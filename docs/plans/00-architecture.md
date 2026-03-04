@@ -1,19 +1,19 @@
-# Pi Agent Go — Architecture
+# Architecture
 
 ## Overview
 
-Pi Agent Go is a Go port of the core layers from [pi-mono](https://github.com/badlogic/pi-mono), a TypeScript monorepo that implements a multi-provider LLM abstraction and agentic framework. The goal is to bring the same clean, layered architecture to Go — preserving the elegant separation of concerns while embracing Go idioms.
+This project is a Go implementation of multi-provider LLM abstraction and agentic framework, inspired by the core layers of [pi-mono](https://github.com/badlogic/pi-mono). The goal is to bring the same clean, layered architecture to Go — preserving the elegant separation of concerns while embracing Go idioms.
 
-**V1 scope:** Two packages that mirror the TypeScript originals:
+**V1 scope:** Two packages:
 
-1. **`piai`** — Vendor-agnostic LLM streaming abstraction (equivalent to `@mariozechner/pi-ai`)
-2. **`piagent`** — Stateful agent loop with tool execution (equivalent to `@mariozechner/pi-agent-core`)
+1. **`ai`** — Vendor-agnostic LLM streaming abstraction (inspired by `@mariozechner/pi-ai`)
+2. **`agent`** — Stateful agent loop with tool execution (inspired by `@mariozechner/pi-agent-core`)
 
 **V2 (future, out of scope but informs design):** Coding agent with file tools, TUI, session persistence, extensions.
 
 ### Design Principles
 
-- **Clean layering**: `piai` knows nothing about agents. `piagent` knows nothing about filesystems or persistence. Higher layers (V2) add those concerns.
+- **Clean layering**: `ai` knows nothing about agents. `agent` knows nothing about filesystems or persistence. Higher layers (V2) add those concerns.
 - **Go idioms**: Interfaces for extensibility, channels for streaming, `context.Context` for cancellation, explicit error handling.
 - **Provider-pluggable**: New LLM providers are added by implementing an interface, not modifying core code.
 - **Tool-agnostic**: The agent loop executes tools via an interface — it doesn't know or care what they do.
@@ -27,7 +27,7 @@ graph TB
         CA[Coding Agent<br/>Session persistence, TUI,<br/>file tools, extensions]
     end
 
-    subgraph "V1 — piagent"
+    subgraph "V1 — agent"
         AL[Agent Loop]
         TE[Tool Executor]
         ES2[Event Stream<br/>chan AgentEvent]
@@ -35,7 +35,7 @@ graph TB
         AL --> ES2
     end
 
-    subgraph "V1 — piai"
+    subgraph "V1 — ai"
         SM[Stream Manager<br/>StreamSimple / Stream]
         PR[Provider Registry]
         MR[Model Registry]
@@ -64,13 +64,13 @@ graph TB
 
 ## Component Architecture
 
-### Package: `piai`
+### Package: `ai`
 
 The LLM abstraction layer. Zero knowledge of agents, tools execution, or persistence.
 
 ```mermaid
 graph LR
-    subgraph piai
+    subgraph ai
         direction TB
         types[types.go<br/>Messages, Content,<br/>Model, Usage, Events]
         stream[stream.go<br/>StreamSimple, Stream,<br/>Complete, CompleteSimple]
@@ -282,7 +282,7 @@ type Tool struct {
 }
 ```
 
-This keeps `piai` simple — it doesn't need to understand schemas, just pass them to providers. Validation against schemas happens via a `ValidateToolArguments(tool Tool, args map[string]any) error` function using a JSON Schema validation library (e.g., `github.com/santhosh-tekuri/jsonschema`).
+This keeps the `ai` package simple — it doesn't need to understand schemas, just pass them to providers. Validation against schemas happens via a `ValidateToolArguments(tool Tool, args map[string]any) error` function using a JSON Schema validation library (e.g., `github.com/santhosh-tekuri/jsonschema`).
 
 #### Context & Conversation
 
@@ -330,13 +330,13 @@ type SimpleStreamOptions struct {
 
 Note: Cancellation is handled via `context.Context` (passed to `Stream`/`StreamSimple`), not via a signal field in options. This is the Go-idiomatic approach.
 
-### Package: `piagent`
+### Package: `agent`
 
 The agentic framework. Knows about tools and the agent loop. Zero knowledge of filesystems, persistence, or UI.
 
 ```mermaid
 graph TB
-    subgraph piagent
+    subgraph agent
         direction TB
         agent[agent.go<br/>Agent struct, state,<br/>prompt, subscribe]
         loop[loop.go<br/>agentLoop,<br/>agentLoopContinue,<br/>tool execution]
@@ -346,31 +346,31 @@ graph TB
     agent --> loop
     agent --> types
     loop --> types
-    loop -->|"calls StreamSimple"| piai[piai package]
+    loop -->|"calls StreamSimple"| aiPkg[ai package]
 ```
 
 #### Core Types
 
 ```go
-// AgentMessage extends piai.Message with custom message support
+// AgentMessage extends ai.Message with custom message support
 // In Go, we use an interface rather than TS declaration merging
 type AgentMessage interface {
     agentMessageRole() string
 }
 
 // Standard messages implement AgentMessage via embedding
-// piai.UserMessage, piai.AssistantMessage, piai.ToolResultMessage
+// ai.UserMessage, ai.AssistantMessage, ai.ToolResultMessage
 // all satisfy AgentMessage through a wrapper or direct method
 
-// AgentTool extends piai.Tool with an Execute function
+// AgentTool extends ai.Tool with an Execute function
 type AgentTool struct {
-    piai.Tool
+    ai.Tool
     Label   string
     Execute func(ctx context.Context, toolCallID string, params map[string]any, onUpdate func(AgentToolResult)) (AgentToolResult, error)
 }
 
 type AgentToolResult struct {
-    Content []piai.ContentBlock
+    Content []ai.ContentBlock
     Details any
 }
 ```
@@ -380,7 +380,7 @@ type AgentToolResult struct {
 ```go
 type AgentState struct {
     SystemPrompt    string
-    Model           piai.Model
+    Model           ai.Model
     ThinkingLevel   ThinkingLevel
     Tools           []AgentTool
     Messages        []AgentMessage
@@ -419,8 +419,8 @@ type AgentEvent struct {
     Args         map[string]any          // for tool events
     Result       *AgentToolResult        // for tool_execution_end
     IsError      bool                    // for tool_execution_end
-    ToolResults  []piai.ToolResultMessage // for turn_end
-    AssistantEvent *piai.AssistantMessageEvent // for message_update
+    ToolResults  []ai.ToolResultMessage // for turn_end
+    AssistantEvent *ai.AssistantMessageEvent // for message_update
 }
 ```
 
@@ -433,7 +433,7 @@ sequenceDiagram
     participant Consumer
     participant Agent
     participant Loop
-    participant LLM as piai.StreamSimple
+    participant LLM as ai.StreamSimple
     participant Tool as AgentTool.Execute
 
     Consumer->>Agent: Prompt("do something")
@@ -442,7 +442,7 @@ sequenceDiagram
     loop Until no more tool calls or follow-ups
         Loop->>Loop: Check pending messages (steering)
         Loop->>Loop: transformContext (if configured)
-        Loop->>Loop: convertToLLM (AgentMessage → piai.Message)
+        Loop->>Loop: convertToLLM (AgentMessage → ai.Message)
         Loop->>LLM: StreamSimple(model, context, opts)
 
         loop Stream events
@@ -486,20 +486,20 @@ type Agent struct {
 
 type AgentOptions struct {
     InitialState     *AgentState
-    ConvertToLLM     func([]AgentMessage) ([]piai.Message, error)
+    ConvertToLLM     func([]AgentMessage) ([]ai.Message, error)
     TransformContext func(ctx context.Context, messages []AgentMessage) ([]AgentMessage, error)
     SteeringMode     string  // "all" | "one-at-a-time"
     FollowUpMode     string  // "all" | "one-at-a-time"
     StreamFn         StreamFn
     GetAPIKey        func(provider string) (string, error)
-    ThinkingBudgets  *piai.ThinkingBudgets
+    ThinkingBudgets  *ai.ThinkingBudgets
     MaxRetryDelayMs  int
 }
 
 func NewAgent(opts AgentOptions) *Agent
 
 // Core operations
-func (a *Agent) Prompt(ctx context.Context, text string, images ...piai.ImageContent) error
+func (a *Agent) Prompt(ctx context.Context, text string, images ...ai.ImageContent) error
 func (a *Agent) PromptMessages(ctx context.Context, msgs ...AgentMessage) error
 func (a *Agent) Continue(ctx context.Context) error
 func (a *Agent) Abort()
@@ -518,7 +518,7 @@ func (a *Agent) Subscribe(fn func(AgentEvent)) func()
 
 // State mutators
 func (a *Agent) SetSystemPrompt(s string)
-func (a *Agent) SetModel(m piai.Model)
+func (a *Agent) SetModel(m ai.Model)
 func (a *Agent) SetThinkingLevel(l ThinkingLevel)
 func (a *Agent) SetTools(tools []AgentTool)
 func (a *Agent) ReplaceMessages(msgs []AgentMessage)
@@ -530,15 +530,15 @@ func (a *Agent) ReplaceMessages(msgs []AgentMessage)
 
 ```go
 type AgentLoopConfig struct {
-    Model            piai.Model
-    ConvertToLLM     func([]AgentMessage) ([]piai.Message, error)
+    Model            ai.Model
+    ConvertToLLM     func([]AgentMessage) ([]ai.Message, error)
     TransformContext func(ctx context.Context, messages []AgentMessage) ([]AgentMessage, error)
     GetSteeringMsgs  func() []AgentMessage
     GetFollowUpMsgs  func() []AgentMessage
     GetAPIKey        func(provider string) (string, error)
     // Plus all SimpleStreamOptions fields
     Reasoning        ThinkingLevel
-    ThinkingBudgets  *piai.ThinkingBudgets
+    ThinkingBudgets  *ai.ThinkingBudgets
     MaxRetryDelayMs  int
     SessionID        string
 }
@@ -549,10 +549,10 @@ type AgentLoopConfig struct {
 ```mermaid
 sequenceDiagram
     participant App as Application (V2)
-    participant Agent as piagent.Agent
-    participant Loop as piagent.agentLoop
-    participant AI as piai.StreamSimple
-    participant Prov as piai.Provider (Anthropic)
+    participant Agent as agent.Agent
+    participant Loop as agent.agentLoop
+    participant AI as ai.StreamSimple
+    participant Prov as ai.Provider (Anthropic)
     participant API as Anthropic API
 
     App->>Agent: Prompt(ctx, "read config.json")
@@ -562,8 +562,8 @@ sequenceDiagram
 
     Note over Loop: Turn 1 — LLM decides to use tool
     Loop->>Loop: transformContext(messages)
-    Loop->>Loop: convertToLLM(agentMessages) → piaiMessages
-    Loop->>AI: StreamSimple(model, piaiContext, opts)
+    Loop->>Loop: convertToLLM(agentMessages) → aiMessages
+    Loop->>AI: StreamSimple(model, aiContext, opts)
     AI->>AI: Lookup provider from model.API
     AI->>Prov: Stream(ctx, model, context, opts)
     Prov->>API: POST /v1/messages (SSE)
@@ -640,9 +640,9 @@ Rather than bringing in a schema DSL (like TypeBox), tool parameters are plain `
 - Validation uses a JSON Schema library at runtime
 - Builders/helpers can be provided as utilities, not required
 
-### 5. No Global Mutable State in piagent
+### 5. No Global Mutable State in agent
 
-The `piai` package has global registries (providers, models) — this matches the TS version and is acceptable because providers are effectively singletons. The `piagent` package has no global state — all state lives in the `Agent` struct.
+The `ai` package has global registries (providers, models) — this matches the TS version and is acceptable because providers are effectively singletons. The `agent` package has no global state — all state lives in the `Agent` struct.
 
 ### 6. Synchronous Event Subscribers
 
@@ -680,39 +680,45 @@ func WithEffort(effort string) AnthropicOption { ... }
 
 ## Module Structure
 
+Following Go conventions, most logic lives in `internal/` with thin public packages that re-export the necessary API surface. This keeps the internal implementation flexible while providing a stable public contract. Each `internal/` package contains cohesive application logic with lightweight unit tests; heavier cross-cutting tests (integration, e2e, benchmarks) go in separate top-level test directories.
+
 ```
 pi-agent-go/
 ├── go.mod
 ├── go.sum
-├── piai/                          # LLM abstraction package
-│   ├── types.go                   # Core types: Message, Content, Model, Events
-│   ├── stream.go                  # StreamSimple, Stream, Complete, CompleteSimple
-│   ├── event_stream.go            # EventStream channel wrapper
-│   ├── registry.go                # Provider & model registries
-│   ├── models.go                  # Built-in model catalog, cost calculation
-│   ├── validation.go              # JSON Schema tool argument validation
-│   ├── transform.go               # Cross-provider message transformation
-│   ├── provider/                  # Provider implementations
-│   │   ├── anthropic/
-│   │   │   ├── anthropic.go       # Anthropic Messages API provider
-│   │   │   ├── messages.go        # Message conversion
-│   │   │   └── sse.go             # SSE stream parsing
-│   │   ├── openai/
-│   │   │   ├── openai.go          # OpenAI Completions API provider
-│   │   │   ├── messages.go
-│   │   │   └── sse.go
-│   │   ├── google/
-│   │   │   ├── google.go          # Google Generative AI provider
-│   │   │   └── messages.go
-│   │   └── sse/
-│   │       └── sse.go             # Shared SSE parsing utilities
-│   └── piai_test.go               # Integration tests
+├── internal/
+│   ├── ai/                        # LLM abstraction package
+│   │   ├── types.go               # Core types: Message, Content, Model, Events
+│   │   ├── stream.go              # StreamSimple, Stream, Complete, CompleteSimple
+│   │   ├── event_stream.go        # EventStream channel wrapper
+│   │   ├── registry.go            # Provider & model registries
+│   │   ├── models.go              # Built-in model catalog, cost calculation
+│   │   ├── validation.go          # JSON Schema tool argument validation
+│   │   ├── transform.go           # Cross-provider message transformation
+│   │   └── provider/              # Provider implementations
+│   │       ├── anthropic/
+│   │       │   ├── anthropic.go   # Anthropic Messages API provider
+│   │       │   ├── messages.go    # Message conversion
+│   │       │   └── sse.go         # SSE stream parsing
+│   │       ├── openai/
+│   │       │   ├── openai.go      # OpenAI Completions API provider
+│   │       │   ├── messages.go
+│   │       │   └── sse.go
+│   │       ├── google/
+│   │       │   ├── google.go      # Google Generative AI provider
+│   │       │   └── messages.go
+│   │       └── sse/
+│   │           └── sse.go         # Shared SSE parsing utilities
+│   │
+│   └── agent/                     # Agent framework package
+│       ├── types.go               # AgentMessage, AgentTool, AgentEvent, AgentState
+│       ├── agent.go               # Agent struct, public API
+│       └── loop.go                # Agent loop: tool execution, steering, follow-up
 │
-├── piagent/                       # Agent framework package
-│   ├── types.go                   # AgentMessage, AgentTool, AgentEvent, AgentState
-│   ├── agent.go                   # Agent struct, public API
-│   ├── loop.go                    # Agent loop: tool execution, steering, follow-up
-│   └── piagent_test.go            # Unit tests
+├── ai/                            # Public re-exports from internal/ai
+│   └── ai.go
+├── agent/                         # Public re-exports from internal/agent
+│   └── agent.go
 │
 └── docs/
     └── plans/
@@ -759,7 +765,7 @@ The V1 architecture is designed so V2 can layer on top without modifying V1 pack
 | **Compaction** | `TransformContext` hook lets V2 inject summarization before LLM calls |
 | **Extensions/plugins** | `AgentTool` interface means V2 can register any tools at runtime |
 | **Custom message types** | `AgentMessage` interface allows V2 to define app-specific message types |
-| **Model switching** | `Agent.SetModel()` + `piai.TransformMessages()` handle cross-provider message normalization |
+| **Model switching** | `Agent.SetModel()` + `ai.TransformMessages()` handles cross-provider message normalization |
 | **UI integration** | Events are synchronous callbacks — V2 can bridge to TUI, web, or any I/O layer |
 | **Steering/follow-up** | Already built into V1's agent loop — V2 just calls `Agent.Steer()` |
 
