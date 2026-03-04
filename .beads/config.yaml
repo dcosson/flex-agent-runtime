@@ -6,4 +6,4 @@ defaults.type: task
 graph.auto_close_parent: "true"
 graph.cascade_parent_blocking: "true"
 hierarchy.max_depth: "3"
-issue_prefix: pigo
+issue_prefix: aiag
