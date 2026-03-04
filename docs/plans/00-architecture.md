@@ -235,15 +235,20 @@ type Provider interface {
 }
 ```
 
-**Provider registration** uses a global registry (like the TS version), with `init()` for built-in providers:
+**Provider registration** uses a global registry (like the TS version), with `init()` for built-in providers. The registry is guarded by `sync.RWMutex` to support concurrent reads and safe runtime registration:
 
 ```go
-var providerRegistry = map[string]Provider{}
+var (
+    providerMu       sync.RWMutex
+    providerRegistry = map[string]Provider{}
+)
 
-func RegisterProvider(p Provider)
-func GetProvider(api string) (Provider, error)
-func UnregisterProviders(sourceID string)
+func RegisterProvider(p Provider)           // write-locks
+func GetProvider(api string) (Provider, error)  // read-locks
+func UnregisterProviders(sourceID string)   // write-locks
 ```
+
+**Concurrency contract:** Registration is safe at any time (not just during `init()`). `GetProvider` is safe to call concurrently from multiple goroutines. All registry functions must pass `-race` detection under concurrent access. The model registry follows the same `sync.RWMutex` pattern.
 
 #### Model Registry
 
@@ -352,15 +357,40 @@ graph TB
 #### Core Types
 
 ```go
-// AgentMessage extends ai.Message with custom message support
-// In Go, we use an interface rather than TS declaration merging
+// AgentMessage extends ai.Message with custom message support.
+// In Go, we use an interface rather than TS declaration merging.
 type AgentMessage interface {
     agentMessageRole() string
 }
 
-// Standard messages implement AgentMessage via embedding
-// ai.UserMessage, ai.AssistantMessage, ai.ToolResultMessage
-// all satisfy AgentMessage through a wrapper or direct method
+// Built-in AgentMessage variants — these are the canonical types:
+//
+//   ai.UserMessage        → implements AgentMessage (role: "user")
+//   ai.AssistantMessage   → implements AgentMessage (role: "assistant")
+//   ai.ToolResultMessage  → implements AgentMessage (role: "toolResult")
+//
+// All three ai.Message concrete types have an agentMessageRole() method,
+// making them directly usable as AgentMessage without wrappers.
+//
+// Custom message types: Applications can define additional types that
+// implement AgentMessage (e.g., NotificationMessage, ArtifactMessage).
+// These are UI-only messages that the LLM never sees.
+
+// ConvertToLLM contract:
+//
+// The ConvertToLLM function provided in AgentOptions MUST:
+// 1. Map each ai.UserMessage → ai.UserMessage (passthrough)
+// 2. Map each ai.AssistantMessage → ai.AssistantMessage (passthrough)
+// 3. Map each ai.ToolResultMessage → ai.ToolResultMessage (passthrough)
+// 4. Map custom AgentMessage types → zero or more ai.Messages
+//    (e.g., filter out UI-only messages, convert custom types to user messages)
+// 5. Return an error for any unrecognized AgentMessage type
+//    (MUST NOT silently drop unknown types)
+//
+// Round-trip invariant: for any ai.Message m passed through ConvertToLLM,
+// the output must be semantically equivalent to m (no data loss).
+// Golden tests verify conversion fidelity across tool-call turns and
+// provider switches.
 
 // AgentTool extends ai.Tool with an Execute function
 type AgentTool struct {
@@ -525,6 +555,33 @@ func (a *Agent) ReplaceMessages(msgs []AgentMessage)
 ```
 
 **Subscription model:** The TypeScript version uses synchronous callback listeners. In Go, we keep the same pattern (synchronous callbacks) rather than per-subscriber channels — this avoids the complexity of managing N goroutines and slow consumers. The `Subscribe` method returns an unsubscribe function (closure over the listener set).
+
+#### Concurrency Model
+
+The `Agent` struct uses a `sync.Mutex` to protect internal state. The concurrency contract:
+
+**Thread-safe methods (callable from any goroutine at any time):**
+- `State()` — returns a snapshot (deep copy) of current state
+- `Steer(msg)`, `FollowUp(msg)`, `ClearQueues()` — queue operations protected by mutex
+- `SetSystemPrompt()`, `SetModel()`, `SetThinkingLevel()`, `SetTools()`, `ReplaceMessages()` — state mutators protected by mutex
+- `Subscribe(fn)` / unsubscribe — listener set protected by mutex
+- `Abort()` — cancels the context, safe to call anytime
+- `WaitForIdle()` — returns a channel, no lock needed
+
+**Serialized methods (must not be called concurrently with each other):**
+- `Prompt()`, `PromptMessages()`, `Continue()` — these run the agent loop. Calling while already streaming returns an error (checked under lock).
+
+**Lock boundary rule:** The mutex is **never held** while invoking:
+- Subscriber callbacks (`fn(AgentEvent)`)
+- Tool `Execute()` functions
+- Provider `StreamSimple()` / `Stream()` calls
+- `ConvertToLLM()` or `TransformContext()` hooks
+
+This prevents deadlocks when subscribers or tools call back into the Agent (e.g., `agent.Steer()` from within a subscriber callback). The pattern is: acquire lock → copy/update state → release lock → invoke external code → acquire lock → update state from result.
+
+**Lock ordering:** Only one lock exists (`Agent.mu`). The `ai` package registries have their own independent `sync.RWMutex` — no ordering constraint since they are never held simultaneously.
+
+**Testing requirement:** All concurrent API combinations (`Prompt` + `Steer` + `Abort` + `SetModel` + `State`) must pass under `-race` with stress testing.
 
 #### Agent Loop Config
 
@@ -731,8 +788,39 @@ pi-agent-go/
 
 - **Provider errors**: Returned as `AssistantMessage` with `StopReason: "error"` and `ErrorMessage` populated. The event stream always completes (never leaves dangling goroutines).
 - **Tool errors**: Caught by the loop, returned as `ToolResultMessage` with `IsError: true`. The loop continues (LLM sees the error and can retry or adjust).
-- **Context overflow**: Detected by pattern-matching provider error messages (same approach as TS). Returns a specific error type so higher layers can trigger compaction.
 - **Network errors**: Wrapped with context, returned through the event stream's error event.
+
+#### Typed Provider Errors
+
+Provider errors are returned as a `ProviderError` type with structured error codes, rather than relying solely on string pattern matching:
+
+```go
+type ProviderErrorCode string
+
+const (
+    ErrContextOverflow ProviderErrorCode = "context_overflow"
+    ErrRateLimit       ProviderErrorCode = "rate_limit"
+    ErrAuth            ProviderErrorCode = "auth"
+    ErrServerError     ProviderErrorCode = "server_error"
+    ErrUnknown         ProviderErrorCode = "unknown"
+)
+
+type ProviderError struct {
+    Code       ProviderErrorCode
+    Message    string
+    StatusCode int    // HTTP status if available
+    Provider   string // which provider produced this error
+    RetryAfter time.Duration // for rate limit errors
+}
+
+func (e *ProviderError) Error() string
+```
+
+**Detection strategy (in priority order):**
+1. **Structured error fields**: HTTP status codes (400, 413, 429, 401/403), provider-specific error JSON fields (`error.type`, `error.code`)
+2. **String pattern matching**: Only as a fallback for providers that don't return structured errors, or for distinguishing sub-types within a status code (e.g., 400 could be context overflow or invalid request)
+
+Each provider must include **conformance test fixtures** that replay representative error payloads and verify correct `ProviderErrorCode` classification. Higher layers (V2 compaction) check `errors.As(*ProviderError)` and match on `Code == ErrContextOverflow`.
 
 ### Testing Strategy
 
@@ -778,3 +866,12 @@ The V1 architecture is designed so V2 can layer on top without modifying V1 pack
 3. **SSE parsing**: Use `bufio.Scanner` with custom split function vs a small SSE library vs vendor SDK's built-in streaming. Recommendation: shared SSE parser in `provider/sse/` since all three initial providers use SSE.
 
 4. **Partial JSON parsing for streaming tool args**: The TS version uses `partial-json` to parse incomplete JSON during streaming. Need a Go equivalent or implement one — this is important for real-time tool call argument display.
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | lime-cloud | P1 | Global registries unsynchronized | Incorporated | Added sync.RWMutex guards and concurrency contract to registry section |
+| 2 | lime-cloud | P1 | Agent concurrency model undefined | Incorporated | Added Concurrency Model subsection with mutex strategy, thread-safety contract, lock boundary rule (never hold lock during external calls), and -race test requirement |
+| 3 | lime-cloud | P1 | AgentMessage/ai.Message boundary underspecified | Incorporated | Pinned canonical variants, ConvertToLLM contract (must error on unknown types, not silently drop), round-trip invariant, golden test requirement |
+| 4 | lime-cloud | P2 | Context overflow string matching brittle | Incorporated | Added ProviderError typed error codes with structured detection strategy (HTTP status first, string fallback only as last resort), conformance test fixtures required per provider |
