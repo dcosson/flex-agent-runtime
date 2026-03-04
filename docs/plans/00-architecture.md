@@ -867,7 +867,7 @@ The V1 architecture is designed so V2 can layer on top without modifying V1 pack
 
 4. **Partial JSON parsing for streaming tool args**: The TS version uses `partial-json` to parse incomplete JSON during streaming. Need a Go equivalent or implement one — this is important for real-time tool call argument display.
 
-## Review Disposition
+## Round 1 Review Disposition
 
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
@@ -875,3 +875,7 @@ The V1 architecture is designed so V2 can layer on top without modifying V1 pack
 | 2 | lime-cloud | P1 | Agent concurrency model undefined | Incorporated | Added Concurrency Model subsection with mutex strategy, thread-safety contract, lock boundary rule (never hold lock during external calls), and -race test requirement |
 | 3 | lime-cloud | P1 | AgentMessage/ai.Message boundary underspecified | Incorporated | Pinned canonical variants, ConvertToLLM contract (must error on unknown types, not silently drop), round-trip invariant, golden test requirement |
 | 4 | lime-cloud | P2 | Context overflow string matching brittle | Incorporated | Added ProviderError typed error codes with structured detection strategy (HTTP status first, string fallback only as last resort), conformance test fixtures required per provider |
+
+## Round 2 Review Disposition
+
+No new findings.
