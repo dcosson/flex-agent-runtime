@@ -361,14 +361,26 @@ const defaultEventBufferSize = 32
 
 // EventStream wraps a buffered channel for streaming AssistantMessageEvents.
 // Providers push events via Send(). Consumers read from C or call Result().
+//
+// Terminal-state contract: Result() is guaranteed to unblock exactly once.
+// Either Send() delivers a done/error event, or Close() injects an internal
+// ErrStreamClosedWithoutTerminalEvent. The terminated flag (atomic) ensures
+// exactly one terminal result is published, even under races between
+// Send(done/error) and Close().
 type EventStream struct {
     // C is the read-side of the event channel. Consumers range over this.
     C <-chan AssistantMessageEvent
 
-    ch     chan AssistantMessageEvent // internal write side
-    result chan resultOrError         // final result delivery
-    once   sync.Once                 // ensure close is idempotent
+    ch         chan AssistantMessageEvent // internal write side
+    result     chan resultOrError         // final result delivery (buffered 1)
+    closeOnce  sync.Once                 // ensure channel close is idempotent
+    terminated atomic.Bool               // true after terminal result published
 }
+
+// ErrStreamClosedWithoutTerminalEvent is returned by Result() when the
+// provider goroutine closed the stream (or panicked) without sending a
+// done or error event.
+var ErrStreamClosedWithoutTerminalEvent = errors.New("event stream closed without terminal done/error event")
 
 type resultOrError struct {
     Message AssistantMessage
@@ -386,18 +398,19 @@ func NewEventStream() *EventStream {
 }
 
 // Send pushes an event into the stream. Called by providers.
-// If the event is a "done" or "error" event, it also delivers the final result.
+// If the event is a "done" or "error" event, it also delivers the final result
+// (guarded by the terminated flag to prevent double-publish).
 // Panics if called after Close().
 func (s *EventStream) Send(event AssistantMessageEvent) {
     s.ch <- event
 
     switch event.Type {
     case EventDone:
-        if event.Message != nil {
+        if event.Message != nil && s.terminated.CompareAndSwap(false, true) {
             s.result <- resultOrError{Message: *event.Message}
         }
     case EventError:
-        if event.Error != nil {
+        if event.Error != nil && s.terminated.CompareAndSwap(false, true) {
             s.result <- resultOrError{
                 Message: *event.Error,
                 Err:     providerErrorFromMessage(event.Error),
@@ -406,17 +419,34 @@ func (s *EventStream) Send(event AssistantMessageEvent) {
     }
 }
 
-// Close closes the event channel. Must be called exactly once by the provider
-// goroutine (typically via defer). Idempotent.
+// Close closes the event channel. Must be called by the provider goroutine
+// (typically via defer). Idempotent.
+//
+// If no terminal event (done/error) was sent before Close(), an internal
+// error result is injected so that Result() never blocks forever. This
+// handles provider panics and early-return paths.
 func (s *EventStream) Close() {
-    s.once.Do(func() {
+    s.closeOnce.Do(func() {
         close(s.ch)
+        // If no terminal event was published, inject one so Result() unblocks
+        if s.terminated.CompareAndSwap(false, true) {
+            s.result <- resultOrError{
+                Message: AssistantMessage{
+                    StopReason:   StopReasonError,
+                    ErrorMessage: ErrStreamClosedWithoutTerminalEvent.Error(),
+                    Timestamp:    TimeToMillis(time.Now()),
+                },
+                Err: ErrStreamClosedWithoutTerminalEvent,
+            }
+        }
     })
 }
 
 // Result blocks until the stream completes and returns the final AssistantMessage.
-// Returns an error if the stream ended with an error event.
+// Returns an error if the stream ended with an error event or was closed
+// without a terminal event.
 // This is the blocking convenience API — callers who don't need streaming use this.
+// Guaranteed to unblock exactly once due to the terminal-state contract.
 func (s *EventStream) Result() (AssistantMessage, error) {
     r := <-s.result
     return r.Message, r.Err
@@ -440,9 +470,11 @@ func (s *EventStream) Drain() (AssistantMessage, error) {
 
 3. **`Send` pushes to both channels**: The done/error event goes to both `ch` (for consumers iterating events) and `result` (for consumers calling `Result()`). This mirrors the TS pattern where `isComplete` triggers the final result promise.
 
-4. **Idempotent Close**: `sync.Once` prevents double-close panics. Providers call `defer es.Close()` in their goroutine.
+4. **Terminal-state guarantee via `atomic.Bool`**: The `terminated` flag ensures exactly one terminal result is published to the `result` channel. Both `Send(done/error)` and `Close()` use `CompareAndSwap(false, true)` — whichever wins publishes, the loser is a no-op. This prevents races between a provider sending a terminal event and `Close()` firing (e.g., via `defer` after a panic). `Close()` injects `ErrStreamClosedWithoutTerminalEvent` if no terminal event was sent, guaranteeing `Result()` never blocks forever.
 
-5. **`Drain()` helper**: For `Complete()` — iterates the channel to completion, then returns `Result()`. Without this, `Result()` might block if the result channel hasn't been written yet (edge case: error before any events).
+5. **Idempotent Close**: `sync.Once` prevents double-close panics. Providers call `defer es.Close()` in their goroutine.
+
+6. **`Drain()` helper**: For `Complete()` — iterates the channel to completion, then returns `Result()`. Safe because `Result()` is guaranteed to unblock (terminal-state contract).
 
 ### 4.3 Provider Goroutine Pattern
 
@@ -566,7 +598,10 @@ var (
 )
 
 // RegisterModel registers a model under its provider.
+// Deep-copies mutable fields (Headers, Compat) to prevent external mutation
+// of registry state after registration.
 func RegisterModel(m Model) {
+    m = deepCopyModel(m)
     modelMu.Lock()
     defer modelMu.Unlock()
     providerModels, ok := modelRegistry[m.Provider]
@@ -577,7 +612,8 @@ func RegisterModel(m Model) {
     providerModels[m.ID] = m
 }
 
-// GetModel returns the model for the given provider and model ID.
+// GetModel returns a deep copy of the model for the given provider and model ID.
+// Callers may freely mutate the returned Model without affecting registry state.
 func GetModel(provider, modelID string) (Model, error) {
     modelMu.RLock()
     defer modelMu.RUnlock()
@@ -589,19 +625,48 @@ func GetModel(provider, modelID string) (Model, error) {
     if !ok {
         return Model{}, fmt.Errorf("model %q not found for provider %q", modelID, provider)
     }
-    return model, nil
+    return deepCopyModel(model), nil
 }
 
-// GetModels returns all models for the given provider.
+// GetModels returns deep copies of all models for the given provider.
 func GetModels(provider string) []Model {
     modelMu.RLock()
     defer modelMu.RUnlock()
     providerModels := modelRegistry[provider]
     models := make([]Model, 0, len(providerModels))
     for _, m := range providerModels {
-        models = append(models, m)
+        models = append(models, deepCopyModel(m))
     }
     return models
+}
+
+// deepCopyModel returns a deep copy of a Model, cloning mutable reference
+// fields (Headers map, Compat pointer with its map members, Input slice).
+func deepCopyModel(m Model) Model {
+    if m.Headers != nil {
+        h := make(map[string]string, len(m.Headers))
+        for k, v := range m.Headers {
+            h[k] = v
+        }
+        m.Headers = h
+    }
+    if m.Input != nil {
+        inp := make([]string, len(m.Input))
+        copy(inp, m.Input)
+        m.Input = inp
+    }
+    if m.Compat != nil {
+        c := *m.Compat
+        if c.ReasoningEffortMap != nil {
+            rem := make(map[string]string, len(c.ReasoningEffortMap))
+            for k, v := range c.ReasoningEffortMap {
+                rem[k] = v
+            }
+            c.ReasoningEffortMap = rem
+        }
+        m.Compat = &c
+    }
+    return m
 }
 
 // GetModelProviders returns all provider names that have registered models.
@@ -1163,6 +1228,8 @@ func transformToolResult(msg *ToolResultMessage, idMap map[string]string) *ToolR
 ```go
 // insertSyntheticToolResults inserts synthetic error results for tool calls
 // that have no corresponding ToolResultMessage in the conversation.
+// Synthetic results are inserted in sorted order by tool call ID for
+// deterministic output (Go map iteration is non-deterministic).
 func insertSyntheticToolResults(messages []Message) []Message {
     var result []Message
     pendingToolCalls := make(map[string]*ToolCall) // callID → ToolCall
@@ -1171,9 +1238,16 @@ func insertSyntheticToolResults(messages []Message) []Message {
         switch m := msg.(type) {
         case *AssistantMessage:
             // Before adding this assistant message, flush any pending tool calls
-            // from the PREVIOUS assistant message that weren't answered
+            // from the PREVIOUS assistant message that weren't answered.
+            // Sort by ID for deterministic output.
             if len(pendingToolCalls) > 0 {
-                for id, tc := range pendingToolCalls {
+                ids := make([]string, 0, len(pendingToolCalls))
+                for id := range pendingToolCalls {
+                    ids = append(ids, id)
+                }
+                sort.Strings(ids)
+                for _, id := range ids {
+                    tc := pendingToolCalls[id]
                     result = append(result, &ToolResultMessage{
                         ToolCallID: id,
                         ToolName:   tc.Name,
@@ -1202,10 +1276,17 @@ func insertSyntheticToolResults(messages []Message) []Message {
         }
     }
 
-    // Flush any remaining pending tool calls at the end
+    // Flush any remaining pending tool calls at the end.
+    // Sort by ID for deterministic output.
     if len(pendingToolCalls) > 0 {
         now := TimeToMillis(time.Now())
-        for id, tc := range pendingToolCalls {
+        ids := make([]string, 0, len(pendingToolCalls))
+        for id := range pendingToolCalls {
+            ids = append(ids, id)
+        }
+        sort.Strings(ids)
+        for _, id := range ids {
+            tc := pendingToolCalls[id]
             result = append(result, &ToolResultMessage{
                 ToolCallID: id,
                 ToolName:   tc.Name,
@@ -1752,3 +1833,11 @@ No CGO. No LLM provider SDKs. Minimal dependency footprint.
 10. Mock provider demonstrates full stream → event → result flow
 11. All tests pass with `-race` flag
 12. `go vet` and `staticcheck` report no issues
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | lime-cloud | P1 | EventStream can deadlock on close-without-terminal-event | Incorporated | Added atomic `terminated` flag with CompareAndSwap for single-terminal-result guarantee. Close() injects ErrStreamClosedWithoutTerminalEvent if no terminal event was sent. Handles provider panic and early-return paths. |
+| 2 | lime-cloud | P1 | Model registry leaks mutable state via shallow copies | Incorporated | Added deepCopyModel() that clones Headers map, Input slice, and Compat pointer with its map fields. RegisterModel deep-copies on ingest, GetModel/GetModels deep-copy on read. |
+| 3 | lime-cloud | P2 | Deterministic transform ordering claimed but algorithm iterates maps unsorted | Incorporated | Both flush paths in insertSyntheticToolResults now collect map keys, sort.Strings, then iterate in sorted order. |

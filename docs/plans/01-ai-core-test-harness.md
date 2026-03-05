@@ -102,11 +102,138 @@ func TestCostConsistency(t *testing.T) {
 
 **Invariant:** If an argument already matches its schema type, `CoerceTypes` must not modify it.
 
-### P5. TransformMessages Preserves Message Count Bound
+### P5. EventStream Terminal-State Guarantee
+
+**Invariant:** `Result()` always unblocks, regardless of how the stream ends (done event, error event, close-without-terminal, panic in provider goroutine, double terminal event). Exactly one result is ever published.
+
+```go
+func TestEventStreamAlwaysTerminates(t *testing.T) {
+    cases := []struct{
+        name string
+        run  func(es *EventStream)
+    }{
+        {"done_event", func(es *EventStream) {
+            es.Send(AssistantMessageEvent{Type: EventDone, Message: &AssistantMessage{}})
+        }},
+        {"error_event", func(es *EventStream) {
+            es.Send(AssistantMessageEvent{Type: EventError, Error: &AssistantMessage{StopReason: StopReasonError}})
+        }},
+        {"close_without_terminal", func(es *EventStream) {
+            // Provider goroutine exits without sending done/error
+        }},
+        {"panic_in_provider", func(es *EventStream) {
+            panic("simulated provider panic")
+        }},
+        {"double_done", func(es *EventStream) {
+            es.Send(AssistantMessageEvent{Type: EventDone, Message: &AssistantMessage{Model: "first"}})
+            es.Send(AssistantMessageEvent{Type: EventDone, Message: &AssistantMessage{Model: "second"}})
+        }},
+        {"done_then_close", func(es *EventStream) {
+            es.Send(AssistantMessageEvent{Type: EventDone, Message: &AssistantMessage{}})
+            // Close() follows via defer — should not publish competing result
+        }},
+    }
+
+    for _, tc := range cases {
+        t.Run(tc.name, func(t *testing.T) {
+            es := NewEventStream()
+            go func() {
+                defer func() { recover() }() // catch panics
+                defer es.Close()
+                tc.run(es)
+            }()
+
+            // Must not hang — use timeout
+            ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+            defer cancel()
+
+            done := make(chan struct{})
+            go func() {
+                for range es.C {} // drain events
+                _, _ = es.Result()
+                close(done)
+            }()
+
+            select {
+            case <-done:
+                // success
+            case <-ctx.Done():
+                t.Fatal("Result() did not unblock")
+            }
+        })
+    }
+}
+```
+
+### P6. TransformMessages Preserves Message Count Bound
 
 **Invariant:** `len(TransformMessages(msgs, model, nil)) <= len(msgs) + toolCallCount(msgs)`. Transformation can add synthetic tool results but never more than one per tool call, and can remove messages (skipped errors) but never duplicates.
 
-### P6. Registry Thread-Safety
+### P7. Model Registry Mutation Isolation
+
+**Invariant:** Mutating a Model returned by `GetModel`/`GetModels` must not affect subsequent calls to the registry.
+
+```go
+func TestModelRegistryMutationIsolation(t *testing.T) {
+    ClearModels()
+    RegisterModel(Model{
+        ID:       "test-model",
+        Provider: "test",
+        Headers:  map[string]string{"X-Key": "original"},
+        Input:    []string{"text"},
+        Compat:   &ModelCompat{ReasoningEffortMap: map[string]string{"high": "h"}},
+    })
+
+    // Get model and mutate everything
+    m, err := GetModel("test", "test-model")
+    require.NoError(t, err)
+    m.Headers["X-Key"] = "mutated"
+    m.Headers["X-New"] = "injected"
+    m.Input[0] = "corrupted"
+    m.Compat.ReasoningEffortMap["high"] = "corrupted"
+
+    // Original must be unaffected
+    m2, err := GetModel("test", "test-model")
+    require.NoError(t, err)
+    assert.Equal(t, "original", m2.Headers["X-Key"])
+    assert.NotContains(t, m2.Headers, "X-New")
+    assert.Equal(t, "text", m2.Input[0])
+    assert.Equal(t, "h", m2.Compat.ReasoningEffortMap["high"])
+}
+```
+
+### P8. TransformMessages Deterministic Output
+
+**Invariant:** Running `TransformMessages` on the same input N times produces byte-for-byte identical output every time. Tests the sorted map iteration fix for synthetic tool results.
+
+```go
+func TestTransformDeterministic(t *testing.T) {
+    // Conversation with multiple orphaned tool calls (will generate synthetic results)
+    msgs := []Message{
+        &AssistantMessage{
+            Content: []ContentBlock{
+                &ToolCall{ID: "z-call", Name: "toolZ", Arguments: map[string]any{}},
+                &ToolCall{ID: "a-call", Name: "toolA", Arguments: map[string]any{}},
+                &ToolCall{ID: "m-call", Name: "toolM", Arguments: map[string]any{}},
+            },
+            StopReason: StopReasonToolUse,
+        },
+        // No tool results — all three are orphaned
+        &UserMessage{Content: []ContentBlock{&TextContent{Text: "continue"}}},
+    }
+    model := Model{ID: "target", Provider: "test", API: "test"}
+
+    // Run 100 times, compare output
+    first := TransformMessages(msgs, model, nil)
+    for i := 0; i < 100; i++ {
+        result := TransformMessages(msgs, model, nil)
+        assert.DeepEqual(t, first, result,
+            "iteration %d produced different output — map ordering is non-deterministic", i)
+    }
+}
+```
+
+### P9. Registry Thread-Safety
 
 **Invariant:** Concurrent Register/Get/Unregister operations never panic, never return corrupt data, and always pass `-race`.
 
