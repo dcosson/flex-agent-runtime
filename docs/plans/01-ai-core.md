@@ -1834,10 +1834,14 @@ No CGO. No LLM provider SDKs. Minimal dependency footprint.
 11. All tests pass with `-race` flag
 12. `go vet` and `staticcheck` report no issues
 
-## Review Disposition
+## Round 1 Review Disposition
 
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
 | 1 | lime-cloud | P1 | EventStream can deadlock on close-without-terminal-event | Incorporated | Added atomic `terminated` flag with CompareAndSwap for single-terminal-result guarantee. Close() injects ErrStreamClosedWithoutTerminalEvent if no terminal event was sent. Handles provider panic and early-return paths. |
 | 2 | lime-cloud | P1 | Model registry leaks mutable state via shallow copies | Incorporated | Added deepCopyModel() that clones Headers map, Input slice, and Compat pointer with its map fields. RegisterModel deep-copies on ingest, GetModel/GetModels deep-copy on read. |
 | 3 | lime-cloud | P2 | Deterministic transform ordering claimed but algorithm iterates maps unsorted | Incorporated | Both flush paths in insertSyntheticToolResults now collect map keys, sort.Strings, then iterate in sorted order. |
+
+## Round 2 Review Disposition
+
+No new findings.
