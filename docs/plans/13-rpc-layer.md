@@ -220,7 +220,7 @@ type SandboxBackend struct {
     sessionID string
 }
 
-func (b *SandboxBackend) ExecuteTool(ctx context.Context, req ToolRequest) (*ToolResponse, error) {
+func (b *SandboxBackend) ExecuteTool(ctx context.Context, req ToolRequest, onProgress func(ToolProgress)) (*ToolResponse, error) {
     rpcReq := &ExecuteToolRequest{
         SessionID:  b.sessionID,
         ToolCallID: req.ToolCallID, // propagate for traceability
@@ -228,9 +228,29 @@ func (b *SandboxBackend) ExecuteTool(ctx context.Context, req ToolRequest) (*Too
         Params:     req.Params,
         Resources:  req.Resources,
     }
-    rpcResp, err := b.client.ExecuteTool(ctx, rpcReq)
+    // Use server-streaming RPC to receive incremental progress for Tier 2 tools.
+    // Each streamed message is either a progress chunk or the final response.
+    stream, err := b.client.ExecuteToolStream(ctx, rpcReq)
     if err != nil {
         return nil, wrapRPCError(err, b.sessionID, req.ToolName)
+    }
+    var rpcResp *ExecuteToolResponse
+    for {
+        msg, err := stream.Receive()
+        if err != nil {
+            return nil, wrapRPCError(err, b.sessionID, req.ToolName)
+        }
+        if msg.Progress != nil && onProgress != nil {
+            onProgress(ToolProgress{
+                Content: msg.Progress.Content,
+                IsError: msg.Progress.IsError,
+            })
+            continue
+        }
+        if msg.Response != nil {
+            rpcResp = msg.Response
+            break
+        }
     }
     // Server echoes ToolCallID — verify it matches for safety
     if rpcResp.ToolCallID != req.ToolCallID {
@@ -287,10 +307,10 @@ Safe retries require idempotency guarantees. The following table classifies each
 
 | Method | Idempotency | Mechanism |
 |--------|-------------|-----------|
-| `CreateSession` | Naturally idempotent | Repeated calls with the same `session_id` return the existing session (no-op if already created). |
+| `CreateSession` | State-guarded | Returns `already_exists` if the session ID is already in use. Callers must not retry blindly — check for `already_exists` and treat it as success if the existing session matches the requested configuration. |
 | `GetSession` | Naturally idempotent | Read-only. |
-| `PauseSession` | Naturally idempotent | Pausing an already-paused session is a no-op. |
-| `ResumeSession` | Naturally idempotent | Resuming an already-active session is a no-op. |
+| `PauseSession` | State-guarded | Returns `failed_precondition` if the session is not in `Active` state (e.g., already paused, destroyed). Callers should check session state before retrying. A retry after a transient RPC failure is safe only if the session may still be `Active`. |
+| `ResumeSession` | State-guarded | Returns `failed_precondition` if the session is not in `Paused` state (e.g., already active, destroyed). Same retry guidance as `PauseSession`. |
 | `DestroySession` | Naturally idempotent | Destroying an already-destroyed session returns `not_found` (non-retryable). |
 | `ListSnapshots` | Naturally idempotent | Read-only. |
 | `RollbackSession` | Naturally idempotent | Rolling back to the same snapshot_id is a no-op if already at that state. |
@@ -464,15 +484,23 @@ This metadata is included in `ExecuteToolResponse` so that the agent and Runtime
 | 1 | coder-1-sea | P1 | Server-streaming API returned producer-side type | Incorporated | `StreamAgentEvents` now returns `AgentEventReceiver` for RuntimeController consumers. |
 | 2 | coder-1-sea | P1 | Event taxonomy drifted from canonical agent lifecycle names | Incorporated | Terminal/lifecycle semantics now align to `session_started`/`session_ended` with `state_change` transitions. |
 
+## Seam Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | SandboxBackend.ExecuteTool missing onProgress callback from ToolBackend interface (plan 06) | Incorporated | Added `onProgress func(ToolProgress)` parameter and server-streaming RPC pattern for progress propagation. |
+| 2 | coder-1-sea | P1 | RPC response doesn't propagate SnapshotID from host service to agent | Incorporated | SnapshotID now flows: host service ExecuteToolResponse → RPC stream → SandboxBackend → ToolResponse. |
+| 3 | coder-1-sea | P2 | Idempotency table claims CreateSession/PauseSession/ResumeSession are naturally idempotent, but plan 11 returns state errors | Incorporated | Updated to state-guarded idempotency with correct error semantics matching plan 11 behavior. |
+
 ## Plan Review Signoff
 
 - **Status**: Approved
 - **Date**: 2026-03-12
 - **Branch**: main
 - **Commit**: ee32c55
-- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
-- **Total findings**: 10
-- **Finding breakdown**: P0: 0, P1: 3, P2: 5, P3: 2
+- **Review rounds**: 4 (R1 batch + R2 batch + R3 focused + seam review)
+- **Total findings**: 13
+- **Finding breakdown**: P0: 0, P1: 5, P2: 6, P3: 2
 - **Incorporation rate**: 100%
 - **Not incorporated**: None
 - **Open questions**: All resolved

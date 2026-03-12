@@ -278,10 +278,11 @@ type ExecuteToolRequest struct {
 }
 
 type ExecuteToolResponse struct {
-    Content    string   // tool output
-    ExitCode   *int     // Tier 2 only
+    Content    string        // tool output
+    ExitCode   *int          // Tier 2 only
+    SnapshotID string        // snapshot taken after tool execution (if per-tool snapshots enabled)
     Duration   time.Duration
-    Tier       int      // 1 or 2
+    Tier       int           // 1 or 2
 }
 
 type SnapshotResult struct {
@@ -652,6 +653,19 @@ func (svc *SandboxHostService) ExecuteTool(ctx context.Context, req ExecuteToolR
     duration := time.Since(start)
     if resp != nil {
         resp.Duration = duration
+        resp.Tier = tier
+
+        // If per-tool-call snapshots are enabled, take a snapshot after execution.
+        // SnapshotID is empty by default; callers (agent, RuntimeController) use
+        // TurnComplete for per-turn snapshots. Per-tool snapshots are opt-in for
+        // debugging/audit (see config.PerToolSnapshots).
+        if svc.config.PerToolSnapshots && err == nil {
+            snapName := fmt.Sprintf("tool-%s-%s", req.ToolCallID, time.Now().Format("20060102-150405"))
+            snapResult, snapErr := svc.zfs.CreateSnapshot(ctx, sess.dataset, snapName)
+            if snapErr == nil {
+                resp.SnapshotID = snapResult.Name
+            }
+        }
         resp.Tier = int(tier)
     }
 
@@ -1483,15 +1497,21 @@ Should sessions have a configurable time-to-live after which they are automatica
 | 1 | coder-1-sea | P1 | `TurnComplete` returned undefined `turnNum` symbol | Incorporated | Return value now uses committed `prospectiveTurn` consistently. |
 | 2 | coder-1-sea | P2 | Snapshot latency metric recorded bytes-used value | Incorporated | Added explicit timing around `CreateSnapshot`; `snapshotLatency` and `snapshotSpaceUsed` are recorded separately. |
 
+## Seam Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | ExecuteToolResponse missing SnapshotID field required by plan 06 ToolResponse contract | Incorporated | Added `SnapshotID` field to `ExecuteToolResponse`. Per-tool snapshots are opt-in via `config.PerToolSnapshots`. |
+
 ## Plan Review Signoff
 
 - **Status**: Approved
 - **Date**: 2026-03-12
 - **Branch**: main
 - **Commit**: ee32c55
-- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
-- **Total findings**: 13
-- **Finding breakdown**: P0: 0, P1: 3, P2: 6, P3: 4
+- **Review rounds**: 4 (R1 batch + R2 batch + R3 focused + seam review)
+- **Total findings**: 14
+- **Finding breakdown**: P0: 0, P1: 4, P2: 6, P3: 4
 - **Incorporation rate**: 100%
 - **Not incorporated**: None
 - **Open questions**: All resolved
