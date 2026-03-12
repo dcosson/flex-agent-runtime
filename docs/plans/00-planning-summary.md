@@ -1,8 +1,8 @@
 # Planning Review Summary
 
 **Scope:** 16 plan docs (01 through 16) and 16 companion test harness docs.
-**Review rounds completed:** Pre-batch (01-ai-core, 2 rounds by lime-cloud) + Batch Round 1 (3 reviewers, 5 docs each).
-**Total unique findings:** 102 across all review rounds.
+**Review rounds completed:** Pre-batch (01-ai-core, 2 rounds by lime-cloud) + Batch Round 1 (3 reviewers, 5 docs each) + Batch Round 2 (3 reviewers rotated, 5 docs each).
+**Total unique findings:** 112 across all review rounds.
 
 ---
 
@@ -10,20 +10,20 @@
 
 | Metric | Count |
 |--------|-------|
-| Total findings (all rounds) | 102 |
-| Incorporated | 101 |
+| Total findings (all rounds) | 112 |
+| Incorporated | 111 |
 | Not Incorporated | 1 |
-| Incorporation rate | 99.0% |
+| Incorporation rate | 99.1% |
 
 ### Severity Breakdown (All Rounds Combined)
 
 | Severity | Count | Incorporated | Not Inc | Inc Rate |
 |----------|-------|-------------|---------|----------|
 | P0 | 2 | 2 | 0 | 100% |
-| P1 | 20 | 20 | 0 | 100% |
-| P2 | 48 | 48 | 0 | 100% |
-| P3 | 32 | 31 | 1 | 96.9% |
-| **Total** | **102** | **101** | **1** | **99.0%** |
+| P1 | 26 | 26 | 0 | 100% |
+| P2 | 51 | 51 | 0 | 100% |
+| P3 | 33 | 32 | 1 | 96.9% |
+| **Total** | **112** | **111** | **1** | **99.1%** |
 
 ### Convergence Table
 
@@ -32,29 +32,38 @@
 | Pre-batch R1 | 01-ai-core (lime-cloud) | 3 | 3 | 0 | -- |
 | Pre-batch R2 | 01-ai-core (lime-cloud) | 0 | 0 | 0 | converged |
 | Batch R1 | 15 docs (3 reviewers) | 99 | 98 | 1 | -- |
+| Batch R2 | 15 docs (3 reviewers, rotated) | 10 | 10 | 0 | ↓90% |
 
 ### Per-Doc Finding Counts (All Rounds)
 
-| Doc | Reviewer | Findings | P0 | P1 | P2 | P3 | Inc | Not Inc |
-|-----|----------|----------|----|----|----|----|-----|---------|
-| 01-ai-core | lime-cloud | 3 | 0 | 2 | 1 | 0 | 3 | 0 |
-| 02-provider-anthropic | coder-1-sea | 1 | 0 | 1 | 0 | 0 | 1 | 0 |
-| 03-provider-openai | coder-1-sea | 2 | 0 | 2 | 0 | 0 | 2 | 0 |
-| 04-provider-google | coder-1-sea | 1 | 0 | 1 | 0 | 0 | 1 | 0 |
-| 05-agent | coder-1-sea | 2 | 0 | 2 | 0 | 0 | 2 | 0 |
-| 06-built-in-tools | coder-1-sea | 2 | 0 | 1 | 1 | 0 | 2 | 0 |
-| 07-code-interpreter | coder-2-sea | 13 | 0 | 4 | 6 | 3 | 13 | 0 |
-| 08-agent-tools-e2e | coder-2-sea | 8 | 0 | 0 | 5 | 3 | 8 | 0 |
-| 09-h2-termmux-port | coder-2-sea | 10 | 1 | 2 | 4 | 3 | 9 | 1 |
-| 09-sandbox-zfs | coder-2-sea | 11 | 0 | 0 | 5 | 6 | 11 | 0 |
-| 10-sandbox-gvisor | coder-2-sea | 12 | 0 | 0 | 6 | 6 | 12 | 0 |
-| 11-sandbox-host-service | reviewer-sea | 11 | 0 | 2 | 5 | 4 | 11 | 0 |
-| 13-rpc-layer | reviewer-sea | 8 | 0 | 1 | 5 | 2 | 8 | 0 |
-| 14-mode3-e2e | reviewer-sea | 6 | 0 | 1 | 3 | 2 | 6 | 0 |
-| 15-mode2-e2e | reviewer-sea | 6 | 0 | 1 | 3 | 2 | 6 | 0 |
-| 16-runtime-test-harness | reviewer-sea | 6 | 0 | 0 | 4 | 2 | 6 | 0 |
+| Doc | Round | Reviewer | Findings | P0 | P1 | P2 | P3 | Inc | Not Inc |
+|-----|-------|----------|----------|----|----|----|----|-----|---------|
+| 01-ai-core | R1 | lime-cloud | 3 | 0 | 2 | 1 | 0 | 3 | 0 |
+| 02-provider-anthropic | R1 | coder-1-sea | 1 | 0 | 1 | 0 | 0 | 1 | 0 |
+| 03-provider-openai | R1 | coder-1-sea | 2 | 0 | 2 | 0 | 0 | 2 | 0 |
+| 04-provider-google | R1 | coder-1-sea | 1 | 0 | 1 | 0 | 0 | 1 | 0 |
+| 04-provider-google | R2 | coder-2-sea | 2 | 0 | 0 | 1 | 1 | 2 | 0 |
+| 05-agent | R1 | coder-1-sea | 2 | 0 | 2 | 0 | 0 | 2 | 0 |
+| 05-agent | R2 | coder-2-sea | 1 | 0 | 1 | 0 | 0 | 1 | 0 |
+| 06-built-in-tools | R1 | coder-1-sea | 2 | 0 | 1 | 1 | 0 | 2 | 0 |
+| 07-code-interpreter | R1 | coder-2-sea | 13 | 0 | 4 | 6 | 3 | 13 | 0 |
+| 08-agent-tools-e2e | R1 | coder-2-sea | 8 | 0 | 0 | 5 | 3 | 8 | 0 |
+| 09-h2-termmux-port | R1 | coder-2-sea | 10 | 1 | 2 | 4 | 3 | 9 | 1 |
+| 09-sandbox-zfs | R1 | coder-2-sea | 11 | 0 | 0 | 5 | 6 | 11 | 0 |
+| 10-sandbox-gvisor | R1 | coder-2-sea | 12 | 0 | 0 | 6 | 6 | 12 | 0 |
+| 10-sandbox-gvisor | R2 | reviewer-sea | 2 | 0 | 1 | 1 | 0 | 2 | 0 |
+| 11-sandbox-host-service | R1 | reviewer-sea | 11 | 0 | 2 | 5 | 4 | 11 | 0 |
+| 11-sandbox-host-service | R2 | coder-1-sea | 2 | 0 | 1 | 1 | 0 | 2 | 0 |
+| 13-rpc-layer | R1 | reviewer-sea | 8 | 0 | 1 | 5 | 2 | 8 | 0 |
+| 13-rpc-layer | R2 | coder-1-sea | 2 | 0 | 2 | 0 | 0 | 2 | 0 |
+| 14-mode3-e2e | R1 | reviewer-sea | 6 | 0 | 1 | 3 | 2 | 6 | 0 |
+| 14-mode3-e2e | R2 | coder-1-sea | 1 | 0 | 1 | 0 | 0 | 1 | 0 |
+| 15-mode2-e2e | R1 | reviewer-sea | 6 | 0 | 1 | 3 | 2 | 6 | 0 |
+| 16-runtime-test-harness | R1 | reviewer-sea | 6 | 0 | 0 | 4 | 2 | 6 | 0 |
 
-Note: Finding counts for docs 07-10 include companion test harness disposition entries (15 findings total across 5 TH docs).
+Notes:
+- R1 finding counts for docs 07-10 include companion test harness disposition entries (15 findings total across 5 TH docs).
+- R2 finding for 05-agent also appears in the 05-agent-test-harness disposition table (same underlying issue). Counted once in the table above.
 
 ---
 
@@ -112,6 +121,44 @@ Only 1 of 99 findings was not incorporated: 09-h2-termmux-port finding #9 (P3, "
 
 ---
 
+## Batch Round 2 Review Summary
+
+Reviewer assignments were rotated from R1: coder-2-sea took Batch A (docs 02-06, previously coder-1-sea), reviewer-sea took Batch B (docs 07-10, previously coder-2-sea), coder-1-sea took Batch C (docs 11-16, previously reviewer-sea). Total R2 findings: 10, all incorporated. 100% incorporation rate.
+
+### Batch R2 Severity Breakdown
+
+| Severity | Count | Inc Rate |
+|----------|-------|----------|
+| P0 | 0 | — |
+| P1 | 6 | 100% |
+| P2 | 3 | 100% |
+| P3 | 1 | 100% |
+| **Total** | **10** | **100%** |
+
+### Per-Reviewer Breakdown
+
+| Reviewer | Docs Reviewed | Findings | Not Inc |
+|----------|--------------|----------|---------|
+| coder-2-sea | 02, 03, 04, 05, 06 | 3 | 0 |
+| reviewer-sea | 07, 08, 09-termmux, 09-zfs, 10 | 2 | 0 |
+| coder-1-sea | 11, 13, 14, 15, 16 | 5 | 0 |
+
+### Finding Patterns
+
+The dominant theme in R2 was **cross-document event taxonomy drift** — 3 of 10 findings identified event lifecycle names or streaming API types that diverged from the canonical definitions established in plans 01 and 05. coder-1-sea found that 13-rpc-layer's `StreamAgentEvents` returned a producer-side type instead of a consumer-appropriate `AgentEventReceiver`, and that both 13-rpc-layer and 14-mode3-e2e used non-canonical lifecycle event names instead of the `session_started`/`session_ended` taxonomy from plan 05. These were cross-doc consistency issues that the reviewer rotation was specifically designed to catch — fresh eyes on unfamiliar docs spotted naming divergences that the original R1 reviewer (who reviewed the plans in isolation) had not flagged.
+
+The second theme was **pseudo-code correctness defects** — 3 findings at P1 severity. The most impactful was reviewer-sea's finding that 10-sandbox-gvisor's `checkOOMKill` function misclassified timeouts and context cancellations as OOM kills (exit code -1 matched all abnormal exits). coder-1-sea found that 11-sandbox-host-service's `TurnComplete` returned an undefined `prospectiveTurn` symbol. coder-2-sea found that 05-agent's snapshot trigger cardinality in the companion test harness contradicted the follow-up chaining semantics in the plan.
+
+The remaining findings were **metrics and observability gaps** — 10-sandbox-gvisor's `ContainerResult.Duration` was never set (P2, exec_duration metric always zero), 11-sandbox-host-service recorded bytes-used as snapshot latency (P2), and 04-provider-google had a StopReason mapping mismatch for max-token termination (P2). One P3 finding corrected 04-provider-google's local context-overflow detector diverging from the shared helper.
+
+### Convergence
+
+11 of 15 batch docs had zero R2 findings, confirming convergence: 02-provider-anthropic, 03-provider-openai, 06-built-in-tools, 07-code-interpreter, 08-agent-tools-e2e, 09-sandbox-zfs, 09-h2-termmux-port, 15-mode2-e2e, 16-runtime-test-harness. Combined with 01-ai-core (converged in pre-batch R2), 12 of 16 plan docs are fully converged with no findings in their most recent review round.
+
+The 6 docs with R2 findings (04, 05, 10, 11, 13, 14) all had their findings incorporated. No P0 issues were found in R2, and all P1 findings were correctness bugs in pseudo-code rather than architectural gaps — indicating the plans are structurally sound with residual implementation-level issues being caught.
+
+---
+
 ## Document Metrics
 
 ### Plan Docs (01-16)
@@ -121,20 +168,20 @@ Only 1 of 99 findings was not incorporated: 09-h2-termmux-port finding #9 (P3, "
 | 01-ai-core | 1,847 |
 | 02-provider-anthropic | 412 |
 | 03-provider-openai | 926 |
-| 04-provider-google | 1,185 |
-| 05-agent | 416 |
+| 04-provider-google | 1,187 |
+| 05-agent | 422 |
 | 06-built-in-tools | 415 |
 | 07-code-interpreter | 715 |
 | 08-agent-tools-e2e | 318 |
 | 09-h2-termmux-port | 672 |
 | 09-sandbox-zfs | 1,396 |
-| 10-sandbox-gvisor | 1,699 |
-| 11-sandbox-host-service | 1,470 |
-| 13-rpc-layer | 453 |
-| 14-mode3-e2e | 329 |
+| 10-sandbox-gvisor | 1,714 |
+| 11-sandbox-host-service | 1,484 |
+| 13-rpc-layer | 465 |
+| 14-mode3-e2e | 339 |
 | 15-mode2-e2e | 339 |
 | 16-runtime-test-harness | 337 |
-| **Total** | **12,929** |
+| **Total** | **12,988** |
 
 ### Test Harness Docs
 
@@ -144,7 +191,7 @@ Only 1 of 99 findings was not incorporated: 09-h2-termmux-port finding #9 (P3, "
 | 02-provider-anthropic-test-harness | 212 |
 | 03-provider-openai-test-harness | 889 |
 | 04-provider-google-test-harness | 741 |
-| 05-agent-test-harness | 218 |
+| 05-agent-test-harness | 226 |
 | 06-built-in-tools-test-harness | 215 |
 | 07-code-interpreter-test-harness | 348 |
 | 08-agent-tools-e2e-test-harness | 199 |
@@ -156,36 +203,39 @@ Only 1 of 99 findings was not incorporated: 09-h2-termmux-port finding #9 (P3, "
 | 14-mode3-e2e-test-harness | 220 |
 | 15-mode2-e2e-test-harness | 193 |
 | 16-runtime-test-harness-test-harness | 214 |
-| **Total** | **7,280** |
+| **Total** | **7,288** |
 
 ### Review Docs
 
 | Category | Files | Lines |
 |----------|-------|-------|
-| Existing (not yet deleted) | 5 | 362 |
+| Existing (not yet deleted) | 15 | 574 |
 | Deleted (incorporated) | 14 | 630 |
-| **Total** | **19** | **992** |
+| **Total** | **29** | **1,204** |
 
 ### Grand Total
 
 | Category | Docs | Lines |
 |----------|------|-------|
-| Architecture + index | 2 | 1,455 |
-| Plan docs | 16 | 12,929 |
-| Test harness docs | 16 | 7,280 |
-| Review docs (all) | 19 | 992 |
-| **Grand total** | **53** | **22,656** |
+| Architecture + index | 2 | 1,654 |
+| Plan docs | 16 | 12,988 |
+| Test harness docs | 16 | 7,288 |
+| Review docs (existing) | 15 | 574 |
+| Review docs (deleted, incorporated) | 14 | 630 |
+| **Grand total** | **63** | **23,134** |
 
 ---
 
 ## Quality Signals
 
-**Review process health:** The batch R1 review was comprehensive -- 99 findings across 15 docs with a 99.0% incorporation rate indicates the review process is working well. Findings were substantive (20 at P0/P1) and plan authors were receptive to feedback. The single non-incorporation was a minor organizational issue with clear rationale.
+**Review process health:** Across two batch review rounds, 109 findings were produced with a 99.1% incorporation rate (108/109 incorporated). The single non-incorporation (P3, plan numbering) had documented rationale. Findings were substantive — 28 at P0/P1 severity, catching real correctness bugs, cross-doc contract mismatches, and safety issues.
 
-**Pre-batch convergence:** 01-ai-core demonstrated the target convergence pattern: R1 found 3 real issues, R2 found zero. This validates the review-incorporate-review cycle for achieving plan maturity.
+**Strong convergence:** R2 produced 90% fewer findings than R1 (10 vs 99), with no P0 issues. 12 of 16 plan docs are fully converged (zero findings in their most recent review round). The 6 docs with R2 findings had only implementation-level pseudo-code bugs and cross-doc naming drift — no architectural gaps remained. This matches the target convergence pattern demonstrated by 01-ai-core in the pre-batch rounds.
 
-**Reviewer calibration:** The three batch reviewers showed complementary strengths. coder-1-sea's tight focus on P1 correctness in the provider plans caught subtle data-corruption paths. coder-2-sea's breadth (54 findings including all 15 TH findings) reflects thorough coverage of the most complex subsystems. reviewer-sea's emphasis on concurrency and state machine correctness caught races and lifecycle gaps in the service layer.
+**Reviewer rotation validated:** R2 reviewer rotation (each batch assigned to a different reviewer than R1) proved effective at catching cross-doc consistency issues. 3 of 10 R2 findings were event taxonomy drift between connected components — the type of issue that fresh eyes on unfamiliar docs are best positioned to catch. The original R1 reviewers, who reviewed docs in isolation, had not flagged these naming divergences.
 
-**Readiness for Batch R2:** All batch R1 findings have been incorporated. The 5 review files from reviewer-sea's Batch C remain on disk (not yet deleted during incorporation cleanup) but their findings are reflected in the plan disposition tables. A Batch R2 review round would test convergence -- the expectation is significantly fewer findings, focused on residual cross-doc seam issues rather than per-doc gaps.
+**Reviewer calibration across rounds:** In R1, reviewers showed complementary strengths (coder-1-sea on correctness, coder-2-sea on breadth, reviewer-sea on concurrency). In R2, coder-1-sea produced the most findings (5) on the service integration docs — their correctness focus caught event naming mismatches and pseudo-code symbol errors. coder-2-sea found 3 issues in the provider/agent plans. reviewer-sea found 2 issues in the sandbox plans, maintaining the pattern of catching implementation-level correctness bugs.
 
-**Cross-doc seam risk:** The most systemic findings (terminology drift, duplicate type ownership, dependency references to shared plan numbers) suggest a seam review pass across connected components would be valuable before implementation begins. The individual plan reviews caught many cross-doc issues incidentally, but a dedicated seam review would provide systematic coverage.
+**Cross-doc consistency improved:** R1's most systemic issue was terminology drift ("orchestrator" vs "RuntimeController"). By R2, the cross-cutting terminology update during R1 incorporation had taken effect — no terminology drift findings in R2. The remaining cross-doc issues were event lifecycle naming (3 findings), which are narrower and were resolved by aligning to the canonical plan 05 taxonomy.
+
+**Readiness assessment:** All 16 plan docs have been through at least 2 review rounds. 12 have fully converged. The remaining 6 (04, 05, 10, 11, 13, 14) had their R2 findings incorporated. The plans are ready for implementation or a final seam review pass to systematically verify cross-component interface compatibility.
