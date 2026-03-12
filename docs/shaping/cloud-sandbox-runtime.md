@@ -80,43 +80,6 @@ A system where:
 
 ## Shapes
 
-### A: ZFS-on-EBS + Fargate
-
-The user's initial proposal. ZFS provides the snapshotable filesystem layer, EBS provides durability, and Fargate provides serverless container execution with variable resource sizing.
-
-| Part | Mechanism | Flag |
-|------|-----------|:----:|
-| **A1** | **Durable filesystem:** ZFS pool on AWS EBS volume(s). EBS provides persistence; ZFS provides instant copy-on-write snapshots. | |
-| **A2** | **Execution environment:** AWS Fargate tasks. Each tool call (or batch of tool calls) launches a Fargate task with the ZFS volume attached. Task size (CPU/memory) specified per invocation. | ⚠️ |
-| **A3** | **Snapshot lifecycle:** After each tool call completes, `zfs snapshot` is taken. Snapshots are named with monotonic sequence IDs correlated to agent event log entries. | |
-| **A4** | **Pause/resume:** On pause, Fargate task stops — no compute cost. EBS volume persists. On resume, new Fargate task launched, EBS re-attached, ZFS pool imported, agent continues from last snapshot. | |
-| **A5** | **Rollback:** `zfs rollback` to any named snapshot. Agent session state is reconstructed from event log up to the corresponding event index. | |
-| **A6** | **Initial snapshot:** Base snapshots pre-built (e.g., via a "workspace provisioner" that clones a repo, installs deps, takes a ZFS snapshot). New agent sessions `zfs clone` from the base snapshot. | |
-| **A7** | **Agent integration:** A `SandboxToolExecutor` wraps each `AgentTool`. Instead of executing locally, it dispatches the tool call to the Fargate sandbox via RPC, waits for result + snapshot confirmation, then returns. | |
-
-**A2 flag note:** Fargate does not natively support EBS volume attachment. Fargate tasks use ephemeral storage (up to 200GB) or EFS. Attaching an EBS volume to a Fargate task would require a sidecar or custom orchestration layer — this is a significant architectural gap.
-
----
-
-### B: ZFS-on-EBS + EC2 with Start/Stop
-
-Same ZFS-on-EBS filesystem layer, but using EC2 instances instead of Fargate. EC2 natively supports EBS attachment and can be stopped (zero compute cost, EBS persists) and restarted.
-
-| Part | Mechanism | Flag |
-|------|-----------|:----:|
-| **B1** | **Durable filesystem:** ZFS pool on AWS EBS volume(s). Same as A1. | |
-| **B2** | **Execution environment:** EC2 instances. A pool of instances (or on-demand launch) with ZFS-capable AMI. EBS volumes attached/detached as needed. | |
-| **B3** | **Snapshot lifecycle:** Same as A3 — `zfs snapshot` after each tool call. | |
-| **B4** | **Pause/resume:** EC2 instance stopped (no compute cost, EBS persists). On resume, instance started (or new instance launched + EBS re-attached). ZFS pool imported, agent continues. | |
-| **B5** | **Rollback:** Same as A5 — `zfs rollback` + event log replay. | |
-| **B6** | **Initial snapshot:** Same as A6 — base snapshots, `zfs clone`. | |
-| **B7** | **Agent integration:** Same as A7 — `SandboxToolExecutor` dispatches via RPC to EC2 instance. | |
-| **B8** | **Dynamic sizing:** Use different EC2 instance types (or a fleet of pre-warmed instances at different sizes). Tool calls declare resource needs; orchestrator routes to appropriately-sized instance. | ⚠️ |
-
-**B8 flag note:** Dynamic EC2 instance type selection adds complexity. Options: (a) maintain a fleet with different sizes and route, (b) launch on-demand (slow cold start), (c) use a single generous size for all (wastes resources for simple operations). Needs further investigation.
-
----
-
 ### C: Firecracker microVMs + Overlay Snapshots
 
 Use Firecracker microVMs (as used by AWS Lambda and Fly.io) for fast-launching, lightweight isolation. Filesystem snapshots via Firecracker's built-in VM snapshotting or overlay filesystem approach.
@@ -136,28 +99,9 @@ Use Firecracker microVMs (as used by AWS Lambda and Fly.io) for fast-launching, 
 
 ---
 
-### D: Kubernetes Pods + Persistent Volume Snapshots
-
-Use Kubernetes (EKS or similar) as the orchestration layer. Pods for execution, PersistentVolumeClaims for storage, VolumeSnapshots for filesystem history.
-
-| Part | Mechanism | Flag |
-|------|-----------|:----:|
-| **D1** | **Durable filesystem:** Kubernetes PersistentVolume (backed by EBS via CSI driver). Mounted into pods. | |
-| **D2** | **Execution environment:** Kubernetes Pods. Resource requests/limits set per pod (CPU, memory). Pods created/destroyed per tool call or per session. | |
-| **D3** | **Snapshot lifecycle:** Kubernetes VolumeSnapshot API after each tool call. EBS CSI driver creates EBS snapshots. | ⚠️ |
-| **D4** | **Pause/resume:** Delete pod (zero compute). PV retained. On resume, create new pod, mount same PV. | |
-| **D5** | **Rollback:** Create new PV from a VolumeSnapshot, mount into new pod. | |
-| **D6** | **Initial snapshot:** Base VolumeSnapshots pre-created. New sessions create PVs from base snapshot. | |
-| **D7** | **Agent integration:** Same pattern — `SandboxToolExecutor` dispatches to pod via service/exec API. | |
-| **D8** | **Dynamic sizing:** Pod resource requests/limits set per invocation. Kubernetes scheduler handles placement. | |
-
-**D3 flag note:** EBS snapshots are NOT suitable for per-tool-call frequency. EBS snapshots are eventual (take seconds to minutes to create), are charged per GB-month of storage, and have API rate limits. A single agent session could generate hundreds of tool calls — that's hundreds of EBS snapshots, which is operationally untenable. This is a fundamental mismatch between the snapshot frequency requirement and EBS snapshot capabilities.
-
----
-
 ### E: ZFS-on-EBS + Firecracker (Hybrid)
 
-Combines the best of A/B and C: ZFS on EBS for the durable, instantly-snapshotable filesystem, and Firecracker microVMs for fast, lightweight, dynamically-sized execution.
+Combines ZFS on EBS for the durable, instantly-snapshotable filesystem with Firecracker microVMs for fast, lightweight, dynamically-sized execution.
 
 | Part | Mechanism | Flag |
 |------|-----------|:----:|
@@ -175,26 +119,22 @@ Combines the best of A/B and C: ZFS on EBS for the durable, instantly-snapshotab
 
 ## Fit Check
 
-| Req | Requirement | Status | A | B | C | D | E |
-|-----|-------------|--------|---|---|---|---|---|
-| R0 | Tool calls execute in isolated sandboxes, not on the agent host | Core goal | ✅ | ✅ | ✅ | ✅ | ✅ |
-| R1 | Every tool call produces a filesystem snapshot; full incremental history is maintained | Core goal | ✅ | ✅ | ✅ | ❌ | ✅ |
-| R2 | Agent can pause (spin down sandbox, zero compute cost) and resume from last snapshot | Core goal | ✅ | ✅ | ✅ | ✅ | ✅ |
-| R3 | Sandbox resources are dynamically sized per tool call | Must-have | ❌ | ❌ | ✅ | ✅ | ✅ |
-| R4 | Filesystem and snapshots are durably persisted | Must-have | ✅ | ✅ | ✅ | ✅ | ✅ |
-| R5 | Rollback: restore agent session state and filesystem to any prior snapshot in sync | Must-have | ✅ | ✅ | ✅ | ❌ | ✅ |
-| R6 | Sandbox can be initialized from a pre-built snapshot | Must-have | ✅ | ✅ | ✅ | ✅ | ✅ |
-| R7 | Snapshot overhead is low enough for per-tool-call frequency | Must-have | ✅ | ✅ | ✅ | ❌ | ✅ |
-| R8 | Integrates with ai-agent-go agent framework | Must-have | ✅ | ✅ | ✅ | ✅ | ✅ |
-| R9 | Multi-tenancy: multiple agents run concurrently without interference | Must-have | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Req | Requirement | Status | C | E |
+|-----|-------------|--------|---|---|
+| R0 | Tool calls execute in isolated sandboxes, not on the agent host | Core goal | ✅ | ✅ |
+| R1 | Every tool call produces a filesystem snapshot; full incremental history is maintained | Core goal | ✅ | ✅ |
+| R2 | Agent can pause (spin down sandbox, zero compute cost) and resume from last snapshot | Core goal | ✅ | ✅ |
+| R3 | Sandbox resources are dynamically sized per tool call | Must-have | ✅ | ✅ |
+| R4 | Filesystem and snapshots are durably persisted | Must-have | ✅ | ✅ |
+| R5 | Rollback: restore agent session state and filesystem to any prior snapshot in sync | Must-have | ✅ | ✅ |
+| R6 | Sandbox can be initialized from a pre-built snapshot | Must-have | ✅ | ✅ |
+| R7 | Snapshot overhead is low enough for per-tool-call frequency | Must-have | ✅ | ✅ |
+| R8 | Integrates with ai-agent-go agent framework | Must-have | ✅ | ✅ |
+| R9 | Multi-tenancy: multiple agents run concurrently without interference | Must-have | ✅ | ✅ |
 
 **Notes:**
 
-- **A fails R3:** Fargate task sizes are set at task definition time. Changing resource allocation requires stopping and starting a new task — high latency (~30-60s). Not feasible to change per tool call.
-- **B fails R3:** EC2 instance type is fixed at launch. Changing requires stopping, changing instance type, and restarting — minutes of latency. A fleet approach is possible but adds significant complexity (B8 flagged).
-- **D fails R1:** EBS snapshots are too slow and expensive for per-tool-call frequency (D3 flagged). You'd get a snapshot every few minutes at best, not per tool call.
-- **D fails R5:** Rolling back requires creating a new PV from a snapshot — but since snapshots can't be taken at per-tool-call frequency, rollback granularity is too coarse.
-- **D fails R7:** EBS snapshot creation takes seconds to minutes, making per-tool-call snapshots impractical.
+Both Shape C and Shape E pass all requirements. Shapes A, B, and D were eliminated (see Analysis below).
 
 ---
 
@@ -202,11 +142,11 @@ Combines the best of A/B and C: ZFS on EBS for the durable, instantly-snapshotab
 
 ### Shapes Eliminated
 
-**Shape D (Kubernetes + PV Snapshots)** is eliminated. The fundamental issue is that Kubernetes VolumeSnapshots backed by EBS are too slow and expensive for per-tool-call snapshot frequency. This is not a solvable problem within the Kubernetes storage abstraction — it's a mismatch between the requirement and the infrastructure primitive.
+Three shapes were evaluated and eliminated:
 
-**Shape A (ZFS-on-EBS + Fargate)** has a critical gap: Fargate does not support EBS volume attachment. You'd need to use EFS (NFSv4) instead, but ZFS cannot run on top of EFS. This means either (a) abandoning ZFS and using EFS directly (losing instant snapshots), or (b) using a sidecar architecture where the ZFS host is separate from the Fargate task, adding network latency to every filesystem operation. Neither is clean.
-
-**Shape B (ZFS-on-EBS + EC2)** works but fails on dynamic sizing. The core issue is that EC2 instances have a fixed instance type. You can't cheaply resize per tool call. A fleet of pre-warmed instances at different sizes is operationally complex and expensive.
+- **Shape A (ZFS-on-EBS + Fargate):** Fargate does not support EBS volume attachment, making ZFS-on-EBS impossible without a sidecar architecture that adds network latency to every filesystem operation.
+- **Shape B (ZFS-on-EBS + EC2):** EC2 instance types are fixed at launch. Dynamic per-tool-call resource sizing is not feasible without an operationally complex fleet of pre-warmed instances at different sizes.
+- **Shape D (Kubernetes + PV Snapshots):** EBS snapshots are too slow (seconds to minutes) and expensive for per-tool-call frequency. Fundamental mismatch between the snapshot requirement and the infrastructure primitive.
 
 ### Leading Shape
 
@@ -222,7 +162,7 @@ Combines the best of A/B and C: ZFS on EBS for the durable, instantly-snapshotab
 
 **Pause/resume model:** When an agent pauses, the Firecracker microVM is destroyed (or was never running — it may be destroyed after each tool call). The ZFS dataset and all its snapshots remain on the EBS volume. The EBS volume can optionally be detached from the host and re-attached later (to the same or different host). Resume means: ensure EBS is attached to a host, import the ZFS pool (if needed), launch a fresh Firecracker microVM with the filesystem at the last snapshot point.
 
-**Dynamic sizing model:** Each Firecracker microVM is created with a specific vCPU count and memory allocation. The orchestrator decides sizing based on the tool being called. File reads/writes/greps: 1 vCPU, 256MB. Compilation/builds: 4 vCPUs, 8GB. The microVM boots in ~125ms regardless of size, so the overhead of creating a new VM per tool call is acceptable.
+**Dynamic sizing model:** Tier 1 tools (file read/write/grep/glob/git) execute as Go functions directly on ZFS — no VM needed. Tier 2 tools (bash/shell/build/test) each get a Firecracker microVM with a specific vCPU count and memory allocation. The orchestrator decides sizing based on the tool being called: simple shell commands might get 2 vCPUs, 1GB; compilation/builds get 4+ vCPUs, 8GB+. The microVM boots in ~125ms regardless of size, so the overhead of creating a new VM per tool call is acceptable.
 
 **Isolation model:** Firecracker uses KVM hardware virtualization — stronger isolation than containers. Each tool call runs in its own VM with its own kernel. A malicious command in one tool call cannot affect the host, the ZFS pool, or other sessions.
 
@@ -308,8 +248,8 @@ graph TB
             ZP --> DS2
         end
 
-        subgraph "Firecracker MicroVMs"
-            VM1[MicroVM: tool call<br/>1 vCPU, 256MB<br/>file read]
+        subgraph "Firecracker MicroVMs (Tier 2 only)"
+            VM1[MicroVM: tool call<br/>2 vCPU, 1GB<br/>bash command]
             VM2[MicroVM: tool call<br/>4 vCPU, 8GB<br/>build]
         end
 
@@ -395,6 +335,45 @@ sequenceDiagram
     Orch-->>Agent: Resume with reconstructed state
     Note over Agent: Continues as if nothing happened
 ```
+
+---
+
+## Agent Placement Models
+
+Three models were considered for where the agent process runs relative to the sandbox host.
+
+### Model 1: Split — Agent on Workflow Engine, Tools on Sandbox Host via RPC (Chosen)
+
+The agent loop, LLM calls, and orchestration run on the workflow engine. The sandbox host handles all tool execution: Tier 1 tools (file read/write/grep/glob/git) execute as Go functions directly on ZFS (microsecond latency), and Tier 2 tools (bash/shell/build/test) execute in Firecracker microVMs (~125ms boot). All tool calls are dispatched via RPC from the workflow engine to the sandbox host.
+
+RPC overhead (~1-5ms per call) is negligible compared to LLM thinking time (5-30+ seconds). This model provides clean separation: the workflow server is stateless compute that scales horizontally, while sandbox hosts are stateful storage scaled separately. Agent scaling is fully decoupled from sandbox host scaling.
+
+This is the chosen approach.
+
+### Model 2: Monolith — Everything in the Sandbox VM
+
+The entire agent process runs inside a VM or container on the sandbox host. This gives zero RPC overhead and local filesystem access. However, the VM runs the entire time the agent is active, including during LLM calls when it is idle. At scale — 50 agents running 12-hour sessions with ~85% of time spent waiting on LLM responses — this wastes roughly 510 VM-hours of compute. Rejected due to idle compute waste at scale.
+
+### Model 3: Agent as Goroutine on Sandbox Host
+
+The agent loop runs as a goroutine in the sandbox host service process (not in a VM). This gives local filesystem access with VMs only needed for bash/builds, and reduces compute and bandwidth load on the workflow server. However, it couples agent scaling to sandbox host scaling — scaling agents means scaling sandbox hosts even when the bottleneck is LLM concurrency, not filesystem operations. Less architecturally clean than Model 1.
+
+---
+
+## Two-Tier Tool Execution
+
+Tool calls on the sandbox host are divided into two tiers:
+
+- **Tier 1 (file read/write/grep/glob/git):** Executes as Go functions directly on ZFS on the sandbox host. No VM is needed. These operations run at native filesystem speed (microseconds).
+- **Tier 2 (bash/shell/build/test):** Executes in Firecracker microVMs on the sandbox host. A VM is spun up per tool call and destroyed after execution. VMs are NOT kept alive during LLM thinking time.
+
+ZFS snapshots are taken after every tool call regardless of tier.
+
+### VM Lifecycle: Per-Tool-Call
+
+The default behavior is VM-per-tool-call: spin up the microVM, execute the command, take a ZFS snapshot, destroy the VM. VMs are not kept alive between tool calls or during LLM thinking time.
+
+At scale, this matters. Over a 12-hour agent session with ~200 tool calls, the 125ms boot overhead totals roughly 27 seconds — negligible. But keeping VMs alive during LLM thinking time across 50+ concurrent agents would waste hundreds of VM-hours of idle compute. The per-tool-call model eliminates this waste entirely.
 
 ---
 
