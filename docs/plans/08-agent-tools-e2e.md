@@ -1,6 +1,6 @@
 # 08: Agent + Tools End-to-End Test Suite
 
-**Status:** Draft
+**Status:** Approved
 **Depends on:** 05-agent, 06-built-in-tools, 07-code-interpreter
 **Depended on by:** 14-mode3-e2e
 **Implements:** `e2etests/` suite validating full agent-loop behavior with built-in tools and code interpreter workflows across local execution modes.
@@ -316,3 +316,17 @@ On scenario failure, automatically emit:
 | 5 | coder-2-sea | P3 | Exit criteria omit budget enforcement | Incorporated | Added acceptance and exit criteria for budget enforcement scenario. |
 | 6 | coder-2-sea | P2 | Outdated "scripting" terminology | Incorporated | Renamed to "code interpreter" where subsystem is referenced. |
 | 7 | coder-2-sea | P3 | Workspace cleanup/retention strategy unspecified | Incorporated | Added cleanup-on-success, preserve-on-failure policy and env override in §7.4. |
+
+## Plan Review Signoff
+
+- **Status**: Approved
+- **Date**: 2026-03-12
+- **Branch**: main
+- **Commit**: ee32c55
+- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
+- **Total findings**: 7
+- **Finding breakdown**: P2: 4, P3: 3
+- **Incorporation rate**: 100%
+- **Not incorporated**: None
+- **Open questions**: All resolved
+- **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea

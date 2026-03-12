@@ -1,6 +1,6 @@
 # 09: ZFS Dataset & Snapshot Management
 
-**Status:** Draft
+**Status:** Approved
 **Depends on:** —
 **Depended on by:** 11-sandbox-host-service
 **Implements:** `internal/sandbox/zfs` — ZFS dataset lifecycle, snapshot operations, mountpoint management, pool health monitoring, ZFS send/recv for migration
@@ -1358,7 +1358,7 @@ internal/sandbox/zfs/
 
 ---
 
-## 18. Open Questions
+## 18. Open Questions (All Resolved)
 
 ### OQ1: libzfs vs CLI
 
@@ -1394,3 +1394,17 @@ Some environments require `sudo` for ZFS operations. The `WithSudo` option handl
 | 4 | coder-2-sea | P3 | Rollback benchmark conflates snapshot creation and rollback | Incorporated | Updated companion harness benchmark design to isolate rollback cost. |
 | 5 | coder-2-sea | P2 | Pool import/export in scope but not covered | Incorporated | Added `ImportPool`/`ExportPool` interface and implementation outline in §3.1 and §7.3. |
 | 6 | coder-2-sea | P3 | Stress snapshot count bookkeeping is fragile | Incorporated | Companion harness now uses `ListSnapshots` assertions instead of manual counters. |
+
+## Plan Review Signoff
+
+- **Status**: Approved
+- **Date**: 2026-03-12
+- **Branch**: main
+- **Commit**: ee32c55
+- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
+- **Total findings**: 6
+- **Finding breakdown**: P2: 3, P3: 3
+- **Incorporation rate**: 100%
+- **Not incorporated**: None
+- **Open questions**: All resolved
+- **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea

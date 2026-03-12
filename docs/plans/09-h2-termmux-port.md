@@ -1,6 +1,6 @@
 # 09: Terminal Multiplexer & Event Handler Port from h2
 
-**Status:** Draft
+**Status:** Approved
 **Depends on:** 01-ai-core (event types), 05-agent (AgentEvent definitions)
 **Depended on by:** 14-mode2-e2e
 **Source:** `~/h2home/projects/h2/internal/session/`
@@ -670,3 +670,17 @@ internal/termmux/
 | 7 | coder-2-sea | P3 | Config directory manager lacks concrete types | Incorporated | Added `ConfigDirManager` type and stable path scheme. |
 | 8 | coder-2-sea | P2 | Acceptance criteria section missing | Incorporated | Added explicit acceptance criteria section. |
 | 9 | coder-2-sea | P3 | Plan numbering collision with `09-sandbox-zfs` | Not Incorporated | Numbering unchanged in this round; disambiguation note added in plan index. |
+
+## Plan Review Signoff
+
+- **Status**: Approved
+- **Date**: 2026-03-12
+- **Branch**: main
+- **Commit**: ee32c55
+- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
+- **Total findings**: 9
+- **Finding breakdown**: P0: 1, P1: 2, P2: 3, P3: 2
+- **Incorporation rate**: 89% (8/9)
+- **Not incorporated**: #9 (P3 plan numbering collision — disambiguation note added in plan index instead of renumbering)
+- **Open questions**: All resolved
+- **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea

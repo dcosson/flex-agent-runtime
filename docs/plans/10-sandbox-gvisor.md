@@ -1,6 +1,6 @@
 # 10: gVisor Container Management
 
-**Status:** Draft
+**Status:** Approved
 **Depends on:** — (no code dependencies; 09-sandbox-zfs provides the ZFS datasets this component bind-mounts, but the gVisor manager has no Go import dependency on it)
 **Depended on by:** 11-sandbox-host-service
 **Implements:** gVisor container lifecycle, cgroup resource limits, OCI spec construction, per-tool-call container management
@@ -1673,7 +1673,7 @@ The test rootfs will be a busybox-based minimal Linux filesystem, stored as a ta
 
 ---
 
-## 20. Open Questions
+## 20. Open Questions (All Resolved)
 
 ### OQ1: Rootfs Preparation Strategy
 
@@ -1712,3 +1712,17 @@ Should we capture runsc's debug logs for troubleshooting? Options:
 |---|----------|----------|---------|-------------|-------|
 | 1 | reviewer-sea | P1 | `checkOOMKill` could misclassify timeout/cancel sentinel exits | Incorporated | OOM detection now runs only for `StatusExited` + `exitCode==137`; timeout/cancel statuses are no longer overridden. |
 | 2 | reviewer-sea | P2 | `Duration` vs `BootDuration` semantics and metrics clarity | Incorporated | Clarified field semantics and ensured end-to-end `Duration` remains separately recorded from runsc execution `BootDuration`. |
+
+## Plan Review Signoff
+
+- **Status**: Approved
+- **Date**: 2026-03-12
+- **Branch**: main
+- **Commit**: ee32c55
+- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
+- **Total findings**: 9
+- **Finding breakdown**: P1: 1, P2: 5, P3: 3
+- **Incorporation rate**: 100%
+- **Not incorporated**: None
+- **Open questions**: All resolved
+- **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea
