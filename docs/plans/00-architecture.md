@@ -93,7 +93,7 @@ graph TB
             end
 
             subgraph "Meta-Tools"
-                starlark[Tool Scripting<br/>Starlark executor,<br/>progressive discovery]
+                starlark[Code Interpreter<br/>Starlark executor,<br/>RLM, DataStore, discovery]
             end
 
             tooliface --> readtool
@@ -407,43 +407,49 @@ func NewSandboxTools(client rpc.SandboxClient, sessionID string) []agent.AgentTo
 
 Both factories return `[]agent.AgentTool` — the Agent (and its AgentDriver) doesn't know or care which factory was used.
 
-### 4. Tool Scripting Meta-Tool (`internal/tools/scripting`)
+### 4. Code Interpreter Meta-Tool (`internal/tools/codeinterp`)
 
-A Starlark-based meta-tool that enables progressive tool discovery and multi-step tool workflows in a single agent turn.
+A Starlark-based code interpreter meta-tool that enables progressive tool discovery, multi-step tool workflows, recursive LLM sub-calls, and pluggable DataStore access in a single agent turn.
 
 ```mermaid
 sequenceDiagram
     participant LLM as Agent Loop (LLM)
-    participant Script as Tool Scripting Meta-Tool
+    participant CI as Code Interpreter Meta-Tool
     participant Starlark as Starlark Interpreter
     participant Tools as Other AgentTools
+    participant Provider as ai.Provider
+    participant Store as DataStore
 
-    LLM->>Script: execute_script({code: "..."})
-    Script->>Starlark: Run sandboxed script
+    LLM->>CI: execute_script({code: "..."})
+    CI->>Starlark: Run sandboxed script
     Starlark->>Starlark: discover("file") → list matching tools
     Starlark->>Tools: invoke("read_file", {path: "go.mod"})
     Tools-->>Starlark: file contents
-    Starlark->>Tools: invoke("grep", {pattern: "module", path: "."})
-    Tools-->>Starlark: grep results
-    Starlark-->>Script: structured result
-    Script-->>LLM: ToolResult with aggregated output
+    Starlark->>Provider: llm_call("Summarize this", context)
+    Provider-->>Starlark: summary response
+    Starlark->>Store: store_write("summary.txt", result)
+    Store-->>Starlark: ok
+    Starlark-->>CI: structured result
+    CI-->>LLM: ToolResult with aggregated output
 ```
 
 #### Key Properties
 
-- **Sandboxed execution**: Starlark interpreter with no filesystem or network access. Can only interact with the outside world through `discover()` and `invoke()` builtins.
+- **Sandboxed execution**: Starlark interpreter with no filesystem or network access. Can only interact with the outside world through approved builtins (`discover`, `invoke`, `llm_call`, `llm_batch`, `store_*`).
 - **Progressive discovery**: `discover(keyword)` returns tool names and descriptions matching a keyword, without loading full schemas. `describe(tool_name)` returns the full schema. This keeps LLM context small.
 - **Multi-step workflows**: A single script can call multiple tools sequentially, inspect intermediate results, and make decisions — all in one LLM turn, saving tokens and latency.
-- **Lightweight runtime**: Just an embedded Go Starlark interpreter + helper function bindings. No OS, filesystem, or container needed.
+- **Recursive LLM (RLM)**: Scripts can spawn sub-LLM calls (`llm_call`, `llm_batch`) for map-reduce, summarization, classification. Sub-calls use existing provider infrastructure with isolated context and configurable token/cost budgets.
+- **Pluggable DataStore**: Scripts read/write data through a generic DataStore interface (MemoryDataStore for lightweight, FSDataStore for sandbox, BlobDataStore for cloud, SQLDataStore for analytics).
+- **Two-tier execution**: Lightweight scripts run in-process with default limits; full scripts (RLM, large data) run in sandbox with elevated limits and persistent DataStore.
 - **Deterministic**: Starlark is intentionally deterministic (no `import`, no goroutines, no I/O). Scripts are reproducible.
 
 #### Implementation
 
 ```go
-type ScriptingTool struct {
+type CodeInterpreterTool struct {
     tools      []agent.AgentTool  // tools available for discovery/invocation
-    maxSteps   int                // max tool invocations per script (default 50)
-    maxRuntime time.Duration      // max wall-clock time per script (default 30s)
+    provider   ai.Provider        // provider for RLM sub-calls
+    config     Config             // execution limits (tier-dependent)
 }
 
 // Starlark builtins exposed to scripts:
@@ -451,6 +457,12 @@ type ScriptingTool struct {
 // describe(tool_name: str) -> dict         — full tool schema
 // invoke(tool_name: str, params: dict) -> dict  — execute a tool and return result
 // log(msg: str)                            — append to execution log (returned to LLM)
+// llm_call(prompt, context, model, max_tokens) -> dict  — sub-LLM call
+// llm_batch(calls: list[dict]) -> list[dict]  — parallel sub-LLM calls
+// store_write(key, data) -> None           — write to DataStore
+// store_read(key) -> str                   — read from DataStore
+// store_search(key, pattern) -> list[dict] — search within stored value
+// store_list(prefix) -> list[str]          — list keys by prefix
 ```
 
 ### 5. Terminal Multiplexer (`internal/termmux`)
@@ -889,10 +901,18 @@ h2-agent-runtime/
 │   │   ├── grep.go                  # Content search tool
 │   │   ├── glob.go                  # File pattern matching tool
 │   │   ├── git.go                   # Git operations tool
-│   │   └── scripting/               # Tool scripting meta-tool
-│   │       ├── scripting.go         # Starlark executor
+│   │   └── codeinterp/              # Code interpreter meta-tool
+│   │       ├── codeinterp.go        # Starlark executor + tier classification
 │   │       ├── builtins.go          # discover(), describe(), invoke(), log()
-│   │       └── sandbox.go           # Starlark sandbox restrictions
+│   │       ├── rlm.go               # llm_call(), llm_batch() RLM builtins
+│   │       ├── datastore.go         # store_read/write/search/list builtins
+│   │       ├── sandbox.go           # Starlark sandbox restrictions
+│   │       └── datastore/           # DataStore interface + implementations
+│   │           ├── iface.go         # DataStore interface
+│   │           ├── memory.go        # MemoryDataStore
+│   │           ├── fs.go            # FSDataStore
+│   │           ├── blob.go          # BlobDataStore (S3/GCS)
+│   │           └── sql.go           # SQLDataStore
 │   │
 │   ├── termmux/                     # Terminal multiplexer
 │   │   ├── session.go               # Session struct, lifecycle
@@ -965,8 +985,8 @@ graph TD
     AI[internal/ai] --> Agent[internal/agent]
     AI --> Tools[internal/tools]
     Agent --> Tools
-    AI --> Scripting[internal/tools/scripting]
-    Agent --> Scripting
+    AI --> CodeInterp[internal/tools/codeinterp]
+    Agent --> CodeInterp
     Tools --> Sandbox[internal/sandbox]
     Tools --> RPC[internal/rpc]
     RPC --> Sandbox
@@ -996,7 +1016,7 @@ graph TD
 - `internal/ai` imports nothing from this repo (only stdlib + JSON schema lib)
 - `internal/agent` imports `internal/ai` and `internal/termmux` (for AgentDriver implementations: NativeDriver uses ai directly, ClaudeCodeDriver/CodexDriver use termmux)
 - `internal/tools` imports `internal/ai` and `internal/agent` (for `AgentTool`)
-- `internal/tools/scripting` imports `internal/ai` and `internal/agent`
+- `internal/tools/codeinterp` imports `internal/ai` and `internal/agent`
 - `internal/sandbox` imports `internal/tools` (for `ToolBackend`)
 - `internal/rpc` imports `internal/ai`, `internal/agent`, `internal/tools`, `internal/sandbox`
 - `internal/termmux` imports `internal/agent` (for `AgentEvent` types, `SessionLogConverter`)
@@ -1049,9 +1069,9 @@ This is idiomatic Go. Type switches handle dispatch.
 
 All LLM interactions stream events through buffered Go channels (32-event buffer). `context.Context` provides cancellation. Consumers can range over the channel or call `EventStream.Result()` for blocking.
 
-### AD7: Starlark for Tool Scripting
+### AD7: Starlark for Code Interpreter
 
-Starlark (Go's `go.starlark.net`) provides a deterministic, sandboxed scripting language. No filesystem access, no network, no goroutines, no import. The only external interaction is through explicitly exposed builtins (`discover`, `invoke`). This gives us tool scripting without security concerns.
+Starlark (Go's `go.starlark.net`) provides a deterministic, sandboxed scripting language. No filesystem access, no network, no goroutines, no import. The only external interaction is through explicitly exposed builtins (`discover`, `invoke`, `llm_call`, `llm_batch`, `store_*`). This gives us a code interpreter with recursive LLM support and pluggable storage without security concerns.
 
 ### AD8: Terminal Mux in the Runtime
 
@@ -1130,7 +1150,7 @@ Each component has its own testing section in its plan doc. The overall strategy
 | **Comparison oracle testing** | Every core function (TransformMessages, CalculateCost, IsContextOverflow) is tested against the TypeScript reference implementation on 100+ corpus entries. |
 | **SSE parser fuzz testing** | The SSE parser is fuzzed with arbitrary byte sequences. Must never panic, never OOM, never infinite loop. |
 | **Per-turn snapshots** | Every agent turn produces a ZFS snapshot (when the agent goes idle between turns). This captures every meaningful state boundary while avoiding excessive snapshots on trivial operations like file reads. Per-tool-call snapshots available as an opt-in for debugging/audit. |
-| **Starlark sandbox** | The tool scripting interpreter has no filesystem, network, or OS access. Even a malicious script can only call `discover()` and `invoke()` on already-registered tools. Execution is time-bounded and step-bounded. |
+| **Starlark sandbox** | The code interpreter has no filesystem, network, or OS access. Even a malicious script can only call approved builtins (`discover`, `invoke`, `llm_call`, `llm_batch`, `store_*`) on pre-configured services. Execution is time-bounded, step-bounded, and token/cost-bounded for RLM calls. |
 | **Typed provider errors** | Provider errors are structurally classified (not string-matched). Each provider has conformance test fixtures with real error payloads. |
 
 ## Alien Artifacts

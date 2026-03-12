@@ -166,7 +166,7 @@ Target:
 2. Run one live-provider smoke scenario and manually verify semantic parity with deterministic baseline.
 3. Trigger a controlled failure and confirm diagnostics bundle quality (events + transcript + fs diff).
 4. Validate steering/follow-up UX expectations in logs and final outcomes.
-5. Validate scripted workflow trace from `execute_script` in a real conversation.
+5. Validate code interpreter workflow trace from `execute_script` (including RLM and DataStore ops) in a real conversation.
 
 ---
 
@@ -175,7 +175,7 @@ Target:
 | Tier | Runs | Contents |
 |------|------|----------|
 | PR-fast | every PR | minimal deterministic scenarios (file flow + bash flow) |
-| PR-standard | every PR | broader deterministic matrix incl. steering/follow-up + scripting |
+| PR-standard | every PR | broader deterministic matrix incl. steering/follow-up + code interpreter |
 | Nightly | nightly | full deterministic suite + chaos injections + benchmarks |
 | Weekly | weekly | soak tests + backend-parity oracle + live-provider smoke set |
 

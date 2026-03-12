@@ -4,7 +4,7 @@
 
 This plan index organizes the full h2-agent-runtime implementation into sub-plans grouped by dependency order. The runtime has seven major components spanning four batches, progressing from foundation types through the full distributed runtime.
 
-The existing reviewed plans for AI core (01-ai-core, 01-ai-core-test-harness) are incorporated as the foundation. New plans cover built-in tools, tool scripting, agent loop, terminal mux, sandbox host, and the RPC layer.
+The existing reviewed plans for AI core (01-ai-core, 01-ai-core-test-harness) are incorporated as the foundation. New plans cover built-in tools, code interpreter, agent loop, terminal mux, sandbox host, and the RPC layer.
 
 Sub-plans are sized so each represents a substantial, self-contained unit of work that can be implemented and tested independently by one or two agents.
 
@@ -17,7 +17,7 @@ Sub-plans are sized so each represents a substantial, self-contained unit of wor
 | **G1: Core types compile** | `internal/ai` types, event stream, registries compile. Model catalog loads. No providers yet. | Batch 1 → Batch 2 |
 | **G2: First provider streams** | Anthropic provider passes integration test: stream a prompt, receive text events, get final AssistantMessage with usage. | Batch 2 → Batch 3 |
 | **G3: Tool calling works** | At least one provider handles tool calls end-to-end: schema sent, tool call received, tool result sent back, final response received. | Batch 2 → Batch 3 |
-| **G4: Agent loop + local tools E2E** | `agent.Agent` runs a multi-turn conversation with local built-in tools using any V1 provider. Steering and follow-up work. Tool scripting meta-tool works. | Batch 3 → Batch 4 |
+| **G4: Agent loop + local tools E2E** | `agent.Agent` runs a multi-turn conversation with local built-in tools using any V1 provider. Steering and follow-up work. Code interpreter meta-tool works. | Batch 3 → Batch 4 |
 | **G5: Sandbox host operational** | Sandbox host service creates sessions (ZFS datasets), executes Tier 1 and Tier 2 tool calls, takes snapshots, and supports rollback. Tested on a real EC2 instance with ZFS + gVisor. | Batch 4 → Batch 5 |
 | **G6: Remote tool dispatch works** | Agent loop dispatches tool calls to a remote sandbox host via RPC. Full Mode 3 E2E test passes. | Batch 4 → Batch 5 |
 | **G7: Terminal mux operational** | Terminal mux can launch, attach, detach, and kill 3rd party agent driver sessions. Event normalization produces structured events for at least one agent driver. Bidirectional session log conversion works. | Batch 4 → Batch 5 |
@@ -45,14 +45,14 @@ Each provider is independent. They all depend on Batch 1's core types. The first
 
 ## Batch 3: Agent Loop + Tools
 
-The agent framework, built-in tools, and tool scripting. These can be partially parallelized — the agent loop and built-in tools share the `AgentTool` interface but can be implemented concurrently once the interface is defined. Tool scripting depends on both.
+The agent framework, built-in tools, and code interpreter. These can be partially parallelized — the agent loop and built-in tools share the `AgentTool` interface but can be implemented concurrently once the interface is defined. Code interpreter depends on both.
 
 | Doc | Component | Description | Depends On | Status |
 |-----|-----------|-------------|------------|--------|
 | [05-agent](./05-agent.md) | `internal/agent` | Agent struct, agent loop (LLM → tools → LLM cycle), AgentMessage/AgentTool/AgentEvent types, subscription model, state management, steering, follow-up, terminal tools. Full unit tests with mock provider, integration test with real provider. | 01-ai-core, 02-provider-anthropic | Not started |
 | [06-built-in-tools](./06-built-in-tools.md) | `internal/tools` | Built-in tool implementations: read, write, edit, bash, grep, glob, git ops. ToolBackend interface (LocalBackend vs SandboxBackend) for dispatch. LocalTools factory. Tool-level unit tests. | 01-ai-core, 05-agent | Not started |
-| [07-tool-scripting](./07-tool-scripting.md) | `internal/tools/scripting` | Starlark meta-tool: sandboxed interpreter, progressive tool discovery (discover/describe/invoke builtins), multi-step tool workflows, execution limits (step count, wall clock). | 01-ai-core, 05-agent, 06-built-in-tools | Not started |
-| [08-agent-tools-e2e](./08-agent-tools-e2e.md) | Agent + tools E2E | End-to-end tests: agent loop with local built-in tools, multi-turn conversations with file operations and bash, tool scripting workflows. Tests go in `e2etests/`. | 05-agent, 06-built-in-tools, 07-tool-scripting | Not started |
+| [07-code-interpreter](./07-code-interpreter.md) | `internal/tools/codeinterp` | Starlark code interpreter meta-tool: sandboxed interpreter, progressive tool discovery (discover/describe/invoke), recursive LLM calls (llm_call/llm_batch), pluggable DataStore (memory/fs/blob/sql), two-tier execution (lightweight/full), configurable limits. | 01-ai-core, 05-agent, 06-built-in-tools | Not started |
+| [08-agent-tools-e2e](./08-agent-tools-e2e.md) | Agent + tools E2E | End-to-end tests: agent loop with local built-in tools, multi-turn conversations with file operations and bash, code interpreter workflows. Tests go in `e2etests/`. | 05-agent, 06-built-in-tools, 07-code-interpreter | Not started |
 
 ## Batch 4: Infrastructure Services
 
@@ -96,7 +96,7 @@ graph TD
     subgraph "Batch 3: Agent + Tools"
         E[05-agent<br/>Agent loop, steering,<br/>follow-up, events]
         F[06-built-in-tools<br/>read, write, edit, bash,<br/>grep, glob, git]
-        G[07-tool-scripting<br/>Starlark meta-tool,<br/>progressive discovery]
+        G[07-code-interpreter<br/>Starlark code interpreter,<br/>RLM, DataStore, discovery]
         H[08-agent-tools-e2e<br/>Agent + local tools E2E]
     end
 
@@ -169,7 +169,7 @@ Within each batch, many plans can be worked on in parallel by different agents:
 
 **Batch 2:** All three providers can be parallelized after Anthropic establishes the pattern (OpenAI and Google follow its conventions).
 
-**Batch 3:** Agent loop (05) and built-in tools (06) share the `AgentTool` interface definition but can be implemented concurrently once that interface is agreed upon. Tool scripting (07) depends on both.
+**Batch 3:** Agent loop (05) and built-in tools (06) share the `AgentTool` interface definition but can be implemented concurrently once that interface is agreed upon. Code interpreter (07) depends on both.
 
 **Batch 4:** All four components are independent:
 - ZFS manager (09) and gVisor manager (10) are completely independent
@@ -201,7 +201,7 @@ The following existing plans are **incorporated** into this index:
 | `01-ai-core.md` | **Retained** — solid reviewed design for the AI layer foundation | Batch 1 |
 | `01-ai-core-test-harness.md` | **Retained** — solid reviewed test harness for AI core | Batch 1 |
 
-The old architecture and plan index covered only the AI/agent layer (the "V1" scope). This new index covers the full runtime: AI layer, agent loop, tools, tool scripting, terminal mux, sandbox host, and RPC layer.
+The old architecture and plan index covered only the AI/agent layer (the "V1" scope). This new index covers the full runtime: AI layer, agent loop, tools, code interpreter, terminal mux, sandbox host, and RPC layer.
 
 ---
 
@@ -220,6 +220,6 @@ The old architecture and plan index covered only the AI/agent layer (the "V1" sc
 
 7. **Grep implementation**: Embed ripgrep binary vs pure Go implementation (e.g., wrapping `regexp` with file walking). Ripgrep is faster but adds a binary dependency. Decision in plan 06.
 8. **Edit tool algorithm**: Exact string match (like Claude Code's approach) vs diff-based. Exact string match is simpler and more predictable for LLMs. Decision in plan 06.
-9. **Starlark version/library**: `go.starlark.net` is the standard Go Starlark implementation. Confirm compatibility and sandboxing capabilities in plan 07.
+9. **~~Starlark version/library~~**: Resolved: `go.starlark.net` confirmed as the Starlark implementation. Sandboxing validated in plan 07 (code interpreter).
 10. **Container pre-warming**: Whether to pre-warm gVisor containers (keep a warm pool) vs cold-start every time. Cold-start is simpler and sufficient at ~100ms. Decision in plan 10.
 11. **Model catalog generator**: Automated tool that fetches model metadata from provider APIs (Anthropic, OpenAI, Google) and generates the embedded JSON catalog. Needs its own small plan — could be a sub-task of Batch 2 provider work or a standalone utility.

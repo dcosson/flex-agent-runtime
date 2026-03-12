@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Depends on:** 01-ai-core, 02-provider-anthropic
-**Depended on by:** 06-built-in-tools, 07-tool-scripting, 08-agent-tools-e2e, 13-rpc-layer
+**Depended on by:** 06-built-in-tools, 07-code-interpreter, 08-agent-tools-e2e, 13-rpc-layer
 **Implements:** `internal/agent` Agent struct, NativeDriver loop, driver abstraction, event model, session/state management, steering/follow-up, and terminal-tool termination.
 
 ---
@@ -21,7 +21,7 @@ Primary goals:
 
 Non-goals:
 - Tool implementations themselves (plan 06).
-- Tool scripting meta-tool internals (plan 07).
+- Code interpreter meta-tool internals (plan 07).
 - PTY mux implementation details (plan 09-h2-termmux-port).
 
 ---

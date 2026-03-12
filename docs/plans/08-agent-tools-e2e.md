@@ -1,20 +1,20 @@
 # 08: Agent + Tools End-to-End Test Suite
 
 **Status:** Draft
-**Depends on:** 05-agent, 06-built-in-tools, 07-tool-scripting
+**Depends on:** 05-agent, 06-built-in-tools, 07-code-interpreter
 **Depended on by:** 14-mode3-e2e
-**Implements:** `e2etests/` suite validating full agent-loop behavior with built-in tools and scripting workflows across local execution modes.
+**Implements:** `e2etests/` suite validating full agent-loop behavior with built-in tools and code interpreter workflows across local execution modes.
 
 ---
 
 ## 1. Overview
 
-This plan defines end-to-end verification for the integrated Batch-3 stack: agent loop, built-in tools, and tool scripting. The focus is user-visible behavior across component boundaries rather than isolated unit correctness.
+This plan defines end-to-end verification for the integrated Batch-3 stack: agent loop, built-in tools, and code interpreter. The focus is user-visible behavior across component boundaries rather than isolated unit correctness.
 
 Primary goals:
 - Prove `agent.Agent` can complete realistic multi-turn coding workflows with local tools.
 - Validate steering, follow-up, and terminal-tool behavior in full flows.
-- Validate scripting meta-tool workflows (`discover -> describe -> invoke`) in real conversations.
+- Validate code interpreter meta-tool workflows (`discover -> describe -> invoke`, RLM sub-calls, DataStore operations) in real conversations.
 - Establish reusable E2E harness patterns for later Mode-3/Mode-2 distributed E2E plans.
 
 Non-goals:
@@ -44,13 +44,13 @@ graph TB
 
     subgraph "Runtime under test"
         AG[internal/agent]
-        TOOLS[internal/tools]\n        SCRIPT[internal/tools/scripting]
+        TOOLS[internal/tools]\n        CODEINTERP[internal/tools/codeinterp]
         AI[internal/ai/provider/*]
     end
 
     H --> AG
     AG --> TOOLS
-    AG --> SCRIPT
+    AG --> CODEINTERP
     AG --> AI
 ```
 
@@ -107,7 +107,7 @@ e2etests/
 │   ├── local_file_flow_test.go
 │   ├── local_bash_flow_test.go
 │   ├── steering_followup_test.go
-│   ├── scripting_workflow_test.go
+│   ├── codeinterp_workflow_test.go
 │   └── terminal_tool_test.go
 └── testutil/
     ├── provider_fake.go       # deterministic provider scripts
@@ -152,10 +152,10 @@ Per scenario, assert at three layers:
 - Queue multiple follow-up directives during first turn.
 - Assertions verify FIFO follow-up execution and eventual idle state.
 
-### 4.5 Tool Scripting Workflow
+### 4.5 Code Interpreter Workflow
 
-- Prompt uses `execute_script` meta-tool for multi-step workflow.
-- Assertions verify progressive discovery usage and scripted tool-call trace.
+- Prompt uses `execute_script` meta-tool for multi-step workflow including RLM sub-calls and DataStore operations.
+- Assertions verify progressive discovery usage, RLM call traces, DataStore operations, and scripted tool-call trace.
 
 ### 4.6 Terminal Tool Completion
 
@@ -170,7 +170,7 @@ Per scenario, assert at three layers:
 |-----------|------|----------|
 | `internal/agent` | Public runtime API | prompt/continue/steer/follow-up/subscribe behavior under integrated load |
 | `internal/tools` | Tool execution semantics | correct results and side effects for built-in tool catalog |
-| `internal/tools/scripting` | Meta-tool behavior | discover/describe/invoke orchestration and limit handling |
+| `internal/tools/codeinterp` | Meta-tool behavior | discover/describe/invoke orchestration, RLM sub-calls, DataStore ops, and limit handling |
 | `internal/ai` providers | Streaming and tool-call translation | provider events drive tool loop correctly |
 | `e2etests` infra | Deterministic environment | reproducible fixtures, stable assertions, controlled variance |
 
@@ -194,9 +194,9 @@ Per scenario, assert at three layers:
 - Steps: inject steering and follow-ups during active session.
 - Expected: steering applied at valid boundary; follow-ups execute FIFO.
 
-5. **Tool scripting correctness**
-- Steps: run scripting scenario that discovers and invokes tools.
-- Expected: script trace shows progressive discovery and successful multi-step completion.
+5. **Code interpreter correctness**
+- Steps: run code interpreter scenario that discovers tools, invokes them, and performs RLM sub-calls.
+- Expected: script trace shows progressive discovery, RLM usage stats, and successful multi-step completion.
 
 6. **Terminal-tool correctness**
 - Steps: run scenario using terminal tool result path.
@@ -262,14 +262,14 @@ On scenario failure, automatically emit:
 |-----------|---------|
 | `internal/agent` | runtime under test |
 | `internal/tools` | built-in tool behaviors under test |
-| `internal/tools/scripting` | meta-tool workflows under test |
+| `internal/tools/codeinterp` | meta-tool workflows under test |
 | `internal/ai/provider/anthropic` + fake provider harness | deterministic and live-provider modes |
 
 ---
 
 ## 12. Exit Criteria
 
-1. `e2etests/` contains scenario suite covering file, bash, steering/follow-up, scripting, and terminal-tool workflows.
+1. `e2etests/` contains scenario suite covering file, bash, steering/follow-up, code interpreter, and terminal-tool workflows.
 2. Deterministic provider mode is stable and green in CI.
 3. Live-provider smoke mode is available behind secrets gate.
 4. Failure artifacts (events, transcript, workspace diff) are generated automatically.

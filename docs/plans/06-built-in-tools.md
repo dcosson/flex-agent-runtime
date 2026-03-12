@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Depends on:** 01-ai-core, 05-agent
-**Depended on by:** 07-tool-scripting, 08-agent-tools-e2e, 11-sandbox-host-service
+**Depended on by:** 07-code-interpreter, 08-agent-tools-e2e, 11-sandbox-host-service
 **Implements:** `internal/tools` built-in tools (`read`, `write`, `edit`, `bash`, `grep`, `glob`, `git`), `ToolBackend` dispatch abstraction, and factory wiring for Local/Sandbox execution.
 
 ---
@@ -20,7 +20,7 @@ Primary goals:
 Non-goals:
 - RPC protocol details for sandbox backend transport (plan 13).
 - Sandbox host internals (plan 11).
-- Tool scripting meta-tool internals (plan 07).
+- Code interpreter meta-tool internals (plan 07).
 
 ---
 
@@ -279,7 +279,7 @@ Classifier is centralized and shared to prevent drift across tools/backends.
 | `internal/agent` | Tool exposure | `[]agent.AgentTool` with stable names/schema/Execute semantics |
 | `internal/sandbox` / `internal/rpc` | Remote dispatch | `ToolBackend.ExecuteTool(ToolRequest) -> ToolResponse` |
 | `internal/ai` | Tool schema/types | `ai.Tool`, `ai.ContentBlock` for results |
-| `internal/tools/scripting` | Meta-tool invocation | relies on tool catalog discoverability and schema consistency |
+| `internal/tools/codeinterp` | Meta-tool invocation | relies on tool catalog discoverability and schema consistency |
 
 ---
 
