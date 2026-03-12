@@ -1,6 +1,6 @@
 # 14: Mode 3 End-to-End — Remote Tool Dispatch via RPC
 
-**Status:** Draft
+**Status:** Approved
 **Depends on:** 13-rpc-layer, 08-agent-tools-e2e
 **Depended on by:** 16-runtime-test-harness
 **Implements:** Full Mode-3 E2E suite validating local agent loop + remote sandbox-host tool execution over ConnectRPC, including session lifecycle and snapshot operations.
@@ -337,3 +337,17 @@ On failure, capture:
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
 | 1 | coder-1-sea | P1 | Event assertions referenced non-canonical lifecycle names | Incorporated | Canonical sequence/order assertions now use plan-05 lifecycle taxonomy (`session_started`, `session_ended`). |
+
+## Plan Review Signoff
+
+- **Status**: Approved
+- **Date**: 2026-03-12
+- **Branch**: main
+- **Commit**: ee32c55
+- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
+- **Total findings**: 7
+- **Finding breakdown**: P0: 0, P1: 2, P2: 3, P3: 2
+- **Incorporation rate**: 100%
+- **Not incorporated**: None
+- **Open questions**: All resolved
+- **Reviewers**: reviewer-sea, coder-1-sea

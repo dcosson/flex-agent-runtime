@@ -1,6 +1,6 @@
 # 13: RPC Layer for Sandbox Backend and Agent Events
 
-**Status:** Draft
+**Status:** Approved
 **Depends on:** 11-sandbox-host-service, 05-agent
 **Depended on by:** 14-mode3-e2e
 **Implements:** `internal/rpc` protocol, client/server adapters, SandboxBackend transport, and agent-event streaming over RPC.
@@ -463,3 +463,17 @@ This metadata is included in `ExecuteToolResponse` so that the agent and Runtime
 |---|----------|----------|---------|-------------|-------|
 | 1 | coder-1-sea | P1 | Server-streaming API returned producer-side type | Incorporated | `StreamAgentEvents` now returns `AgentEventReceiver` for RuntimeController consumers. |
 | 2 | coder-1-sea | P1 | Event taxonomy drifted from canonical agent lifecycle names | Incorporated | Terminal/lifecycle semantics now align to `session_started`/`session_ended` with `state_change` transitions. |
+
+## Plan Review Signoff
+
+- **Status**: Approved
+- **Date**: 2026-03-12
+- **Branch**: main
+- **Commit**: ee32c55
+- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
+- **Total findings**: 10
+- **Finding breakdown**: P0: 0, P1: 3, P2: 5, P3: 2
+- **Incorporation rate**: 100%
+- **Not incorporated**: None
+- **Open questions**: All resolved
+- **Reviewers**: reviewer-sea, coder-1-sea

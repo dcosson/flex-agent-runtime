@@ -1,6 +1,6 @@
 # 15: Mode 2 End-to-End — 3rd Party Driver in Sandbox
 
-**Status:** Draft
+**Status:** Approved
 **Depends on:** 09-h2-termmux-port, 11-sandbox-host-service
 > **Note (R1-F1):** Plan 09 in the plan index (`00-plan-index.md`) is "sandbox-zfs." The `09-h2-termmux-port` plan doc exists separately — there is a known plan number collision being tracked. Mode 2 E2E tests code against the `internal/termmux` interface contract defined in `09-h2-termmux-port`. If that plan does not fully specify the termmux API, the Mode 2 E2E tests will define the interface contract they require and the termmux implementation will conform to it.
 **Depended on by:** 16-runtime-test-harness
@@ -337,3 +337,17 @@ On failure, capture:
 | F4 | P2 | Incorporated | Added termmux interface contract notes in Connected Components |
 | F5 | P3 | Incorporated | Defined config dir path scheme and ZFS dataset placement |
 | F6 | P3 | Incorporated | Scoped O2 to lifecycle semantics comparison |
+
+## Plan Review Signoff
+
+- **Status**: Approved
+- **Date**: 2026-03-12
+- **Branch**: main
+- **Commit**: ee32c55
+- **Review rounds**: 2 (R1 batch + R2 batch)
+- **Total findings**: 6
+- **Finding breakdown**: P0: 0, P1: 1, P2: 3, P3: 2
+- **Incorporation rate**: 100%
+- **Not incorporated**: None
+- **Open questions**: All resolved
+- **Reviewers**: reviewer-sea, coder-1-sea

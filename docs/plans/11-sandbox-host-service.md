@@ -1,6 +1,6 @@
 # 11: Sandbox Host Service
 
-**Status:** Draft
+**Status:** Approved
 **Depends on:** 09-sandbox-zfs, 10-sandbox-gvisor, 06-built-in-tools
 **Depended on by:** 13-rpc-layer, 15-mode2-e2e
 **Implements:** `internal/sandbox` — sandbox host service coordinating ZFS + gVisor for session management, two-tier tool routing, per-turn snapshots, pause/resume, rollback. `cmd/sandbox-host` binary.
@@ -1482,3 +1482,17 @@ Should sessions have a configurable time-to-live after which they are automatica
 |---|----------|----------|---------|-------------|-------|
 | 1 | coder-1-sea | P1 | `TurnComplete` returned undefined `turnNum` symbol | Incorporated | Return value now uses committed `prospectiveTurn` consistently. |
 | 2 | coder-1-sea | P2 | Snapshot latency metric recorded bytes-used value | Incorporated | Added explicit timing around `CreateSnapshot`; `snapshotLatency` and `snapshotSpaceUsed` are recorded separately. |
+
+## Plan Review Signoff
+
+- **Status**: Approved
+- **Date**: 2026-03-12
+- **Branch**: main
+- **Commit**: ee32c55
+- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
+- **Total findings**: 13
+- **Finding breakdown**: P0: 0, P1: 3, P2: 6, P3: 4
+- **Incorporation rate**: 100%
+- **Not incorporated**: None
+- **Open questions**: All resolved
+- **Reviewers**: reviewer-sea, coder-1-sea
