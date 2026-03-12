@@ -2,7 +2,7 @@
   "id": "aiag-oaj.7",
   "title": "Draft 08-agent-tools-e2e",
   "description": "Draft plan doc for agent + local tools E2E tests.",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-oaj",
@@ -35,6 +35,7 @@
   "labels": [
     "project=ai-agent-go"
   ],
+  "assignee": "Danny Cosson",
   "created_at": "2026-03-12T14:19:54.778065-07:00",
-  "updated_at": "2026-03-12T14:19:54.778065-07:00"
+  "updated_at": "2026-03-12T14:36:02.915311-07:00"
 }
