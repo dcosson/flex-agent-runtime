@@ -2,7 +2,7 @@
 
 ## Overview
 
-h2-agent-runtime is a Go library and service that provides a flexible, layered agent runtime. It implements the three-layer model from the [agent-runtime shaping doc](../shaping/agent-runtime.md): **orchestrator integration surface**, **agent loop**, and **tools** — with well-defined interfaces between layers that allow each to run locally or remotely.
+h2-agent-runtime is a Go library and service that provides a flexible, layered agent runtime. It implements the three-layer model from the [agent-runtime shaping doc](../shaping/agent-runtime.md): **RuntimeController**, **agent loop**, and **tools** — with well-defined interfaces between layers that allow each to run locally or remotely.
 
 The runtime serves two consumers:
 1. **h2 orchestrator** — imports the runtime as a Go library for multi-agent coordination, terminal mux, and 3rd party agent driver management.
@@ -10,7 +10,8 @@ The runtime serves two consumers:
 
 ### Key Terminology
 
-- **Agent** — The top-level unified interface. Any LLM + tools runtime. Has conversation log, state, metrics. The orchestrator sees a uniform Agent interface regardless of how the agent loop is driven.
+- **Agent** — The top-level unified interface. Any LLM + tools runtime. Has conversation log, state, metrics. The RuntimeController sees a uniform Agent interface regardless of how the agent loop is driven.
+- **RuntimeController** — The control plane for the runtime. Manages session lifecycle (create, pause, resume, stop), event subscription, and state queries. `DefaultController` is the library's built-in implementation. Consumers like h2-orchestrator or edb can use it directly or implement their own `RuntimeController` with additional concerns (TUI, web API, auth, scheduling).
 - **AgentDriver** — What runs the agent loop. Three concrete drivers:
   - `NativeDriver` — Our own agent loop (LLM calls + tool dispatch)
   - `ClaudeCodeDriver` — Wraps Claude Code CLI via PTY
@@ -19,7 +20,7 @@ The runtime serves two consumers:
   All drivers produce the same `AgentEvent` stream and maintain the same `AgentState`.
 - **Session** — A single run of an agent (start to pause/completion). Has session ID, conversation log, state history. Can be resumed.
 
-  > **Session ID disambiguation**: Our runtime Session has its own ID, assigned by the runtime/orchestrator. This is distinct from any driver-native session ID (e.g., Claude Code's own session ID, Codex's session ID). We track the driver's native session ID as a field within our Session struct for correlation and debugging, but our Session ID is the authoritative identifier used throughout the system for snapshots, rollback, pause/resume, and orchestrator state management.
+  > **Session ID disambiguation**: Our runtime Session has its own ID, assigned by the RuntimeController. This is distinct from any driver-native session ID (e.g., Claude Code's own session ID, Codex's session ID). We track the driver's native session ID as a field within our Session struct for correlation and debugging, but our Session ID is the authoritative identifier used throughout the system for snapshots, rollback, pause/resume, and RuntimeController state management.
 
 - **ToolBackend** — Two modes:
   - `LocalBackend` — Executes tools on the machine the agent is running on. Covers both Mode 1 (laptop) and Mode 2 (agent inside sandbox — tools are local to that sandbox).
@@ -27,6 +28,32 @@ The runtime serves two consumers:
 - **Sandbox** — Infrastructure that tool backends point at, NOT a component under the agent. An agent doesn't "have a sandbox" — it has tools whose backends may dispatch to sandbox hosts.
 
 This document is the top-level architecture for the full runtime scope. Individual component plans provide implementation detail.
+
+### RuntimeController Interface
+
+The `RuntimeController` interface defines the control plane API for the runtime. It manages session lifecycle, event subscription, and state queries.
+
+```go
+// RuntimeController manages session lifecycle and provides
+// the control plane API for the runtime.
+type RuntimeController interface {
+    // Session lifecycle
+    CreateSession(ctx context.Context, opts SessionOptions) (*Session, error)
+    GetSession(ctx context.Context, id string) (*Session, error)
+    ListSessions(ctx context.Context) ([]*Session, error)
+    StopSession(ctx context.Context, id string) error
+    PauseSession(ctx context.Context, id string) error
+    ResumeSession(ctx context.Context, id string) error
+
+    // Event subscription
+    Subscribe(ctx context.Context, sessionID string) (<-chan AgentEvent, error)
+
+    // State queries
+    SessionState(ctx context.Context, id string) (SessionState, error)
+}
+```
+
+`DefaultController` is the library's built-in implementation of `RuntimeController`. Consumers like h2-orchestrator or edb can use `DefaultController` directly, or implement their own `RuntimeController` with additional concerns (TUI, web API, auth, scheduling).
 
 ### Design Principles
 
@@ -165,7 +192,7 @@ graph LR
     end
 
     subgraph "Mode 2: Remote Agent"
-        M2O[Orchestrator] -->|RPC| M2A[Agent + Tools<br/>LocalBackend<br/>on sandbox host]
+        M2O[RuntimeController] -->|RPC| M2A[Agent + Tools<br/>LocalBackend<br/>on sandbox host]
     end
 
     subgraph "Mode 3: Split Tools"
@@ -173,7 +200,7 @@ graph LR
     end
 
     subgraph "Mode 4: Fully Distributed"
-        M4O[Orchestrator] -->|RPC| M4A[Agent Loop] -->|SandboxBackend| M4B[Tools on<br/>sandbox host]
+        M4O[RuntimeController] -->|RPC| M4A[Agent Loop] -->|SandboxBackend| M4B[Tools on<br/>sandbox host]
     end
 
     style M1A fill:#e8f5e9
@@ -188,7 +215,7 @@ graph LR
 
 **Mode 1** — everything in-process, no RPC, no ZFS. Tools use `LocalBackend`. For development and single-agent use.
 
-**Mode 2** — orchestrator launches agent + tools on a sandbox host. The agent runs inside the sandbox, so its tools use `LocalBackend` (local to that sandbox). Primary path for 3rd party drivers (ClaudeCodeDriver, CodexDriver run inside the sandbox).
+**Mode 2** — RuntimeController launches agent + tools on a sandbox host. The agent runs inside the sandbox, so its tools use `LocalBackend` (local to that sandbox). Primary path for 3rd party drivers (ClaudeCodeDriver, CodexDriver run inside the sandbox).
 
 **Mode 3** — agent loop on the workflow server (cheap goroutines), tools dispatched via RPC using `SandboxBackend` to sandbox hosts. Most compute-efficient for production.
 
@@ -252,7 +279,7 @@ The Agent is the top-level unified interface — any LLM + tools runtime. It has
 - **`ClaudeCodeDriver`** — Wraps Claude Code CLI via PTY (uses terminal mux). Parses its output into AgentEvents.
 - **`CodexDriver`** — Wraps Codex CLI via PTY (uses terminal mux). Parses its output into AgentEvents.
 
-All drivers produce the same `AgentEvent` stream and maintain the same `AgentState`. The orchestrator sees a uniform Agent interface regardless of driver.
+All drivers produce the same `AgentEvent` stream and maintain the same `AgentState`. The RuntimeController sees a uniform Agent interface regardless of driver.
 
 **Detailed design:** [01-ai-core.md](./01-ai-core.md) Section on `agent` package (reviewed, approved)
 
@@ -295,7 +322,7 @@ type AgentDriver interface {
 // Has session ID, conversation log, state history. Can be resumed.
 //
 // ID is the runtime-assigned session identifier, authoritative for snapshots,
-// rollback, pause/resume, and orchestrator state. DriverSessionID stores the
+// rollback, pause/resume, and RuntimeController state. DriverSessionID stores the
 // driver's native session ID (e.g. Claude Code's session ID) for correlation.
 type Session struct {
     ID               string
@@ -488,7 +515,7 @@ stateDiagram-v2
 - **Session lifecycle**: Create, start, attach, detach, kill sessions
 - **I/O multiplexing**: Capture stdout/stderr for logging while optionally forwarding to an attached consumer
 - **Process management**: Signal handling, graceful shutdown, crash detection
-- **OTEL event normalization**: Parse driver-specific output into normalized events that the orchestrator can consume
+- **OTEL event normalization**: Parse driver-specific output into normalized events that the RuntimeController can consume
 - **Bidirectional session log conversion**: Each 3rd party driver must implement bidirectional session log conversion (see below)
 
 #### Key Interfaces
@@ -561,7 +588,7 @@ type SessionLogConverter interface {
 This bidirectional conversion enables:
 - **Resume after crash**: Rebuild the driver's native session log from our checkpoint, then restart the driver mid-conversation.
 - **Cross-driver migration**: Start a session in ClaudeCodeDriver, pause it, resume in CodexDriver or NativeDriver. Our canonical format is the bridge.
-- **Durable execution**: Our canonical format is the checkpoint (persisted by the orchestrator). The driver's native format is the runtime representation (ephemeral). On recovery, we reconstruct the runtime representation from the checkpoint.
+- **Durable execution**: Our canonical format is the checkpoint (persisted by the RuntimeController). The driver's native format is the runtime representation (ephemeral). On recovery, we reconstruct the runtime representation from the checkpoint.
 
 ### 6. Sandbox Host Service (`internal/sandbox`)
 
@@ -604,7 +631,7 @@ graph TB
 
 ```mermaid
 sequenceDiagram
-    participant Orch as Orchestrator / Agent Loop
+    participant Orch as RuntimeController / Agent Loop
     participant SH as Sandbox Host Service
     participant ZFS as ZFS Manager
     participant GV as gVisor Manager
@@ -724,11 +751,11 @@ type SandboxClient interface {
 
 #### Event Streaming Protocol
 
-Used to stream agent events from a remote agent loop back to the orchestrator:
+Used to stream agent events from a remote agent loop back to the RuntimeController:
 
 ```go
 // AgentEventStream provides a way to stream agent events over RPC.
-// Server-side: agent loop pushes events. Client-side: orchestrator consumes events.
+// Server-side: agent loop pushes events. Client-side: RuntimeController consumes events.
 type AgentEventStream interface {
     Send(event agent.AgentEvent) error
     Recv() (agent.AgentEvent, error)
@@ -1075,11 +1102,11 @@ Starlark (Go's `go.starlark.net`) provides a deterministic, sandboxed scripting 
 
 ### AD8: Terminal Mux in the Runtime
 
-The terminal multiplexer lives in the runtime (not the orchestrator) because it's infrastructure needed for Mode 2 — running 3rd party agent drivers (ClaudeCodeDriver, CodexDriver) requires PTY management. The TUI (user-facing terminal) lives in h2 orchestrator.
+The terminal multiplexer lives in the runtime (not the RuntimeController consumer) because it's infrastructure needed for Mode 2 — running 3rd party agent drivers (ClaudeCodeDriver, CodexDriver) requires PTY management. The TUI (user-facing terminal) lives in h2 orchestrator.
 
 ### AD9: Uniform Agent Interface via AgentDriver
 
-The Agent is the top-level interface. Whether driven by NativeDriver (our own LLM loop), ClaudeCodeDriver (wrapping Claude Code CLI), or CodexDriver (wrapping Codex CLI), the orchestrator sees the same Agent interface with the same AgentEvent stream, AgentState, and Session. This allows the orchestrator to manage all agents uniformly — tracking state, collecting conversation logs, computing metrics — without knowing which driver is running underneath.
+The Agent is the top-level interface. Whether driven by NativeDriver (our own LLM loop), ClaudeCodeDriver (wrapping Claude Code CLI), or CodexDriver (wrapping Codex CLI), the RuntimeController sees the same Agent interface with the same AgentEvent stream, AgentState, and Session. This allows the RuntimeController to manage all agents uniformly — tracking state, collecting conversation logs, computing metrics — without knowing which driver is running underneath.
 
 ### AD10: Bidirectional Session Log Conversion
 
@@ -1087,16 +1114,16 @@ Each 3rd party driver maintains bidirectional conversion between its native sess
 
 ---
 
-## Orchestrator State Tracking
+## RuntimeController State Tracking
 
-The h2 orchestrator consumes the runtime as a Go library and is responsible for managing multiple agents. The runtime produces uniform state information via `AgentEvent` streams regardless of which AgentDriver is running underneath. The orchestrator tracks:
+The h2 orchestrator consumes the runtime as a Go library and is responsible for managing multiple agents. The runtime produces uniform state information via `AgentEvent` streams regardless of which AgentDriver is running underneath. The RuntimeController tracks:
 
 - **Which agents are running**: Registry of all active Agent instances and their current AgentDriver type (NativeDriver, ClaudeCodeDriver, CodexDriver).
 - **Agent state changes**: `Active`, `Idle`, `Blocked`, `Exited` states across all agents. State transitions are reported via AgentEvents and are uniform regardless of driver.
-- **Full conversation logs from all agents**: Every agent's Session maintains its conversation log in our canonical format. The orchestrator collects these for dashboard display, session resume, and replay. For 3rd party drivers, the bidirectional session log converter ensures conversation logs are always in canonical format.
+- **Full conversation logs from all agents**: Every agent's Session maintains its conversation log in our canonical format. The RuntimeController collects these for dashboard display, session resume, and replay. For 3rd party drivers, the bidirectional session log converter ensures conversation logs are always in canonical format.
 - **Metrics**: Token usage, cost, tool call counts, session duration, etc. All metrics are computed from AgentEvents and are driver-agnostic.
 
-The key design point is that the runtime produces all of this uniformly. A NativeDriver emits AgentEvents directly from its LLM loop. A ClaudeCodeDriver emits AgentEvents by parsing Claude Code's output through the EventNormalizer. The orchestrator consumes the same `Agent.Subscribe()` interface either way.
+The key design point is that the runtime produces all of this uniformly. A NativeDriver emits AgentEvents directly from its LLM loop. A ClaudeCodeDriver emits AgentEvents by parsing Claude Code's output through the EventNormalizer. The RuntimeController consumes the same `Agent.Subscribe()` interface either way.
 
 ---
 
@@ -1114,7 +1141,7 @@ The key design point is that the runtime produces all of this uniformly. A Nativ
 - **Structured logging**: `log/slog` throughout. Every component logs with structured fields (session ID, tool name, provider, etc.)
 - **OTEL tracing**: Spans for LLM calls, tool executions, RPC calls, container lifecycle. Trace context propagated across RPC boundaries.
 - **Metrics**: Token usage, tool call latency, container boot time, snapshot latency, ZFS space usage. Exported via OTEL metrics.
-- **Event streaming**: `Agent.Subscribe()` provides real-time visibility into all agent activity. The orchestrator can forward these to any observability backend.
+- **Event streaming**: `Agent.Subscribe()` provides real-time visibility into all agent activity. The RuntimeController can forward these to any observability backend.
 
 ### Testing Strategy
 
