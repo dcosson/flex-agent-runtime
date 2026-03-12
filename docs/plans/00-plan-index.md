@@ -35,7 +35,7 @@ Core types, event streaming, registries, and model catalog. The shared building 
 
 ## Batch 2: Providers
 
-Each provider is independent. They all depend on Batch 1's core types. The first provider (Anthropic) validates the architecture; the others follow its patterns.
+Each provider is independent. They all depend on Batch 1's core types. The first provider (Anthropic) validates the architecture; the others follow its patterns. A **model catalog generator** tool is also needed alongside this batch to automate fetching model metadata from provider APIs and producing the embedded JSON catalog (see Open Questions #11).
 
 | Doc | Component | Description | Depends On | Status |
 |-----|-----------|-------------|------------|--------|
@@ -62,7 +62,7 @@ The sandbox host, terminal mux, and RPC layer. These are the components that ena
 |-----|-----------|-------------|------------|--------|
 | [09-sandbox-zfs](./09-sandbox-zfs.md) | `internal/sandbox/zfs` | ZFS management: dataset create/clone/destroy, snapshot create/rollback/list/destroy, mountpoint management. Requires Linux + ZFS for integration tests. | — | Not started |
 | [10-sandbox-gvisor](./10-sandbox-gvisor.md) | `internal/sandbox/gvisor` | gVisor container management: container create/run/destroy per tool call, cgroup resource limits (CPU, memory, timeout), ZFS bind-mount configuration. Requires Linux + gVisor for integration tests. | — | Not started |
-| [11-sandbox-host-service](./11-sandbox-host-service.md) | `internal/sandbox` | Sandbox host service: session management, two-tier tool routing, snapshot-after-every-call, pause/resume, rollback. Integrates ZFS + gVisor managers. `cmd/sandbox-host` binary. | 09-sandbox-zfs, 10-sandbox-gvisor, 06-built-in-tools | Not started |
+| [11-sandbox-host-service](./11-sandbox-host-service.md) | `internal/sandbox` | Sandbox host service: session management, two-tier tool routing, per-turn snapshots (per-tool-call opt-in), pause/resume, rollback. Integrates ZFS + gVisor managers. `cmd/sandbox-host` binary. | 09-sandbox-zfs, 10-sandbox-gvisor, 06-built-in-tools | Not started |
 | [09-h2-termmux-port](./09-h2-termmux-port.md) | `internal/termmux` | Port from h2: terminal multiplexer (PTY, session lifecycle, multi-client attach/detach, panic recovery, hung child detection), three-source event handler (OTEL server, hooks, session log JSONL), agent state machine (Active/Idle/Exited with sub-states), agent drivers for Claude Code and Codex, bidirectional session log conversion. See detailed plan for h2 source mapping. | 05-agent | Draft |
 | [13-rpc-layer](./13-rpc-layer.md) | `internal/rpc` | RPC protocol implementation: sandbox client/server (session CRUD, tool dispatch, snapshot management), event streaming protocol, protocol choice (ConnectRPC recommended). SandboxTools factory for remote tool dispatch. | 11-sandbox-host-service, 05-agent | Not started |
 
@@ -173,9 +173,9 @@ Within each batch, many plans can be worked on in parallel by different agents:
 
 **Batch 4:** All four components are independent:
 - ZFS manager (09) and gVisor manager (10) are completely independent
-- Terminal mux (12) is independent of sandbox components
+- Terminal mux (09-h2-termmux-port) is independent of sandbox components
 - RPC layer (13) depends on sandbox host service (11) which depends on 09+10
-- Recommended parallel tracks: {09, 10} → 11 → 13, and separately 12
+- Recommended parallel tracks: {09, 10} → 11 → 13, and separately 09-h2-termmux-port
 
 **Batch 5:** Mode 3 E2E (14) and Mode 2 E2E (15) are independent. Runtime test harness (16) depends on both.
 
@@ -212,7 +212,7 @@ The old architecture and plan index covered only the AI/agent layer (the "V1" sc
 1. **OQ1: RPC Protocol** — ConnectRPC recommended, final decision in plan 13.
 2. **OQ2: 3rd Party Agent Driver Snapshot Granularity** — decision in plan 12/15.
 3. **OQ3: Cloud Provider Portability** — future work, not in initial scope.
-4. **OQ4: Partial JSON Parsing** — decision needed before provider plans (02-04). Options: port JS `partial-json`, Go library, or defer.
+4. **~~OQ4: Partial JSON Parsing~~** — Resolved: use `karminski/streaming-json-go` for streaming partial JSON completion during SSE provider responses. Fork and fix gaps if needed.
 5. **OQ5: Model Catalog Maintenance** — embed JSON approach, confirmed in plan 01.
 6. **OQ6: OAuth** — out of scope. API-key-only for runtime.
 
@@ -222,3 +222,4 @@ The old architecture and plan index covered only the AI/agent layer (the "V1" sc
 8. **Edit tool algorithm**: Exact string match (like Claude Code's approach) vs diff-based. Exact string match is simpler and more predictable for LLMs. Decision in plan 06.
 9. **Starlark version/library**: `go.starlark.net` is the standard Go Starlark implementation. Confirm compatibility and sandboxing capabilities in plan 07.
 10. **Container pre-warming**: Whether to pre-warm gVisor containers (keep a warm pool) vs cold-start every time. Cold-start is simpler and sufficient at ~100ms. Decision in plan 10.
+11. **Model catalog generator**: Automated tool that fetches model metadata from provider APIs (Anthropic, OpenAI, Google) and generates the embedded JSON catalog. Needs its own small plan — could be a sub-task of Batch 2 provider work or a standalone utility.

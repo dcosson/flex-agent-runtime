@@ -18,6 +18,9 @@ The runtime serves two consumers:
 
   All drivers produce the same `AgentEvent` stream and maintain the same `AgentState`.
 - **Session** — A single run of an agent (start to pause/completion). Has session ID, conversation log, state history. Can be resumed.
+
+  > **Session ID disambiguation**: Our runtime Session has its own ID, assigned by the runtime/orchestrator. This is distinct from any driver-native session ID (e.g., Claude Code's own session ID, Codex's session ID). We track the driver's native session ID as a field within our Session struct for correlation and debugging, but our Session ID is the authoritative identifier used throughout the system for snapshots, rollback, pause/resume, and orchestrator state management.
+
 - **ToolBackend** — Two modes:
   - `LocalBackend` — Executes tools on the machine the agent is running on. Covers both Mode 1 (laptop) and Mode 2 (agent inside sandbox — tools are local to that sandbox).
   - `SandboxBackend` — Dispatches tool calls via RPC to sandbox host infrastructure. Covers Modes 3 & 4.
@@ -290,11 +293,16 @@ type AgentDriver interface {
 
 // Session — a single run of an agent (start to pause/completion).
 // Has session ID, conversation log, state history. Can be resumed.
+//
+// ID is the runtime-assigned session identifier, authoritative for snapshots,
+// rollback, pause/resume, and orchestrator state. DriverSessionID stores the
+// driver's native session ID (e.g. Claude Code's session ID) for correlation.
 type Session struct {
-    ID              string
-    ConversationLog []AgentMessage
-    StateHistory    []AgentState
-    Metrics         SessionMetrics
+    ID               string
+    DriverSessionID  string         // driver-native session ID, for correlation only
+    ConversationLog  []AgentMessage
+    StateHistory     []AgentState
+    Metrics          SessionMetrics
 }
 
 // Agent — the public API (uniform regardless of driver)
@@ -1146,24 +1154,28 @@ Each component has its own testing section in its plan doc. The overall strategy
 
 ## Open Questions
 
-### OQ1: Cloud Provider Portability
+### ~~OQ1: Cloud Provider Portability~~ (Resolved)
 
-ZFS and gVisor are portable. The AWS-specific piece is EBS. Provider adapters for GCP/Azure are future work.
+See Resolved Questions below.
 
-### OQ2: Partial JSON Parsing
+### ~~OQ2: Partial JSON Parsing~~ (Resolved)
 
-For streaming tool call argument display, we need to parse incomplete JSON during streaming. Options: port JS `partial-json`, find a Go library, or defer. Decision needed before provider implementation plans.
+See Resolved Questions below.
 
-### OQ3: Model Catalog Maintenance
+### ~~OQ3: Model Catalog Maintenance~~ (Resolved)
 
-How to keep Go model catalog in sync with TS `models.generated.ts`. Options: code generator, periodic copy, embed JSON. Current plan: embed JSON.
+See Resolved Questions below.
 
-### OQ4: OAuth
+### ~~OQ4: OAuth~~ (Resolved)
 
-OAuth is out of scope for the initial runtime. API-key-only. OAuth is primarily needed for the coding agent TUI experience (h2 orchestrator concern).
+See Resolved Questions below.
 
 ### Resolved Questions
 
+- **~~Cloud Provider Portability~~** — The core sandbox host only requires ZFS + gVisor (or any OCI-compatible runtime), neither of which is AWS-specific. The AWS-specific piece is EBS for durable storage. A "generic host" deployment mode is supported where ZFS lives on local disk (or any block device) — this works on Mac minis, VPSs, dedicated servers, and bare metal without any cloud provider dependency. Multi-host routing is manual initially (pin agents to hosts based on where their ZFS datasets live), with ZFS send/recv available for dataset migration between hosts.
 - **~~RPC Protocol~~** — Use our own RPC (ConnectRPC/gRPC with custom protobuf) for the sandbox backend. MCP is the wrong fit for built-in tool dispatch because it lacks per-call resource sizing, snapshot correlation, session affinity, and two-tier routing. MCP is used for 3rd party external tool integration (discovered at runtime, standard schemas). Both sit behind the same `AgentTool` interface — different transports underneath.
 - **~~3rd Party Driver Snapshot Granularity~~** — Snapshot when the driver transitions to Idle (between turns). This is the natural turn boundary — the driver finished its batch of tool calls, responded, and is waiting. Same as the native driver default.
 - **~~Snapshot Granularity (default)~~** — Per-turn snapshots as the default (snapshot when agent goes idle between turns). Per-tool-call snapshots available as opt-in for debugging/audit. Per-turn captures every meaningful state boundary with ~10x fewer snapshots. If something goes wrong mid-turn, roll back to end of previous turn and replay the user prompt.
+- **~~Partial JSON Parsing~~** — Use `karminski/streaming-json-go` for streaming partial JSON completion during SSE provider responses. Single library, no fallback — fork and fix gaps if needed. Decision: resolved before provider implementation.
+- **~~Model Catalog Maintenance~~** — Automated catalog generator that fetches model metadata from provider APIs (Anthropic /v1/models, OpenAI /v1/models, Google discovery API) and outputs embedded JSON. Separate plan needed for the generator tool. Decision: automated generation, not manual sync.
+- **~~OAuth~~** — Resolved as part of Config Directory Management. Driver auth (e.g. Claude Code subscription login, Codex auth) is handled through config directory semantics. Auth tokens are path-sensitive — moving the config directory invalidates them. The runtime must: (1) set up config directories at stable, known paths before driver launch, (2) support triggering driver-specific auth flows (which require manual user interaction like browser-based OAuth sign-in), (3) ensure config dir paths don't change across pause/resume/re-launch. This is a runtime concern, not just orchestrator. For the native agent (NativeDriver), API keys are passed directly. See Config Directory Management in the termmux port plan.

@@ -142,14 +142,14 @@ type AgentDriver interface {
     // Launch configuration
     BuildCommandArgs(prependArgs, extraArgs []string) []string
     BuildCommandEnvVars(runtimeDir string) map[string]string
-    PrepareForLaunch(dryRun bool) (LaunchConfig, error)
+    PrepareForLaunch(dryRun bool) (LaunchConfig, error) // Includes config directory setup (see Section 7)
 
     // Capabilities
     SupportsHooks() bool
     SupportsResume() bool
     NativeSessionLogPath(configDir, cwd, sessionID string) string
 
-    // Session log conversion (see Section 7: Bidirectional Session Log Conversion)
+    // Session log conversion (see Section 8: Bidirectional Session Log Conversion)
     ParseSessionLog(reader io.Reader) ([]ConversationEntry, error)
     WriteSessionLog(entries []ConversationEntry, writer io.Writer) error
 
@@ -440,9 +440,50 @@ Polls a JSONL file (e.g., Claude Code's `session.jsonl`) at 500ms intervals:
 
 ---
 
-## 7. Bidirectional Session Log Conversion
+## 7. Config Directory Management
 
-Each AgentDriver for a 3rd party agent must implement bidirectional conversion between the agent's native session log format and our canonical conversation format. This is expressed in the AgentDriver interface (Section 3.1) as:
+Config directory management is a critical runtime concern for 3rd party agent drivers (Claude Code, Codex). The runtime is responsible for creating, populating, and maintaining per-session config directories that drivers depend on for authentication, configuration, and session state.
+
+### 7.1 Stable Path Setup
+
+Each driver session needs a config directory at a stable, known filesystem path. The runtime creates and manages these directories as part of session lifecycle. The path must be deterministic and reproducible given the session identity, so that the same session always resolves to the same config directory location.
+
+### 7.2 Auth Token Storage
+
+Drivers like Claude Code perform browser-based OAuth sign-in that writes tokens to the config directory. These tokens are path-sensitive — moving the config directory invalidates auth. The runtime must ensure config dir paths don't change across pause/resume/re-launch of a session. This is especially important for durable execution: if a session is paused and resumed later (potentially on a different machine with the same filesystem), the config directory path must remain the same so that cached auth tokens continue to work without forcing re-authentication.
+
+### 7.3 Orchestrator-Injected Files
+
+The h2 orchestrator (or other callers) can inject additional files into the config directory before driver launch — e.g. `CLAUDE.md`, `agents.md`, skills, MCP server configs. The runtime provides hooks/APIs for this injection but doesn't prescribe what gets injected. This allows orchestrators to customize the driver's behavior by placing configuration files where the driver expects them, without the runtime needing to understand the semantics of each file.
+
+### 7.4 Driver-Specific Semantics
+
+Each driver has its own config directory conventions:
+
+- **Claude Code**: Uses `~/.claude/` by default, configurable via the `CLAUDE_CONFIG_DIR` environment variable. Contains settings, auth tokens, session state, and `CLAUDE.md`. The runtime sets `CLAUDE_CONFIG_DIR` to point at the managed config directory.
+- **Codex**: Has its own config directory conventions (TBD — needs investigation during implementation).
+
+New drivers added in the future must document their config directory expectations in their driver implementation.
+
+### 7.5 Env Var Configuration
+
+The runtime sets appropriate environment variables to point drivers at the managed config directory before launch. This is part of `BuildCommandEnvVars()` in the `AgentDriver` interface (Section 3.1). For example, for Claude Code the runtime sets `CLAUDE_CONFIG_DIR` to the managed directory path. Each driver implementation is responsible for knowing which environment variables control its config directory location and returning them from `BuildCommandEnvVars()`.
+
+### 7.6 Relationship to PrepareForLaunch
+
+Config directory setup — creating the directory, ensuring the path is stable, and verifying any pre-existing auth tokens — is part of `PrepareForLaunch()` in the `AgentDriver` interface. When `PrepareForLaunch()` is called, the driver implementation must:
+
+1. Ensure the config directory exists at the expected stable path.
+2. Validate or migrate any existing auth tokens if the directory already exists from a prior session.
+3. Return any additional environment variables needed in the `LaunchConfig.ExtraEnv` map.
+
+The orchestrator-injected files (Section 7.3) are written into the config directory between `PrepareForLaunch()` returning and the actual process start, giving the orchestrator a window to customize the driver's configuration.
+
+---
+
+## 8. Bidirectional Session Log Conversion
+
+Each AgentDriver for a 3rd party agent must implement bidirectional conversion between the agent's native session log format and our canonical conversation format. This is expressed in the `AgentDriver` interface (Section 3.1) as:
 
 ```go
 // ParseSessionLog reads the driver's native session log and returns
@@ -454,7 +495,7 @@ ParseSessionLog(reader io.Reader) ([]ConversationEntry, error)
 WriteSessionLog(entries []ConversationEntry, writer io.Writer) error
 ```
 
-### 7.1 Canonical Conversation Format
+### 8.1 Canonical Conversation Format
 
 ```go
 type ConversationEntry struct {
@@ -493,13 +534,13 @@ type TokenUsage struct {
 }
 ```
 
-### 7.2 Use Cases
+### 8.2 Use Cases
 
 - **Resume after crash**: Rebuild the driver's native session log from our canonical checkpoint, then restart the driver process with that log. The canonical format is the durable checkpoint; the native format is the runtime representation the driver process expects.
 - **Cross-driver migration**: Start a session in Claude Code, resume it in Codex or a NativeDriver. Parse the originating driver's session log into canonical format, then write it out as the target driver's native format.
 - **Durable execution**: Our canonical conversation entries are the source of truth for session state. They are persisted independently of the driver process lifecycle. If the driver crashes or is killed, we reconstruct its native log from the canonical entries and restart.
 
-### 7.3 Driver-Specific Implementations
+### 8.3 Driver-Specific Implementations
 
 **Claude Code (`claudecode/session_log.go`)**:
 - Parses Claude Code's `session.jsonl` format (one JSON object per line with role, content, tool use blocks, thinking blocks, and usage metadata)
@@ -511,7 +552,7 @@ type TokenUsage struct {
 
 ---
 
-## 8. ToolBackend
+## 9. ToolBackend
 
 The ToolBackend determines where tool execution occurs, independent of the driver:
 
@@ -522,7 +563,7 @@ The backend is configured per-session and is orthogonal to the driver choice. A 
 
 ---
 
-## 9. Package Structure
+## 10. Package Structure
 
 ```
 internal/termmux/
@@ -555,7 +596,7 @@ internal/termmux/
 
 ---
 
-## 10. Testing Strategy
+## 11. Testing Strategy
 
 ### Unit Tests
 - State machine transitions: every event type → correct state/substate
@@ -578,7 +619,7 @@ internal/termmux/
 
 ---
 
-## 11. Migration Notes
+## 12. Migration Notes
 
 ### From h2 repo
 - `internal/session/session.go` → `internal/termmux/session.go` (strip TUI rendering, message delivery)
