@@ -1,7 +1,7 @@
 {
   "id": "aiag-oaj.8",
   "title": "Draft 09-sandbox-zfs",
-  "description": "Draft plan doc + test harness for ZFS dataset/snapshot management.",
+  "description": "Plan draft and test harness complete. Commits: 2336295 (plan), ea6e555 (test harness). Ready for review.",
   "status": "open",
   "priority": 2,
   "type": "task",
@@ -23,6 +23,7 @@
   "labels": [
     "project=ai-agent-go"
   ],
+  "assignee": "coder-2-sea",
   "created_at": "2026-03-12T14:19:54.810282-07:00",
-  "updated_at": "2026-03-12T14:19:54.810282-07:00"
+  "updated_at": "2026-03-12T14:29:13.886205-07:00"
 }
