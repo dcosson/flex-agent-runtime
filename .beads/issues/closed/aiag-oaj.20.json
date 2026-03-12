@@ -2,7 +2,7 @@
   "id": "aiag-oaj.20",
   "title": "R1 Incorporate: Batch C",
   "description": "Incorporate R1 review findings into: 11-sandbox-host-service, 13-rpc-layer, 14-mode3-e2e, 15-mode2-e2e, 16-runtime-test-harness. Reviews by reviewer-sea.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-oaj",
@@ -19,5 +19,7 @@
   ],
   "assignee": "coder-2-sea",
   "created_at": "2026-03-12T15:15:02.548091-07:00",
-  "updated_at": "2026-03-12T15:15:43.629161-07:00"
+  "updated_at": "2026-03-12T15:28:07.059924-07:00",
+  "closed_at": "2026-03-12T15:28:07.059924-07:00",
+  "close_reason": "Closed"
 }
