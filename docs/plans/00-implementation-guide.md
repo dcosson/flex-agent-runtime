@@ -142,8 +142,9 @@ type ToolProgress struct {
 **Implementers:** `LocalBackend` (in-process), `SandboxBackend` (RPC client to sandbox host).
 
 **Critical contract:**
-- `onProgress` is used for Tier 2 tools (bash) to stream incremental output. Tier 1 tools are fast enough to skip progress callbacks.
+- `onProgress` is used for Tier 2 tools (bash) to stream incremental output. Tier 1 tools are fast enough to skip progress callbacks. **`SandboxBackend` must accept and propagate `onProgress`** — it uses server-streaming RPC (`ExecuteToolStream`) to receive progress chunks from the sandbox host and forwards them to the callback. Each streamed message is either a progress chunk or the final response.
 - `SandboxBackend` propagates `ToolCallID` in both request and response for end-to-end traceability. The server echoes it back.
+- **`SnapshotID` propagation:** The full chain is `SandboxHostService.ExecuteToolResponse.SnapshotID` → RPC stream → `SandboxBackend` → `ToolResponse.SnapshotID`. Per-tool snapshots are opt-in via `config.PerToolSnapshots` on the sandbox host. When enabled, snapshots are named `tool-{toolCallID}-{timestamp}`. `SnapshotID` is empty when per-tool snapshots are disabled (the default) — per-turn snapshots via `TurnComplete` are the primary mechanism.
 - Tier classification is centralized via a `ClassifyTool` function shared across all backends. Do not implement independent classifiers.
 
 ### 1.7 RuntimeController (architecture doc)
@@ -527,6 +528,18 @@ if result.Status == StatusExited && result.ExitCode == 137 {
 
 **DO NOT** check exit code when status is `StatusTimedOut` or `StatusKilled` — those have `ExitCode == -1` but are NOT OOM kills.
 
+### 4.6 Cross-Seam Interface Drift (seam review, 3 findings)
+
+The seam review caught three cases where connected components had interface definitions that had drifted out of sync:
+
+1. **ToolBackend signature drift (P1):** Plan 06 defined `ToolBackend.ExecuteTool` with an `onProgress` callback, but plan 13's `SandboxBackend` implementation omitted it. The `SandboxBackend` must accept `onProgress` and use server-streaming RPC (`ExecuteToolStream`) to forward progress from the sandbox host.
+
+2. **Snapshot metadata gap (P1):** Plan 06's `ToolResponse` includes `SnapshotID`, but plan 11's `ExecuteToolResponse` did not. The `SnapshotID` must flow through the entire chain: `SandboxHostService` → RPC response → `SandboxBackend` → `ToolResponse`. Per-tool snapshots are opt-in (`config.PerToolSnapshots`); when disabled, `SnapshotID` is empty.
+
+3. **RPC idempotency mismatch (P2):** Plan 13 claimed `CreateSession`, `PauseSession`, and `ResumeSession` were "naturally idempotent", but plan 11's state machine returns errors for invalid state transitions (e.g., pausing an already-paused session returns `failed_precondition`). These methods are **state-guarded**, not naturally idempotent. Callers must handle state errors rather than blindly retrying.
+
+**How to avoid:** When implementing one side of a seam, always read the connected plan's interface definition. Verify method signatures, parameter lists, response fields, and error semantics match exactly. The Seam Reference Table (§5) maps every connected pair.
+
 ---
 
 ## 5. Seam Reference Table
@@ -541,8 +554,8 @@ Connected component pairs with the interface at each boundary. Reference these w
 | `internal/agent` (events) | `internal/rpc` (event stream) | `AgentEvent → AgentEventSender/Receiver` | 05 §3.4 | 13 §4.2 |
 | `internal/agent` (Agent) | RuntimeController | `Agent.Start/Stop/Subscribe`, `Session` | 05 §7.1 | arch doc |
 | `internal/agent` (turn boundary) | `internal/sandbox` (snapshots) | `turn_completed` event → `TurnComplete()` | 05 §5.5 | 11 §4.5 |
-| `internal/tools` (ToolBackend) | `internal/sandbox` (service) | `ToolBackend.ExecuteTool → SandboxHostService.ExecuteTool` | 06 §3.1 | 11 §3.1 |
-| `internal/tools` (SandboxBackend) | `internal/rpc` (client) | `SandboxBackend → SandboxClient RPC` | 06 §5.2 | 13 §6 |
+| `internal/tools` (ToolBackend) | `internal/sandbox` (service) | `ToolBackend.ExecuteTool(onProgress) → SandboxHostService.ExecuteTool` + `SnapshotID` propagation | 06 §3.1 | 11 §3.1 |
+| `internal/tools` (SandboxBackend) | `internal/rpc` (client) | `SandboxBackend → ExecuteToolStream` (server-streaming RPC for progress + final response) | 06 §5.2 | 13 §6 |
 | `internal/rpc` (server) | `internal/sandbox` (service) | `RPC server → SandboxHostService` methods | 13 §5 | 11 §3.1 |
 | `internal/sandbox` (service) | `internal/sandbox/zfs` | `ZFSManager` interface | 11 §2.1 | 09-zfs §3.1 |
 | `internal/sandbox` (service) | `internal/sandbox/gvisor` | `GVisorManager` interface | 11 §2.1 | 10 §4.1 |
@@ -595,8 +608,8 @@ e2etests/                → all internal packages
 - **Max message size:** 16 MB (configured on both client and server).
 - **Truncation:** Tool output exceeding 16 MB is truncated by sandbox host. `ToolOutputTruncation` metadata included in response.
 - **Versioning:** `x-api-version` header on every call. Additive-only protobuf evolution. Minimum version enforcement on server.
-- **Idempotency:** `ExecuteTool` uses `tool_call_id` as idempotency key (5-minute dedup window). All other methods are naturally idempotent.
-- **Retry policy:** Retry on `unavailable` and transient transport errors. Never retry `invalid_argument`, `not_found`, `permission_denied`.
+- **Idempotency:** `ExecuteTool` uses `tool_call_id` as idempotency key (5-minute dedup window). `GetSession`, `ListSnapshots`, `DestroySession`, `RollbackSession` are naturally idempotent. **`CreateSession`, `PauseSession`, `ResumeSession` are state-guarded** — they return typed errors (`already_exists`, `failed_precondition`) if the session is not in the expected state. Callers must check these errors before retrying blindly.
+- **Retry policy:** Retry on `unavailable` and transient transport errors. Never retry `invalid_argument`, `not_found`, `permission_denied`. For state-guarded methods, only retry after transient RPC failure if the session may still be in the expected state.
 
 ---
 
