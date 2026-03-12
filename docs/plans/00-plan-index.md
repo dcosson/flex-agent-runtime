@@ -63,7 +63,7 @@ The sandbox host, terminal mux, and RPC layer. These are the components that ena
 | [09-sandbox-zfs](./09-sandbox-zfs.md) | `internal/sandbox/zfs` | ZFS management: dataset create/clone/destroy, snapshot create/rollback/list/destroy, mountpoint management. Requires Linux + ZFS for integration tests. | — | Not started |
 | [10-sandbox-gvisor](./10-sandbox-gvisor.md) | `internal/sandbox/gvisor` | gVisor container management: container create/run/destroy per tool call, cgroup resource limits (CPU, memory, timeout), ZFS bind-mount configuration. Requires Linux + gVisor for integration tests. | — | Not started |
 | [11-sandbox-host-service](./11-sandbox-host-service.md) | `internal/sandbox` | Sandbox host service: session management, two-tier tool routing, snapshot-after-every-call, pause/resume, rollback. Integrates ZFS + gVisor managers. `cmd/sandbox-host` binary. | 09-sandbox-zfs, 10-sandbox-gvisor, 06-built-in-tools | Not started |
-| [12-terminal-mux](./12-terminal-mux.md) | `internal/termmux` | Terminal multiplexer: PTY allocation, session lifecycle (create/start/attach/detach/kill), I/O multiplexing, process management. Event normalizers for Claude Code, Codex, Aider. | 05-agent | Not started |
+| [09-h2-termmux-port](./09-h2-termmux-port.md) | `internal/termmux` | Port from h2: terminal multiplexer (PTY, session lifecycle, multi-client attach/detach, panic recovery, hung child detection), three-source event handler (OTEL server, hooks, session log JSONL), agent state machine (Active/Idle/Exited with sub-states), per-harness event normalization (Claude Code, Codex, generic). See detailed plan for h2 source mapping. | 05-agent | Draft |
 | [13-rpc-layer](./13-rpc-layer.md) | `internal/rpc` | RPC protocol implementation: sandbox client/server (session CRUD, tool dispatch, snapshot management), event streaming protocol, protocol choice (ConnectRPC recommended). SandboxTools factory for remote tool dispatch. | 11-sandbox-host-service, 05-agent | Not started |
 
 ## Batch 5: Integration & Polish
@@ -73,7 +73,7 @@ Full system integration tests, Mode 2/3/4 E2E tests, and any cross-cutting polis
 | Doc | Component | Description | Depends On | Status |
 |-----|-----------|-------------|------------|--------|
 | [14-mode3-e2e](./14-mode3-e2e.md) | Mode 3 E2E | End-to-end test: agent loop dispatching tool calls to remote sandbox host via RPC. Full lifecycle: create session, execute tools, take snapshots, rollback, pause/resume, destroy. | 13-rpc-layer, 08-agent-tools-e2e | Not started |
-| [15-mode2-e2e](./15-mode2-e2e.md) | Mode 2 E2E | End-to-end test: orchestrator launches 3rd party harness in sandbox via terminal mux. Credential injection, event normalization, session lifecycle. | 12-terminal-mux, 11-sandbox-host-service | Not started |
+| [15-mode2-e2e](./15-mode2-e2e.md) | Mode 2 E2E | End-to-end test: orchestrator launches 3rd party harness in sandbox via terminal mux. Credential injection, event normalization, session lifecycle. | 09-h2-termmux-port, 11-sandbox-host-service | Not started |
 | [16-runtime-test-harness](./16-runtime-test-harness.md) | Runtime test harness | Cross-cutting test harness: load testing (many concurrent agents), soak testing (long-running sessions), snapshot space growth analysis, container boot time benchmarks, RPC latency profiling. | 14-mode3-e2e, 15-mode2-e2e | Not started |
 
 ---
@@ -104,7 +104,7 @@ graph TD
         I[09-sandbox-zfs<br/>ZFS dataset +<br/>snapshot management]
         J[10-sandbox-gvisor<br/>gVisor container<br/>lifecycle + cgroups]
         K[11-sandbox-host-service<br/>Two-tier execution,<br/>session management]
-        L[12-terminal-mux<br/>PTY, session lifecycle,<br/>event normalization]
+        L[09-h2-termmux-port<br/>PTY, session lifecycle,<br/>event normalization]
         M[13-rpc-layer<br/>Tool dispatch protocol,<br/>event streaming]
     end
 

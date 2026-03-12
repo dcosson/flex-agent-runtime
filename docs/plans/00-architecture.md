@@ -269,7 +269,7 @@ func (a *Agent) Abort()
 - **Event subscription**: Synchronous callbacks for all state changes (turn start/end, tool execution start/end, message streaming)
 - **State management**: Thread-safe access to agent state via `sync.Mutex` with copy-on-read semantics
 - **ConvertToLLM**: Pluggable function to map application-level messages to LLM messages (supports custom message types)
-- **TransformContext**: Pluggable pre-processing hook (e.g., for context compaction in V2)
+- **TransformContext**: Pluggable pre-processing hook for context compaction (summarizing older conversation turns to stay within context limits)
 - **Terminal tools**: Optional designated tools that terminate the loop with structured output (for workflow integration)
 
 #### Concurrency Model
