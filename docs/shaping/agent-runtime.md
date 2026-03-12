@@ -42,14 +42,14 @@ A flexible agent runtime where:
 | R0 | Three-layer architecture: orchestrator, agent loop, and tools, with well-defined RPC interfaces between them | Core goal |
 | R1 | Each layer can run locally or remotely, independently of the others | Core goal |
 | R2 | Tool calls execute in isolated environments with configurable resource sizing (lightweight for file ops, heavyweight for builds) | Core goal |
-| R3 | Every tool call produces a filesystem snapshot; full incremental history is maintained | Must-have |
+| R3 | Every agent turn produces a filesystem snapshot; full incremental history is maintained | Must-have |
 | R4 | Agents can pause (zero compute cost) and resume from last snapshot, across hours or days | Must-have |
 | R5 | Rollback: restore both agent session state and filesystem to any prior snapshot in sync | Must-have |
 | R6 | 3rd party agent harnesses can be run within the framework, at minimum by running the entire harness inside a sandbox | Must-have |
 | R7 | Tool scripting (code-mode / Starlark executor) is supported as a meta-tool that can call other tools | Must-have |
 | R8 | Multiple concurrent agents can be orchestrated with credential injection, tool policies, and log/artifact collection | Must-have |
 | R9 | Sandbox can be initialized from a pre-built snapshot (repo checked out, deps installed) | Must-have |
-| R10 | Snapshot overhead is low enough for per-tool-call frequency | Must-have |
+| R10 | Snapshot overhead is low enough for per-turn frequency (~10x fewer than per-tool-call) | Must-have |
 
 ---
 
@@ -205,7 +205,7 @@ Firecracker or other VM runtimes (Kata Containers) remain a future option if har
 | R0 | Three-layer architecture with RPC interfaces | ✅ |
 | R1 | Each layer can run locally or remotely | ✅ |
 | R2 | Isolated tool execution with configurable resources | ✅ |
-| R3 | Per-tool-call filesystem snapshots | ✅ |
+| R3 | Per-turn filesystem snapshots | ✅ |
 | R4 | Pause/resume with zero idle compute | ✅ |
 | R5 | Synchronized rollback of session + filesystem | ✅ |
 | R6 | 3rd party harness integration (Mode 2) | ✅ |
@@ -224,7 +224,7 @@ All requirements pass with ZFS-on-EBS + gVisor.
 
 - **ZFS-on-EBS + Fargate:** Fargate cannot attach EBS volumes. Fundamental gap.
 - **ZFS-on-EBS + EC2 (start/stop):** EC2 instance types are fixed at launch. Cannot dynamically resize per tool call.
-- **Kubernetes + PV Snapshots:** EBS snapshots take seconds-to-minutes. Incompatible with per-tool-call snapshot frequency.
+- **Kubernetes + PV Snapshots:** EBS snapshots take seconds-to-minutes. Incompatible with per-turn snapshot frequency.
 - **Firecracker microVMs + Overlay Snapshots:** Overlay snapshots degrade at depth (hundreds of layers hurt read performance). Firecracker also requires bare-metal EC2 or nested virtualization, adding cost and operational complexity.
 - **Firecracker microVMs + ZFS:** Firecracker can't bind-mount host filesystems (needs virtio-fs/NFS workarounds). Requires bare-metal or nested-virt EC2 instances with 10-30% performance overhead. gVisor solves both problems.
 
@@ -254,8 +254,8 @@ The orchestrator layer wraps around the harness:
 - Manages pause/resume of the sandbox
 
 **Limitations of Mode 2 with 3rd party harnesses:**
-- The VM/container runs for the full agent session (no per-tool-call spin-down), since the harness process must stay alive
-- Snapshotting happens at the filesystem level but isn't correlated to individual tool calls (the harness doesn't emit events we can hook into)
+- The VM/container runs for the full agent session (no per-turn spin-down), since the harness process must stay alive
+- Snapshotting happens at the filesystem level when the agent goes idle between turns (detected via event normalization)
 - Resource sizing is fixed for the session, not per tool call
 - Rollback is coarser — we can snapshot periodically or on git commits, but not per tool call
 
@@ -266,7 +266,7 @@ The orchestrator layer wraps around the harness:
 
 ### Our Own Harness
 
-Our `ai-agent-go` agent framework is the default and most capable option. It supports all placement modes (1-4), full per-tool-call snapshots, two-tier execution, tool scripting, and the complete orchestrator integration. This is the path for production-scale deployments.
+Our `ai-agent-go` agent framework is the default and most capable option. It supports all placement modes (1-4), full per-turn snapshots, two-tier execution, tool scripting, and the complete orchestrator integration. This is the path for production-scale deployments.
 
 ---
 
@@ -443,7 +443,7 @@ What protocol for the inter-layer RPCs? gRPC (typed, streaming), HTTP/JSON (simp
 
 ### OQ2: 3rd Party Harness Snapshot Granularity
 
-In Mode 2 with 3rd party harnesses, how do we trigger snapshots without per-tool-call hooks? Options: periodic timer, inotify/fswatch on filesystem changes, git commit hooks, or accept coarser granularity.
+**Resolved:** In Mode 2 with 3rd party harnesses, snapshots are triggered when the agent transitions to idle between turns. This is detected via event normalization (three-source event handler: OTEL, hooks, session log JSONL). For our native agent, per-turn snapshots are the default granularity — ~10x fewer than per-tool-call, capturing meaningful boundaries between turns.
 
 ### OQ3: Cloud Provider Portability
 

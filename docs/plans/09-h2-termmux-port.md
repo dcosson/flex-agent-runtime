@@ -15,7 +15,7 @@ This plan covers porting the terminal multiplexer, event handler, and agent stat
 - Terminal multiplexer (PTY management, session lifecycle, multi-client attach/detach)
 - Three-source event handler (OTEL, hooks, session log JSONL)
 - Agent state machine (Active/Idle/Exited with sub-states)
-- Per-harness event normalization (Claude Code, Codex, with extension points for others)
+- Per-driver event normalization (Claude Code, Codex, with extension points for others)
 - Event persistence (JSONL event store)
 - Session metadata management
 
@@ -41,14 +41,12 @@ graph TB
         S --> VT
     end
 
-    subgraph "internal/termmux/harness"
-        HI[Harness interface]
-        HC[claude/harness.go<br/>Claude Code]
-        HX[codex/harness.go<br/>Codex]
-        HG[generic/harness.go<br/>Generic CLI]
+    subgraph "internal/termmux/driver"
+        HI[AgentDriver interface]
+        HC[claudecode/driver.go<br/>Claude Code]
+        HX[codex/driver.go<br/>Codex]
         HI --> HC
         HI --> HX
-        HI --> HG
     end
 
     subgraph "internal/termmux/eventsrc"
@@ -68,9 +66,9 @@ graph TB
     HC --> HOOK
     HC --> TAIL
     HX --> OTEL
+
     HC -->|normalized events| MON
     HX -->|normalized events| MON
-    HG -->|normalized events| MON
 ```
 
 ### 2.2 Data Flow: Three-Source Event Normalization
@@ -132,11 +130,11 @@ stateDiagram-v2
 
 ## 3. Key Types
 
-### 3.1 Harness Interface
+### 3.1 AgentDriver Interface
 
 ```go
-// Harness abstracts a 3rd party agent CLI (Claude Code, Codex, etc.)
-type Harness interface {
+// AgentDriver abstracts a 3rd party agent CLI (Claude Code, Codex, etc.)
+type AgentDriver interface {
     // Identity
     Name() string
     Command() string
@@ -150,6 +148,10 @@ type Harness interface {
     SupportsHooks() bool
     SupportsResume() bool
     NativeSessionLogPath(configDir, cwd, sessionID string) string
+
+    // Session log conversion (see Section 7: Bidirectional Session Log Conversion)
+    ParseSessionLog(reader io.Reader) ([]ConversationEntry, error)
+    WriteSessionLog(entries []ConversationEntry, writer io.Writer) error
 
     // Lifecycle
     Start(ctx context.Context, events chan<- AgentEvent) error
@@ -171,7 +173,7 @@ type Session struct {
     ID       string
     Config   SessionConfig
     VT       *VirtualTerminal
-    harness  Harness
+    driver   AgentDriver
     monitor  *AgentMonitor
 
     // Multi-client support
@@ -184,7 +186,7 @@ type Session struct {
 }
 
 type SessionConfig struct {
-    HarnessType    string            // "claude_code", "codex", "generic"
+    DriverType     string            // "claude_code", "codex"
     Command        string
     Args           []string
     CWD            string
@@ -400,7 +402,7 @@ Per-session HTTP server on `127.0.0.1:0` (random port). Receives:
 - `POST /v1/metrics` — Metric data points
 - `POST /v1/traces` — Trace spans
 
-The port is injected into the child process via environment variable. Each harness's event handler registers callbacks for the raw payloads and parses them into normalized events.
+The port is injected into the child process via environment variable. Each driver's event handler registers callbacks for the raw payloads and parses them into normalized events.
 
 ### 5.2 Hooks
 
@@ -410,7 +412,7 @@ Supported hook events (Claude Code only currently):
 - `PreCompact`, `SessionStart`, `SessionEnd`
 - `Stop`, `Interrupt`
 
-Hooks are called by the child process via a hook command mechanism. The harness receives the event name and JSON payload, parses it, and emits normalized events.
+Hooks are called by the child process via a hook command mechanism. The driver receives the event name and JSON payload, parses it, and emits normalized events.
 
 ### 5.3 Session Log Tailer
 
@@ -422,7 +424,7 @@ Polls a JSONL file (e.g., Claude Code's `session.jsonl`) at 500ms intervals:
 
 ---
 
-## 6. Per-Harness Event Handler Responsibilities
+## 6. Per-Driver Event Handler Responsibilities
 
 ### Claude Code
 - **OTEL**: Parses `api_request` (turn completed with token counts), `api_error`, `tool_result` (tool completed with timing)
@@ -436,14 +438,91 @@ Polls a JSONL file (e.g., Claude Code's `session.jsonl`) at 500ms intervals:
 - **Session log**: Not used
 - **Debouncing**: 200ms idle delay, 500ms interrupt suppression, token baseline tracking for delta calculation
 
-### Generic (future harnesses)
-- **OTEL**: Not used
-- **Hooks**: Not used
-- **Activity**: Derived from PTY output (any output = active, silence = idle)
+---
+
+## 7. Bidirectional Session Log Conversion
+
+Each AgentDriver for a 3rd party agent must implement bidirectional conversion between the agent's native session log format and our canonical conversation format. This is expressed in the AgentDriver interface (Section 3.1) as:
+
+```go
+// ParseSessionLog reads the driver's native session log and returns
+// our canonical conversation entries.
+ParseSessionLog(reader io.Reader) ([]ConversationEntry, error)
+
+// WriteSessionLog writes canonical conversation entries back into
+// the driver's native session log format.
+WriteSessionLog(entries []ConversationEntry, writer io.Writer) error
+```
+
+### 7.1 Canonical Conversation Format
+
+```go
+type ConversationEntry struct {
+    Timestamp time.Time          `json:"timestamp"`
+    Role      ConversationRole   `json:"role"`       // "user", "assistant", "tool_use", "tool_result"
+    Content   string             `json:"content"`     // Full text content
+    ToolCall  *ToolCallRecord    `json:"tool_call,omitempty"`
+    Thinking  *ThinkingBlock     `json:"thinking,omitempty"`
+    Usage     *TokenUsage        `json:"usage,omitempty"`
+}
+
+type ConversationRole string
+
+const (
+    RoleUser       ConversationRole = "user"
+    RoleAssistant  ConversationRole = "assistant"
+    RoleToolUse    ConversationRole = "tool_use"
+    RoleToolResult ConversationRole = "tool_result"
+)
+
+type ToolCallRecord struct {
+    Name   string          `json:"name"`
+    Args   json.RawMessage `json:"args"`
+    Result string          `json:"result,omitempty"`
+    CallID string          `json:"call_id"`
+}
+
+type ThinkingBlock struct {
+    Content string `json:"content"`
+}
+
+type TokenUsage struct {
+    InputTokens  int64 `json:"input_tokens"`
+    OutputTokens int64 `json:"output_tokens"`
+    CachedTokens int64 `json:"cached_tokens,omitempty"`
+}
+```
+
+### 7.2 Use Cases
+
+- **Resume after crash**: Rebuild the driver's native session log from our canonical checkpoint, then restart the driver process with that log. The canonical format is the durable checkpoint; the native format is the runtime representation the driver process expects.
+- **Cross-driver migration**: Start a session in Claude Code, resume it in Codex or a NativeDriver. Parse the originating driver's session log into canonical format, then write it out as the target driver's native format.
+- **Durable execution**: Our canonical conversation entries are the source of truth for session state. They are persisted independently of the driver process lifecycle. If the driver crashes or is killed, we reconstruct its native log from the canonical entries and restart.
+
+### 7.3 Driver-Specific Implementations
+
+**Claude Code (`claudecode/session_log.go`)**:
+- Parses Claude Code's `session.jsonl` format (one JSON object per line with role, content, tool use blocks, thinking blocks, and usage metadata)
+- Writes back to the same `session.jsonl` format for resume
+
+**Codex (`codex/session_log.go`)**:
+- Parses whatever Codex's native log format is (needs investigation — may be a different JSONL schema or a structured log directory)
+- Writes back to the same format for resume
 
 ---
 
-## 7. Package Structure
+## 8. ToolBackend
+
+The ToolBackend determines where tool execution occurs, independent of the driver:
+
+- **`LocalBackend`** — Executes tools on the machine the agent runs on. In Mode 1 (laptop), this is the user's machine. In Mode 2 (sandbox), this is inside the sandbox itself.
+- **`SandboxBackend`** — Dispatches tool execution via RPC to a sandbox host. Used in Modes 3 and 4 where the agent process runs outside the sandbox but tools must execute within it.
+
+The backend is configured per-session and is orthogonal to the driver choice. A Claude Code driver can run with either a LocalBackend or a SandboxBackend depending on the deployment mode.
+
+---
+
+## 9. Package Structure
 
 ```
 internal/termmux/
@@ -462,21 +541,21 @@ internal/termmux/
 │   │   └── tailer.go        # JSONL file tailer with polling
 │   └── eventstore/
 │       └── store.go         # JSONL event persistence (append, read, tail)
-└── harness/
-    ├── harness.go           # Harness interface
-    ├── claude/
-    │   ├── harness.go       # Claude Code harness implementation
-    │   └── event_handler.go # Three-source normalization for Claude
-    ├── codex/
-    │   ├── harness.go       # Codex harness implementation
-    │   └── event_handler.go # OTEL normalization + debouncing for Codex
-    └── generic/
-        └── harness.go       # Generic CLI harness (PTY output only)
+└── driver/
+    ├── driver.go            # AgentDriver interface, canonical conversation types
+    ├── claudecode/
+    │   ├── driver.go        # Claude Code driver implementation
+    │   ├── event_handler.go # Three-source normalization for Claude
+    │   └── session_log.go   # ParseSessionLog / WriteSessionLog for session.jsonl
+    └── codex/
+        ├── driver.go        # Codex driver implementation
+        ├── event_handler.go # OTEL normalization + debouncing for Codex
+        └── session_log.go   # ParseSessionLog / WriteSessionLog for Codex format
 ```
 
 ---
 
-## 8. Testing Strategy
+## 10. Testing Strategy
 
 ### Unit Tests
 - State machine transitions: every event type → correct state/substate
@@ -486,7 +565,8 @@ internal/termmux/
 - VirtualTerminal: PTY lifecycle, write timeout, resize
 
 ### Integration Tests
-- Full harness lifecycle: start Claude Code harness → inject OTEL events → verify normalized events
+- Session log round-trip: parse a real Claude Code session.jsonl → canonical entries → write back → verify output matches original
+- Full driver lifecycle: start Claude Code driver → inject OTEL events → verify normalized events
 - Multi-client: attach 2 clients → verify both receive output → detach one → verify other continues
 - Panic recovery: inject panic in critical section → verify session continues
 - Hung child detection: simulate blocked stdin → verify timeout + kill
@@ -498,7 +578,7 @@ internal/termmux/
 
 ---
 
-## 9. Migration Notes
+## 11. Migration Notes
 
 ### From h2 repo
 - `internal/session/session.go` → `internal/termmux/session.go` (strip TUI rendering, message delivery)
@@ -509,8 +589,8 @@ internal/termmux/
 - `internal/session/agent/shared/otelserver/` → `internal/termmux/eventsrc/otelserver/`
 - `internal/session/agent/shared/sessionlogcollector/` → `internal/termmux/eventsrc/sessionlog/`
 - `internal/session/agent/shared/eventstore/` → `internal/termmux/eventsrc/eventstore/`
-- `internal/session/agent/harness/claude/` → `internal/termmux/harness/claude/`
-- `internal/session/agent/harness/codex/` → `internal/termmux/harness/codex/`
+- `internal/session/agent/harness/claude/` → `internal/termmux/driver/claudecode/`
+- `internal/session/agent/harness/codex/` → `internal/termmux/driver/codex/`
 
 ### What stays in h2
 - `internal/session/daemon.go` — h2-specific daemon lifecycle

@@ -20,7 +20,7 @@ Sub-plans are sized so each represents a substantial, self-contained unit of wor
 | **G4: Agent loop + local tools E2E** | `agent.Agent` runs a multi-turn conversation with local built-in tools using any V1 provider. Steering and follow-up work. Tool scripting meta-tool works. | Batch 3 → Batch 4 |
 | **G5: Sandbox host operational** | Sandbox host service creates sessions (ZFS datasets), executes Tier 1 and Tier 2 tool calls, takes snapshots, and supports rollback. Tested on a real EC2 instance with ZFS + gVisor. | Batch 4 → Batch 5 |
 | **G6: Remote tool dispatch works** | Agent loop dispatches tool calls to a remote sandbox host via RPC. Full Mode 3 E2E test passes. | Batch 4 → Batch 5 |
-| **G7: Terminal mux operational** | Terminal mux can launch, attach, detach, and kill 3rd party harness sessions. Event normalization produces structured events for at least one harness. | Batch 4 → Batch 5 |
+| **G7: Terminal mux operational** | Terminal mux can launch, attach, detach, and kill 3rd party agent driver sessions. Event normalization produces structured events for at least one agent driver. Bidirectional session log conversion works. | Batch 4 → Batch 5 |
 
 ---
 
@@ -50,7 +50,7 @@ The agent framework, built-in tools, and tool scripting. These can be partially 
 | Doc | Component | Description | Depends On | Status |
 |-----|-----------|-------------|------------|--------|
 | [05-agent](./05-agent.md) | `internal/agent` | Agent struct, agent loop (LLM → tools → LLM cycle), AgentMessage/AgentTool/AgentEvent types, subscription model, state management, steering, follow-up, terminal tools. Full unit tests with mock provider, integration test with real provider. | 01-ai-core, 02-provider-anthropic | Not started |
-| [06-built-in-tools](./06-built-in-tools.md) | `internal/tools` | Built-in tool implementations: read, write, edit, bash, grep, glob, git ops. ToolBackend interface for local vs remote dispatch. LocalTools factory. Tool-level unit tests. | 01-ai-core, 05-agent | Not started |
+| [06-built-in-tools](./06-built-in-tools.md) | `internal/tools` | Built-in tool implementations: read, write, edit, bash, grep, glob, git ops. ToolBackend interface (LocalBackend vs SandboxBackend) for dispatch. LocalTools factory. Tool-level unit tests. | 01-ai-core, 05-agent | Not started |
 | [07-tool-scripting](./07-tool-scripting.md) | `internal/tools/scripting` | Starlark meta-tool: sandboxed interpreter, progressive tool discovery (discover/describe/invoke builtins), multi-step tool workflows, execution limits (step count, wall clock). | 01-ai-core, 05-agent, 06-built-in-tools | Not started |
 | [08-agent-tools-e2e](./08-agent-tools-e2e.md) | Agent + tools E2E | End-to-end tests: agent loop with local built-in tools, multi-turn conversations with file operations and bash, tool scripting workflows. Tests go in `e2etests/`. | 05-agent, 06-built-in-tools, 07-tool-scripting | Not started |
 
@@ -63,7 +63,7 @@ The sandbox host, terminal mux, and RPC layer. These are the components that ena
 | [09-sandbox-zfs](./09-sandbox-zfs.md) | `internal/sandbox/zfs` | ZFS management: dataset create/clone/destroy, snapshot create/rollback/list/destroy, mountpoint management. Requires Linux + ZFS for integration tests. | — | Not started |
 | [10-sandbox-gvisor](./10-sandbox-gvisor.md) | `internal/sandbox/gvisor` | gVisor container management: container create/run/destroy per tool call, cgroup resource limits (CPU, memory, timeout), ZFS bind-mount configuration. Requires Linux + gVisor for integration tests. | — | Not started |
 | [11-sandbox-host-service](./11-sandbox-host-service.md) | `internal/sandbox` | Sandbox host service: session management, two-tier tool routing, snapshot-after-every-call, pause/resume, rollback. Integrates ZFS + gVisor managers. `cmd/sandbox-host` binary. | 09-sandbox-zfs, 10-sandbox-gvisor, 06-built-in-tools | Not started |
-| [09-h2-termmux-port](./09-h2-termmux-port.md) | `internal/termmux` | Port from h2: terminal multiplexer (PTY, session lifecycle, multi-client attach/detach, panic recovery, hung child detection), three-source event handler (OTEL server, hooks, session log JSONL), agent state machine (Active/Idle/Exited with sub-states), per-harness event normalization (Claude Code, Codex, generic). See detailed plan for h2 source mapping. | 05-agent | Draft |
+| [09-h2-termmux-port](./09-h2-termmux-port.md) | `internal/termmux` | Port from h2: terminal multiplexer (PTY, session lifecycle, multi-client attach/detach, panic recovery, hung child detection), three-source event handler (OTEL server, hooks, session log JSONL), agent state machine (Active/Idle/Exited with sub-states), agent drivers for Claude Code and Codex, bidirectional session log conversion. See detailed plan for h2 source mapping. | 05-agent | Draft |
 | [13-rpc-layer](./13-rpc-layer.md) | `internal/rpc` | RPC protocol implementation: sandbox client/server (session CRUD, tool dispatch, snapshot management), event streaming protocol, protocol choice (ConnectRPC recommended). SandboxTools factory for remote tool dispatch. | 11-sandbox-host-service, 05-agent | Not started |
 
 ## Batch 5: Integration & Polish
@@ -73,7 +73,7 @@ Full system integration tests, Mode 2/3/4 E2E tests, and any cross-cutting polis
 | Doc | Component | Description | Depends On | Status |
 |-----|-----------|-------------|------------|--------|
 | [14-mode3-e2e](./14-mode3-e2e.md) | Mode 3 E2E | End-to-end test: agent loop dispatching tool calls to remote sandbox host via RPC. Full lifecycle: create session, execute tools, take snapshots, rollback, pause/resume, destroy. | 13-rpc-layer, 08-agent-tools-e2e | Not started |
-| [15-mode2-e2e](./15-mode2-e2e.md) | Mode 2 E2E | End-to-end test: orchestrator launches 3rd party harness in sandbox via terminal mux. Credential injection, event normalization, session lifecycle. | 09-h2-termmux-port, 11-sandbox-host-service | Not started |
+| [15-mode2-e2e](./15-mode2-e2e.md) | Mode 2 E2E | End-to-end test: orchestrator launches 3rd party agent driver in sandbox via terminal mux. Credential injection, event normalization, session lifecycle. | 09-h2-termmux-port, 11-sandbox-host-service | Not started |
 | [16-runtime-test-harness](./16-runtime-test-harness.md) | Runtime test harness | Cross-cutting test harness: load testing (many concurrent agents), soak testing (long-running sessions), snapshot space growth analysis, container boot time benchmarks, RPC latency profiling. | 14-mode3-e2e, 15-mode2-e2e | Not started |
 
 ---
@@ -110,7 +110,7 @@ graph TD
 
     subgraph "Batch 5: Integration"
         N[14-mode3-e2e<br/>Remote tool dispatch<br/>E2E]
-        O[15-mode2-e2e<br/>3rd party harness<br/>E2E]
+        O[15-mode2-e2e<br/>3rd party agent driver<br/>E2E]
         P[16-runtime-test-harness<br/>Load, soak, perf<br/>tests]
     end
 
@@ -210,7 +210,7 @@ The old architecture and plan index covered only the AI/agent layer (the "V1" sc
 ### From Architecture Doc
 
 1. **OQ1: RPC Protocol** — ConnectRPC recommended, final decision in plan 13.
-2. **OQ2: 3rd Party Harness Snapshot Granularity** — decision in plan 12/15.
+2. **OQ2: 3rd Party Agent Driver Snapshot Granularity** — decision in plan 12/15.
 3. **OQ3: Cloud Provider Portability** — future work, not in initial scope.
 4. **OQ4: Partial JSON Parsing** — decision needed before provider plans (02-04). Options: port JS `partial-json`, Go library, or defer.
 5. **OQ5: Model Catalog Maintenance** — embed JSON approach, confirmed in plan 01.
