@@ -1,7 +1,7 @@
 {
   "id": "aiag-oaj.10",
   "title": "Draft 11-sandbox-host-service",
-  "description": "Draft plan doc + test harness for sandbox host service (session mgmt, two-tier routing, per-turn snapshots).",
+  "description": "Plan draft and test harness complete. Commits: d945861 (plan), 551febd (test harness). Ready for review.",
   "status": "open",
   "priority": 2,
   "type": "task",
@@ -39,6 +39,7 @@
   "labels": [
     "project=ai-agent-go"
   ],
+  "assignee": "coder-2-sea",
   "created_at": "2026-03-12T14:19:54.874929-07:00",
-  "updated_at": "2026-03-12T14:19:54.874929-07:00"
+  "updated_at": "2026-03-12T14:43:59.325748-07:00"
 }

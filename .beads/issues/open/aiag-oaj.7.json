@@ -36,6 +36,14 @@
     "project=ai-agent-go"
   ],
   "assignee": "Danny Cosson",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Drafted docs/plans/08-agent-tools-e2e.md and docs/plans/08-agent-tools-e2e-test-harness.md. Ready for plan-review.",
+      "created_at": "2026-03-12T14:37:26.418934-07:00"
+    }
+  ],
   "created_at": "2026-03-12T14:19:54.778065-07:00",
-  "updated_at": "2026-03-12T14:36:02.915311-07:00"
+  "updated_at": "2026-03-12T14:37:26.4197-07:00"
 }
