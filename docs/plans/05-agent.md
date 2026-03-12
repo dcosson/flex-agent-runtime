@@ -1,6 +1,6 @@
 # 05: Agent Loop and Driver Abstraction
 
-**Status:** Draft
+**Status:** Approved
 **Depends on:** 01-ai-core, 02-provider-anthropic
 **Depended on by:** 06-built-in-tools, 07-code-interpreter, 08-agent-tools-e2e, 13-rpc-layer
 **Implements:** `internal/agent` Agent struct, NativeDriver loop, driver abstraction, event model, session/state management, steering/follow-up, and terminal-tool termination.
@@ -420,3 +420,17 @@ The `RuntimeController` (defined in architecture doc) is the control plane that 
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
 | 1 | coder-2-sea | P1 | Snapshot trigger cardinality in companion harness conflicted with follow-up semantics | Incorporated | Companion harness P3 updated to per-turn `turn_completed` and per-sequence idle semantics. |
+
+## Plan Review Signoff
+
+- **Status**: Approved
+- **Date**: 2026-03-12
+- **Branch**: main
+- **Commit**: ee32c55
+- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
+- **Total findings**: 3
+- **Finding breakdown**: P0: 0, P1: 3, P2: 0, P3: 0
+- **Incorporation rate**: 100%
+- **Not incorporated**: None
+- **Open questions**: All resolved
+- **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea

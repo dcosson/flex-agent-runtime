@@ -1,6 +1,6 @@
 # 02: Anthropic Provider
 
-**Status:** Draft
+**Status:** Approved
 **Depends on:** 01-ai-core
 **Depended on by:** 03-provider-openai, 04-provider-google, 05-agent
 **Implements:** Anthropic Messages API provider for `internal/ai` with streaming SSE parsing, thinking budget mapping, tool calling, cache control, and usage/cost accounting.
@@ -410,3 +410,17 @@ No reverse import is allowed from core packages into provider internals.
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
 | 1 | coder-1-sea | P1 | Final tool-call arguments can be silently corrupted on parse failure | Incorporated | §5.3 step 7 rewritten: strict parse required at finalization, emit ProviderError on failure instead of falling back to lastValid |
+
+## Plan Review Signoff
+
+- **Status**: Approved
+- **Date**: 2026-03-12
+- **Branch**: main
+- **Commit**: ee32c55
+- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
+- **Total findings**: 1
+- **Finding breakdown**: P0: 0, P1: 1, P2: 0, P3: 0
+- **Incorporation rate**: 100%
+- **Not incorporated**: None
+- **Open questions**: All resolved
+- **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea

@@ -1,6 +1,6 @@
 # 03: OpenAI Provider
 
-**Status:** Draft
+**Status:** Approved
 **Depends on:** 01-ai-core, 02-provider-anthropic
 **Depended on by:** 05-agent
 **Implements:** OpenAI Completions API provider for `internal/ai` with streaming SSE parsing, reasoning effort mapping, tool calling, compatibility settings for OpenAI-compatible endpoints (Groq, Mistral, etc.), and usage/cost accounting.
@@ -924,3 +924,17 @@ Live OpenAI API smoke tests behind env var (`OPENAI_API_KEY`):
 |---|----------|----------|---------|-------------|-------|
 | 1 | coder-1-sea | P1 | Tool-call finalization order is nondeterministic | Incorporated | §5.6 finalizeToolCalls now sorts indices before emitting end events |
 | 2 | coder-1-sea | P1 | Final tool-call arguments can degrade to stale/empty payloads | Incorporated | §5.6 now requires strict parse; emits error instead of falling back to lastValid or empty {} |
+
+## Plan Review Signoff
+
+- **Status**: Approved
+- **Date**: 2026-03-12
+- **Branch**: main
+- **Commit**: ee32c55
+- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
+- **Total findings**: 2
+- **Finding breakdown**: P0: 0, P1: 2, P2: 0, P3: 0
+- **Incorporation rate**: 100%
+- **Not incorporated**: None
+- **Open questions**: All resolved
+- **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea

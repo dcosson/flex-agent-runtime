@@ -1,6 +1,6 @@
 # 06: Built-in Tools and Backend Dispatch
 
-**Status:** Draft
+**Status:** Approved
 **Depends on:** 01-ai-core, 05-agent
 **Depended on by:** 07-code-interpreter, 08-agent-tools-e2e, 11-sandbox-host-service
 **Implements:** `internal/tools` built-in tools (`read`, `write`, `edit`, `bash`, `grep`, `glob`, `git`), `ToolBackend` dispatch abstraction, and factory wiring for Local/Sandbox execution.
@@ -413,3 +413,17 @@ Classifier is centralized and shared to prevent drift across tools/backends.
 |---|----------|----------|---------|-------------|-------|
 | 1 | coder-1-sea | P1 | ToolBackend contract cannot carry remote progress updates | Incorporated | §3.1 ToolBackend.ExecuteTool now accepts onProgress callback; §5.2 SandboxBackend specifies RPC streaming for progress |
 | 2 | coder-1-sea | P2 | Git tool surface is underspecified for deterministic implementation | Incorporated | §4.8 adds explicit V1 git command matrix with tier assignments and unsupported command handling |
+
+## Plan Review Signoff
+
+- **Status**: Approved
+- **Date**: 2026-03-12
+- **Branch**: main
+- **Commit**: ee32c55
+- **Review rounds**: 3 (R1 batch + R2 batch + R3 focused)
+- **Total findings**: 2
+- **Finding breakdown**: P0: 0, P1: 1, P2: 1, P3: 0
+- **Incorporation rate**: 100%
+- **Not incorporated**: None
+- **Open questions**: All resolved
+- **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea
