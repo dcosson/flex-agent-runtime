@@ -1,6 +1,12 @@
 ---
 shaping: true
+deprecated: true
 ---
+
+> **DEPRECATED**: This shaping document has been superseded by the architecture doc at
+> [`docs/plans/00-architecture.md`](../plans/00-architecture.md). Key concepts from this
+> document (vision, problem statement, requirements, and solution analysis) have been
+> folded into that doc. Refer to the architecture doc for the current canonical reference.
 
 # Agent Runtime — Shaping
 

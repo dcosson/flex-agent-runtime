@@ -1,33 +1,27 @@
 # Architecture — h2-agent-runtime
 
-## Overview
+## Vision
 
-h2-agent-runtime is a Go library and service that provides a flexible, layered agent runtime. It implements the three-layer model from the [agent-runtime shaping doc](../shaping/agent-runtime.md): **RuntimeController**, **agent loop**, and **tools** — with well-defined interfaces between layers that allow each to run locally or remotely.
+An LLM agent is an LLM paired with a computer. This runtime provides flexible ways to deploy that pairing — from a single process on a developer's laptop to hundreds of concurrent agents distributed across cloud infrastructure.
 
-The runtime serves two consumers:
-1. **h2 orchestrator** — imports the runtime as a Go library for multi-agent coordination, terminal mux, and 3rd party agent driver management.
-2. **everything-db** — imports the runtime as a Go library for workflow-embedded agent loops (`ActivityAgentLoop`, `ActivityLLMCall`).
+Building an AI coding agent today requires choosing a rigid, all-in-one harness that bundles the agent loop, tools, and execution environment into a single monolithic process. This limits placement flexibility, provides no production-grade execution (no snapshots, rollback, or durability), and locks you into one harness. h2-agent-runtime solves this by decomposing the agent into three independently deployable layers with well-defined interfaces, pluggable LLM providers and tools, and production-grade execution with ZFS snapshots and gVisor containers.
 
-### Key Terminology
+---
 
-- **Agent** — The top-level unified interface. Any LLM + tools runtime. Has conversation log, state, metrics. The RuntimeController sees a uniform Agent interface regardless of how the agent loop is driven.
-- **RuntimeController** — The control plane for the runtime. Manages session lifecycle (create, pause, resume, stop), event subscription, and state queries. `DefaultController` is the library's built-in implementation. Consumers like h2-orchestrator or edb can use it directly or implement their own `RuntimeController` with additional concerns (TUI, web API, auth, scheduling).
-- **AgentDriver** — What runs the agent loop. Three concrete drivers:
-  - `NativeDriver` — Our own agent loop (LLM calls + tool dispatch)
-  - `ClaudeCodeDriver` — Wraps Claude Code CLI via PTY
-  - `CodexDriver` — Wraps Codex CLI via PTY
+## Three-Layer Model
 
-  All drivers produce the same `AgentEvent` stream and maintain the same `AgentState`.
-- **Session** — A single run of an agent (start to pause/completion). Has session ID, conversation log, state history. Can be resumed.
+The runtime decomposes into three layers with well-defined RPC interfaces between them, allowing each to run locally or remotely:
 
-  > **Session ID disambiguation**: Our runtime Session has its own ID, assigned by the RuntimeController. This is distinct from any driver-native session ID (e.g., Claude Code's own session ID, Codex's session ID). We track the driver's native session ID as a field within our Session struct for correlation and debugging, but our Session ID is the authoritative identifier used throughout the system for snapshots, rollback, pause/resume, and RuntimeController state management.
+```
+1. RuntimeController  — Control plane: session lifecycle (create, pause, resume, stop),
+                        event subscription, state queries, credential injection
 
-- **ToolBackend** — Two modes:
-  - `LocalBackend` — Executes tools on the machine the agent is running on. Covers both Mode 1 (laptop) and Mode 2 (agent inside sandbox — tools are local to that sandbox).
-  - `SandboxBackend` — Dispatches tool calls via RPC to sandbox host infrastructure. Covers Modes 3 & 4.
-- **Sandbox** — Infrastructure that tool backends point at, NOT a component under the agent. An agent doesn't "have a sandbox" — it has tools whose backends may dispatch to sandbox hosts.
+2. Agent Loop         — Core loop: LLM provider calls, message log management,
+                        tool call dispatch, steering, follow-up
 
-This document is the top-level architecture for the full runtime scope. Individual component plans provide implementation detail.
+3. Tools              — Regular tools (read, write, bash, grep, glob, MCP)
+                        + Code Interpreter meta-tool (Starlark executor, RLM, DataStore)
+```
 
 ### RuntimeController Interface
 
@@ -55,6 +49,26 @@ type RuntimeController interface {
 
 `DefaultController` is the library's built-in implementation of `RuntimeController`. Consumers like h2-orchestrator or edb can use `DefaultController` directly, or implement their own `RuntimeController` with additional concerns (TUI, web API, auth, scheduling).
 
+### Key Terminology
+
+- **Agent** — The top-level unified interface. Any LLM + tools runtime. Has conversation log, state, metrics. The RuntimeController sees a uniform Agent interface regardless of how the agent loop is driven.
+- **RuntimeController** — The control plane for the runtime. Manages session lifecycle (create, pause, resume, stop), event subscription, and state queries. `DefaultController` is the library's built-in implementation. Consumers like h2-orchestrator or edb can use it directly or implement their own `RuntimeController` with additional concerns (TUI, web API, auth, scheduling).
+- **AgentDriver** — What runs the agent loop. Three concrete drivers:
+  - `NativeDriver` — Our own agent loop (LLM calls + tool dispatch)
+  - `ClaudeCodeDriver` — Wraps Claude Code CLI via PTY
+  - `CodexDriver` — Wraps Codex CLI via PTY
+
+  All drivers produce the same `AgentEvent` stream and maintain the same `AgentState`.
+- **Session** — A single run of an agent (start to pause/completion). Has session ID, conversation log, state history. Can be resumed.
+
+  > **Session ID disambiguation**: Our runtime Session has its own ID, assigned by the RuntimeController. This is distinct from any driver-native session ID (e.g., Claude Code's own session ID, Codex's session ID). We track the driver's native session ID as a field within our Session struct for correlation and debugging, but our Session ID is the authoritative identifier used throughout the system for snapshots, rollback, pause/resume, and RuntimeController state management.
+
+- **ToolBackend** — Two modes:
+  - `LocalBackend` — Executes tools on the machine the agent is running on. Covers both Mode 1 (laptop) and Mode 2 (agent inside Session Sandbox — tools are local to that sandbox).
+  - `SandboxBackend` — Dispatches tool calls via RPC to Tool Call Sandbox infrastructure. Covers Modes 3 & 4.
+- **Session Sandbox** — The container/environment where an entire agent process runs in Mode 2. The agent's tools use LocalBackend (they're local to the sandbox). Long-lived for the duration of the session.
+- **Tool Call Sandbox** — The ZFS + gVisor infrastructure that executes individual tool calls in Modes 3 & 4. Per-call container lifecycle. The SandboxBackend dispatches to this infrastructure via RPC.
+
 ### Design Principles
 
 - **Clean layering with interface seams**: Each component communicates through Go interfaces. The same Agent interface works regardless of whether the underlying AgentDriver is our NativeDriver or a 3rd party CLI driver. Likewise, tools call `AgentTool.Execute()` and don't know or care whether a `LocalBackend` or `SandboxBackend` handles execution.
@@ -65,7 +79,84 @@ type RuntimeController interface {
 
 ---
 
-## System Architecture
+## Placement Modes
+
+The same codebase supports four deployment configurations. The `AgentTool` interface is the key seam — `LocalBackend` and `SandboxBackend` tools implement the same interface:
+
+```mermaid
+graph LR
+    subgraph "Mode 1: All Local"
+        M1A[Agent Loop] --> M1B[Tools<br/>LocalBackend]
+    end
+
+    subgraph "Mode 2: Remote Agent (Session Sandbox)"
+        M2O[RuntimeController] -->|RPC| M2A[Agent + Tools<br/>LocalBackend<br/>in Session Sandbox]
+    end
+
+    subgraph "Mode 3: Split Tools (Tool Call Sandbox)"
+        M3A[Agent Loop] -->|SandboxBackend| M3B[Tools on<br/>Tool Call Sandbox host]
+    end
+
+    subgraph "Mode 4: Fully Distributed"
+        M4O[RuntimeController] -->|RPC| M4A[Agent Loop] -->|SandboxBackend| M4B[Tools on<br/>Tool Call Sandbox host]
+    end
+
+    style M1A fill:#e8f5e9
+    style M2O fill:#e1f5fe
+    style M2A fill:#e8f5e9
+    style M3A fill:#e8f5e9
+    style M3B fill:#fce4ec
+    style M4O fill:#e1f5fe
+    style M4A fill:#e8f5e9
+    style M4B fill:#fce4ec
+```
+
+**Mode 1** — everything in-process, no RPC, no ZFS. Tools use `LocalBackend`. For development and single-agent use.
+
+**Mode 2** — RuntimeController launches agent + tools on a Session Sandbox host. The agent runs inside the sandbox, so its tools use `LocalBackend` (local to that sandbox). Primary path for 3rd party drivers (ClaudeCodeDriver, CodexDriver run inside the Session Sandbox).
+
+**Mode 3** — agent loop on the workflow server (cheap goroutines), tools dispatched via RPC using `SandboxBackend` to Tool Call Sandbox hosts. Most compute-efficient for production.
+
+**Mode 4** — maximum flexibility, each layer on separate infrastructure. Tools use `SandboxBackend` dispatching to Tool Call Sandbox hosts.
+
+---
+
+## Key Capabilities
+
+### Per-Turn Snapshots and Rollback
+
+Every agent turn produces a ZFS snapshot — an instant, space-efficient checkpoint capturing the full filesystem state. Rollback restores both the filesystem and agent session state to any prior snapshot in sync. Per-tool-call snapshots are available as opt-in for debugging/audit. ZFS COW semantics make snapshots microsecond-fast and only store changed blocks.
+
+### Pause and Resume
+
+Agents can pause with zero idle compute cost — no containers running, just a ZFS dataset on persistent storage. Resume re-activates the session from the last snapshot. Sessions can span hours or days.
+
+### Two-Tier Tool Execution
+
+Tools are classified into two tiers based on isolation needs:
+
+| Tier | Tools | Execution | Overhead |
+|------|-------|-----------|----------|
+| **Tier 1** | read, write, edit, grep, glob, git read ops | Go functions directly on ZFS dataset | ~microseconds |
+| **Tier 2** | bash, build, test, git push/clone | gVisor container with ZFS bind mount + cgroup limits | ~50-150ms boot |
+
+~80% of tool calls are Tier 1, bypassing container overhead entirely. Containers are spun up per Tier 2 tool call and destroyed after completion (not kept alive during LLM thinking time), saving massive idle compute at scale.
+
+### Code Interpreter with RLM and DataStore
+
+A Starlark-based meta-tool that enables progressive tool discovery, multi-step tool workflows, recursive LLM sub-calls (RLM), and pluggable DataStore access in a single agent turn. Scripts are sandboxed with no filesystem or network access — only approved builtins (`discover`, `invoke`, `llm_call`, `llm_batch`, `store_*`).
+
+### 3rd Party Agent Driver Support
+
+3rd party harnesses (Claude Code, Codex) run inside Session Sandboxes in Mode 2. From the harness's perspective, it's running locally. The runtime wraps around the harness: injecting credentials, providing the filesystem snapshot, normalizing events from three sources (OTEL, hooks, session log), and managing session lifecycle. Bidirectional session log conversion enables crash recovery and cross-driver migration.
+
+### ZFS + gVisor Solution
+
+ZFS on EBS provides instant COW snapshots with EBS durability across host lifecycle. gVisor (runsc) provides user-space container isolation without nested virtualization — runs on any standard EC2 instance with native filesystem performance via bind mounts. This combination satisfies all requirements: instant snapshots, strong isolation, dynamic per-call resource sizing, and standard compute infrastructure.
+
+---
+
+## Detailed Architecture
 
 ### Full Component Map
 
@@ -181,45 +272,46 @@ graph TB
     style starlark fill:#fff3e0
 ```
 
-### Placement Modes
-
-The same codebase supports four deployment configurations. The `AgentTool` interface is the key seam — `LocalBackend` and `SandboxBackend` tools implement the same interface:
+### Architecture Sketch (Mode 3: Split Tools)
 
 ```mermaid
-graph LR
-    subgraph "Mode 1: All Local"
-        M1A[Agent Loop] --> M1B[Tools<br/>LocalBackend]
+graph TB
+    subgraph "Workflow Server"
+        ORCH[RuntimeController<br/>Credentials, launch,<br/>hooks, logs]
+        AL[Agent Loop<br/>LLM calls, message mgmt,<br/>tool dispatch]
+        TS[Code Interpreter<br/>Starlark meta-tool<br/>discovery, batching]
     end
 
-    subgraph "Mode 2: Remote Agent"
-        M2O[RuntimeController] -->|RPC| M2A[Agent + Tools<br/>LocalBackend<br/>on sandbox host]
+    subgraph "Tool Call Sandbox Host Pool"
+        subgraph "Host 1"
+            SHS1[Sandbox Host Service<br/>RPC API]
+            ZFS1[ZFS Pool on EBS<br/>session datasets + snapshots]
+            T1_1[Tier 1: Go functions<br/>read, write, grep, glob]
+            T2_1[Tier 2: gVisor containers<br/>bash, build, test]
+            SHS1 --> T1_1
+            SHS1 --> T2_1
+            T1_1 --> ZFS1
+            T2_1 -.->|bind mount| ZFS1
+        end
+
+        subgraph "Host N"
+            SHS2[Sandbox Host Service]
+            ZFS2[ZFS Pool on EBS]
+        end
     end
 
-    subgraph "Mode 3: Split Tools"
-        M3A[Agent Loop] -->|SandboxBackend| M3B[Tools on<br/>sandbox host]
-    end
+    ORCH --> AL
+    AL --> TS
+    AL -->|"RPC: tool calls"| SHS1
+    TS -->|"RPC: discovered tools"| SHS1
+    AL -->|"RPC: tool calls"| SHS2
 
-    subgraph "Mode 4: Fully Distributed"
-        M4O[RuntimeController] -->|RPC| M4A[Agent Loop] -->|SandboxBackend| M4B[Tools on<br/>sandbox host]
-    end
-
-    style M1A fill:#e8f5e9
-    style M2O fill:#e1f5fe
-    style M2A fill:#e8f5e9
-    style M3A fill:#e8f5e9
-    style M3B fill:#fce4ec
-    style M4O fill:#e1f5fe
-    style M4A fill:#e8f5e9
-    style M4B fill:#fce4ec
+    style ORCH fill:#e1f5fe
+    style AL fill:#e8f5e9
+    style TS fill:#fff3e0
+    style SHS1 fill:#fce4ec
+    style ZFS1 fill:#f3e5f5
 ```
-
-**Mode 1** — everything in-process, no RPC, no ZFS. Tools use `LocalBackend`. For development and single-agent use.
-
-**Mode 2** — RuntimeController launches agent + tools on a sandbox host. The agent runs inside the sandbox, so its tools use `LocalBackend` (local to that sandbox). Primary path for 3rd party drivers (ClaudeCodeDriver, CodexDriver run inside the sandbox).
-
-**Mode 3** — agent loop on the workflow server (cheap goroutines), tools dispatched via RPC using `SandboxBackend` to sandbox hosts. Most compute-efficient for production.
-
-**Mode 4** — maximum flexibility, each layer on separate infrastructure. Tools use `SandboxBackend`.
 
 ---
 
@@ -257,7 +349,7 @@ func (s *EventStream) Result() (AssistantMessage, error)
 - **Registries**: Thread-safe (`sync.RWMutex`) provider and model registries with concurrent read support
 - **Message transformation**: Cross-provider normalization — strip thinking signatures, normalize tool call IDs, insert synthetic tool results for orphaned calls
 - **Validation**: JSON Schema validation with type coercion for LLM-generated arguments
-- **SSE parsing**: Shared server-sent events parser used by all HTTP-based providers
+- **SSE parser**: Shared server-sent events parser used by all HTTP-based providers
 - **Provider error typing**: `ProviderError` with structured codes (`context_overflow`, `rate_limit`, `auth`, etc.)
 
 #### Providers
@@ -361,7 +453,7 @@ func (a *Agent) Abort()
 
 ### 3. Built-in Tools (`internal/tools`)
 
-Core coding tools that implement the `AgentTool` interface. Each tool has two backends: **`LocalBackend`** (direct filesystem/process execution — used in Mode 1 and Mode 2 where the agent runs on the same machine as the tools) and **`SandboxBackend`** (RPC dispatch to sandbox host infrastructure — used in Modes 3 & 4).
+Core coding tools that implement the `AgentTool` interface. Each tool has two backends: **`LocalBackend`** (direct filesystem/process execution — used in Mode 1 and Mode 2 where the agent runs on the same machine as the tools) and **`SandboxBackend`** (RPC dispatch to Tool Call Sandbox infrastructure — used in Modes 3 & 4).
 
 #### Tool Catalog
 
@@ -412,7 +504,7 @@ type ResourceSpec struct {
 
 ```go
 // NewLocalTools creates the built-in tool set using LocalBackend.
-// Used in Mode 1 (all local) and Mode 2 (agent inside sandbox — tools are local to sandbox).
+// Used in Mode 1 (all local) and Mode 2 (agent inside Session Sandbox — tools are local to sandbox).
 // rootDir constrains all file operations to a directory.
 func NewLocalTools(rootDir string, opts LocalToolsOptions) []agent.AgentTool
 
@@ -428,7 +520,7 @@ type LocalToolsOptions struct {
 
 ```go
 // NewSandboxTools creates the built-in tool set using SandboxBackend.
-// All tool calls are dispatched via RPC to sandbox host infrastructure (Mode 3 and Mode 4).
+// All tool calls are dispatched via RPC to Tool Call Sandbox infrastructure (Mode 3 and Mode 4).
 func NewSandboxTools(client rpc.SandboxClient, sessionID string) []agent.AgentTool
 ```
 
@@ -711,17 +803,6 @@ type ContainerResult struct {
 }
 ```
 
-#### Two-Tier Execution
-
-The sandbox host service routes each tool call to the appropriate tier:
-
-| Tier | Tools | Execution | Overhead | Isolation |
-|------|-------|-----------|----------|-----------|
-| **Tier 1** | read, write, edit, grep, glob, git status/diff/log | Go functions directly on ZFS dataset | ~microseconds | Path validation only |
-| **Tier 2** | bash, build, test, git push/clone | gVisor container with ZFS bind mount + cgroup limits | ~50-150ms boot | Full syscall interception |
-
-Per-tool-call container lifecycle: containers are created, used, and destroyed per Tier 2 call. No idle containers during LLM thinking time. At scale with 50 agents, this saves ~510 container-hours per 12-hour session vs keeping containers alive.
-
 ### 7. RPC Layer (`internal/rpc`)
 
 Interfaces between layers when they run on separate hosts.
@@ -754,10 +835,14 @@ type SandboxClient interface {
 Used to stream agent events from a remote agent loop back to the RuntimeController:
 
 ```go
-// AgentEventStream provides a way to stream agent events over RPC.
-// Server-side: agent loop pushes events. Client-side: RuntimeController consumes events.
-type AgentEventStream interface {
+// AgentEventSender pushes events (producer side — agent loop).
+type AgentEventSender interface {
     Send(event agent.AgentEvent) error
+    Close() error
+}
+
+// AgentEventReceiver consumes events (consumer side — RuntimeController).
+type AgentEventReceiver interface {
     Recv() (agent.AgentEvent, error)
     Close() error
 }
@@ -765,15 +850,7 @@ type AgentEventStream interface {
 
 #### Protocol Choice
 
-The RPC protocol is an open question (OQ1 from shaping doc). The architecture is protocol-agnostic — interfaces are defined in Go, and a concrete protocol adapter implements them. Candidates:
-
-| Protocol | Pros | Cons |
-|----------|------|------|
-| **gRPC** | Typed contracts, bidirectional streaming, code generation | Heavier dependency, proto files to maintain |
-| **ConnectRPC** | gRPC-compatible, works over HTTP/1.1+, browser-friendly | Newer ecosystem |
-| **HTTP/JSON + SSE** | Simple, debuggable, no code generation | Manual serialization, no bidirectional streaming |
-
-Recommendation: **ConnectRPC** — gRPC compatibility with simpler deployment (standard HTTP), good streaming support, and aligns with the Go ecosystem. Final decision deferred to implementation plan.
+ConnectRPC — gRPC compatibility with simpler deployment (standard HTTP), good streaming support, and aligns with the Go ecosystem.
 
 ---
 
@@ -837,11 +914,11 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant H2 as h2 Orchestrator
+    participant H2 as h2 RuntimeController
     participant Agent as Agent<br/>(ClaudeCodeDriver)
     participant TMux as Terminal Mux
-    participant SH as Sandbox Host
-    participant CLI as Claude Code CLI<br/>(in sandbox)
+    participant SH as Session Sandbox Host
+    participant CLI as Claude Code CLI<br/>(in Session Sandbox)
     participant ZFS as ZFS Filesystem
 
     H2->>SH: CreateSession(base: "repo-v1", env: {API_KEY: "..."})
@@ -849,14 +926,14 @@ sequenceDiagram
 
     H2->>Agent: Prompt(ctx, "fix the bug")
     Agent->>TMux: CreateSession(driver: "claude-code", cmd: [...])
-    TMux->>SH: Start CLI process in sandbox PTY
+    TMux->>SH: Start CLI process in Session Sandbox PTY
     SH->>CLI: Process starts with injected credentials
 
     loop Agent session
         CLI->>CLI: LLM call (uses its own agent loop)
-        CLI->>ZFS: Built-in tool: read file (LocalBackend — local to sandbox)
+        CLI->>ZFS: Built-in tool: read file (LocalBackend — local to Session Sandbox)
         CLI->>CLI: LLM call
-        CLI->>ZFS: Built-in tool: bash command (LocalBackend — local to sandbox)
+        CLI->>ZFS: Built-in tool: bash command (LocalBackend — local to Session Sandbox)
     end
 
     TMux->>TMux: EventNormalizer parses output
@@ -867,6 +944,70 @@ sequenceDiagram
     H2->>SH: Snapshot + collect artifacts
     H2->>SH: DestroySession
 ```
+
+---
+
+## Consumers & Integration
+
+The runtime serves two consumers:
+1. **h2 orchestrator** — imports the runtime as a Go library for multi-agent coordination, terminal mux, and 3rd party agent driver management.
+2. **everything-db** — imports the runtime as a Go library for workflow-embedded agent loops (`ActivityAgentLoop`, `ActivityLLMCall`).
+
+This document is the top-level architecture for the full runtime scope. Individual component plans provide implementation detail.
+
+### RuntimeController State Tracking
+
+The h2 orchestrator consumes the runtime as a Go library and is responsible for managing multiple agents. The runtime produces uniform state information via `AgentEvent` streams regardless of which AgentDriver is running underneath. The RuntimeController tracks:
+
+- **Which agents are running**: Registry of all active Agent instances and their current AgentDriver type (NativeDriver, ClaudeCodeDriver, CodexDriver).
+- **Agent state changes**: `Active`, `Idle`, `Blocked`, `Exited` states across all agents. State transitions are reported via AgentEvents and are uniform regardless of driver.
+- **Full conversation logs from all agents**: Every agent's Session maintains its conversation log in our canonical format. The RuntimeController collects these for dashboard display, session resume, and replay. For 3rd party drivers, the bidirectional session log converter ensures conversation logs are always in canonical format.
+- **Metrics**: Token usage, cost, tool call counts, session duration, etc. All metrics are computed from AgentEvents and are driver-agnostic.
+
+The key design point is that the runtime produces all of this uniformly. A NativeDriver emits AgentEvents directly from its LLM loop. A ClaudeCodeDriver emits AgentEvents by parsing Claude Code's output through the EventNormalizer. The RuntimeController consumes the same `Agent.Subscribe()` interface either way.
+
+### Everything-DB Integration
+
+everything-db imports `h2-agent-runtime` as a Go library to implement its deferred `ActivityAgentLoop` and `ActivityLLMCall` workflow activity types.
+
+The `AgentTool` interface is the integration seam between placement modes:
+
+```go
+// edb workflow executor, Mode 1 (local — single laptop)
+tools := []AgentTool{localReadFile, localBash, localGrep}
+agent := agentruntime.NewAgentLoop(tools, llmConfig)
+
+// edb workflow executor, Mode 3 (remote Tool Call Sandbox — production)
+tools := []AgentTool{sandboxRPC.ReadFile, sandboxRPC.Bash, sandboxRPC.Grep}
+agent := agentruntime.NewAgentLoop(tools, llmConfig)
+```
+
+Same agent loop code, different tool backends. In Mode 1, everything runs in-process (just goroutines, no RPC, no sandbox host, no ZFS). In Mode 3, tool calls dispatch to Tool Call Sandbox hosts via RPC. The agent loop doesn't know or care — it just calls `AgentTool.Execute()`.
+
+This makes the agent feel built-in to edb rather than a separate piece of infrastructure. The workflow engine dispatches `ActivityAgentLoop` → runtime runs the loop → events flow back as activity progress/completion via the existing ERC patterns.
+
+### 3rd Party Harness Integration
+
+3rd party harnesses (Claude Code, Cursor, Aider, etc.) have deeply integrated assumptions about local execution. Their built-in tools cannot be overridden or redirected.
+
+**Primary integration path: Mode 2 (Session Sandbox).** Run the entire 3rd party harness inside a Session Sandbox. From the harness's perspective, it's running locally — it just happens to be "local" inside our managed sandbox with ZFS underneath.
+
+The RuntimeController layer wraps around the harness:
+- Injects credentials (API keys, git auth) into the sandbox environment
+- Provides the initial filesystem snapshot (code checked out, deps installed)
+- Collects logs and artifacts after completion
+- Manages pause/resume of the sandbox
+
+**Limitations of Mode 2 with 3rd party harnesses:**
+- The Session Sandbox runs for the full agent session (no per-turn spin-down), since the harness process must stay alive
+- Snapshotting happens at the filesystem level when the agent goes idle between turns (detected via event normalization)
+- Resource sizing is fixed for the session, not per tool call
+- Rollback is coarser — we can snapshot periodically or on git commits, but not per tool call
+
+**Deeper integration (stretch goal per harness):**
+- Mount remote ZFS via NFS so file operations hit remote storage transparently
+- Use hooks (where available) to trigger snapshots on tool calls
+- These are harness-specific and fragile — document supported modes per harness
 
 ---
 
@@ -1052,36 +1193,53 @@ graph TD
 
 ---
 
-## Key Architectural Decisions
+## Decisions
 
-### AD1: AgentTool as the Universal Seam
+### D1: Two-Repo Split
 
-The `AgentTool` interface is the single point where placement modes diverge. The Agent (via its AgentDriver) calls `tool.Execute()` — it doesn't know if the `LocalBackend` reads a local file or the `SandboxBackend` sends an RPC to a sandbox host 1000 miles away. This is what makes Mode 1 and Mode 3 use the same agent code:
+The project is split into two repositories with a clean dependency direction:
 
-```go
-// Mode 1: LocalBackend
-tools := tools.NewLocalTools("/workspace", tools.LocalToolsOptions{})
-a := agent.NewAgent(agent.AgentOptions{Tools: tools, ...})
+**`h2-agent-runtime`** (this repo):
+- Core agent loop (our own LLM abstraction + tool dispatch, inspired by pi-mono)
+- Tool interfaces and built-in tool implementations (read, write, bash, grep, glob)
+- Terminal multiplexer / session manager (for running CLI-based 3rd party agents like Claude Code, Codex, Aider — they need a PTY)
+- OTEL event normalization (parsing agent activity from 3rd party harnesses)
+- Sandbox host service (ZFS + gVisor)
+- Code interpreter meta-tool (Starlark executor, RLM, DataStore)
+- Importable as a Go library by everything-db or any other consumer
 
-// Mode 3: SandboxBackend
-client := rpc.NewSandboxClient("sandbox-host-1:8080")
-tools := tools.NewSandboxTools(client, "session-123")
-a := agent.NewAgent(agent.AgentOptions{Tools: tools, ...})
-```
+**`h2` (orchestrator, separate repo):**
+- Profiles, roles, pods configuration system
+- Inter-agent messaging protocol
+- Plan/review/signoff framework
+- Work ledger / beads-lite task system
+- External integrations (Linear, etc.)
+- Pluggable UI layer (headless by default — TUI, web, desktop/mobile, Slack/Telegram, pure API)
+- Imports `h2-agent-runtime` as a dependency
 
-### AD2: Two-Tier Tool Execution
+**Why two repos:**
+- Clean dependency direction: `h2` depends on `h2-agent-runtime`, never the reverse
+- everything-db imports `h2-agent-runtime` without pulling in orchestration opinions
+- Runtime is a stable general-purpose library; orchestrator is an opinionated framework with faster evolution
+- Separate release cadences
+
+### D2: AgentTool as the Universal Seam
+
+The `AgentTool` interface is the single point where placement modes diverge. The Agent (via its AgentDriver) calls `tool.Execute()` — it doesn't know if the `LocalBackend` reads a local file or the `SandboxBackend` sends an RPC to a Tool Call Sandbox host 1000 miles away.
+
+### D3: Two-Tier Tool Execution
 
 File operations (read, write, grep, glob) don't need a container. They run as Go functions directly on the ZFS dataset. Only process execution (bash, builds) needs the isolation of a gVisor container. This eliminates container overhead for ~80% of tool calls.
 
-### AD3: Per-Tool-Call Container Lifecycle
+### D4: Per-Tool-Call Container Lifecycle
 
 gVisor containers are created and destroyed per Tier 2 tool call. This costs ~100ms per call but saves massive idle compute at scale (510 container-hours across 50 agents over 12 hours). The agent loop already has 5-30+ second LLM thinking time between tool calls — 100ms boot overhead is negligible.
 
-### AD4: Library-First Architecture
+### D5: Library-First Architecture
 
 The core runtime is a Go library, not a service. everything-db imports it directly and runs agent loops in-process. The sandbox host service (`cmd/sandbox-host`) is a separate binary that wraps the library with an RPC interface — but it's optional. Mode 1 works with zero external services.
 
-### AD5: Sum Types via Interfaces
+### D6: Sum Types via Interfaces
 
 Go doesn't have algebraic data types. We use sealed interfaces with unexported marker methods:
 
@@ -1092,38 +1250,34 @@ type ContentBlock interface{ contentType() string }
 
 This is idiomatic Go. Type switches handle dispatch.
 
-### AD6: Channels for Event Streaming
+### D7: Channels for Event Streaming
 
 All LLM interactions stream events through buffered Go channels (32-event buffer). `context.Context` provides cancellation. Consumers can range over the channel or call `EventStream.Result()` for blocking.
 
-### AD7: Starlark for Code Interpreter
+### D8: Starlark for Code Interpreter
 
 Starlark (Go's `go.starlark.net`) provides a deterministic, sandboxed scripting language. No filesystem access, no network, no goroutines, no import. The only external interaction is through explicitly exposed builtins (`discover`, `invoke`, `llm_call`, `llm_batch`, `store_*`). This gives us a code interpreter with recursive LLM support and pluggable storage without security concerns.
 
-### AD8: Terminal Mux in the Runtime
+### D9: Terminal Mux in the Runtime
 
 The terminal multiplexer lives in the runtime (not the RuntimeController consumer) because it's infrastructure needed for Mode 2 — running 3rd party agent drivers (ClaudeCodeDriver, CodexDriver) requires PTY management. The TUI (user-facing terminal) lives in h2 orchestrator.
 
-### AD9: Uniform Agent Interface via AgentDriver
+### D10: Uniform Agent Interface via AgentDriver
 
 The Agent is the top-level interface. Whether driven by NativeDriver (our own LLM loop), ClaudeCodeDriver (wrapping Claude Code CLI), or CodexDriver (wrapping Codex CLI), the RuntimeController sees the same Agent interface with the same AgentEvent stream, AgentState, and Session. This allows the RuntimeController to manage all agents uniformly — tracking state, collecting conversation logs, computing metrics — without knowing which driver is running underneath.
 
-### AD10: Bidirectional Session Log Conversion
+### D11: Bidirectional Session Log Conversion
 
 Each 3rd party driver maintains bidirectional conversion between its native session log format and our canonical conversation format. This is a key enabler for durable execution: our canonical format serves as the checkpoint, while the driver's native format is the runtime representation. On crash recovery, we reconstruct the native format from our checkpoint. This also enables cross-driver migration — starting a session in one driver and resuming in another.
 
----
+### D12: Headless Orchestrator with Pluggable UI
 
-## RuntimeController State Tracking
-
-The h2 orchestrator consumes the runtime as a Go library and is responsible for managing multiple agents. The runtime produces uniform state information via `AgentEvent` streams regardless of which AgentDriver is running underneath. The RuntimeController tracks:
-
-- **Which agents are running**: Registry of all active Agent instances and their current AgentDriver type (NativeDriver, ClaudeCodeDriver, CodexDriver).
-- **Agent state changes**: `Active`, `Idle`, `Blocked`, `Exited` states across all agents. State transitions are reported via AgentEvents and are uniform regardless of driver.
-- **Full conversation logs from all agents**: Every agent's Session maintains its conversation log in our canonical format. The RuntimeController collects these for dashboard display, session resume, and replay. For 3rd party drivers, the bidirectional session log converter ensures conversation logs are always in canonical format.
-- **Metrics**: Token usage, cost, tool call counts, session duration, etc. All metrics are computed from AgentEvents and are driver-agnostic.
-
-The key design point is that the runtime produces all of this uniformly. A NativeDriver emits AgentEvents directly from its LLM loop. A ClaudeCodeDriver emits AgentEvents by parsing Claude Code's output through the EventNormalizer. The RuntimeController consumes the same `Agent.Subscribe()` interface either way.
+The h2 orchestrator is headless by default, exposing APIs that any UI can consume:
+- TUI (current h2 terminal experience)
+- Web interface
+- Desktop/mobile app
+- Chat integrations (Slack, Telegram — existing bridge pattern)
+- Pure API consumers (CI/CD, other services)
 
 ---
 
@@ -1199,6 +1353,51 @@ Each component has its own testing section in its plan doc. The overall strategy
 
 ---
 
+## Requirements Traceability
+
+These requirements originate from the [agent-runtime shaping doc](../shaping/agent-runtime.md):
+
+| Req | Requirement | Status |
+|-----|-------------|--------|
+| R0 | Three-layer architecture with RPC interfaces | ✅ |
+| R1 | Each layer can run locally or remote | ✅ |
+| R2 | Isolated tool execution with configurable resources | ✅ |
+| R3 | Per-turn filesystem snapshots | ✅ |
+| R4 | Pause/resume with zero idle compute | ✅ |
+| R5 | Synchronized rollback of session + filesystem | ✅ |
+| R6 | 3rd party harness integration (Mode 2) | ✅ |
+| R7 | Code interpreter meta-tool support | ✅ |
+| R8 | Multi-agent orchestration | ✅ |
+| R9 | Initialization from pre-built snapshot | ✅ |
+| R10 | Low snapshot overhead | ✅ |
+
+---
+
+## Solution Analysis
+
+### Why gVisor
+
+gVisor (runsc) is a user-space container runtime that intercepts syscalls through a reimplemented Linux kernel interface (written in Go, memory-safe). It is used in production by Google (GKE Sandbox, Cloud Run).
+
+Key advantages over Firecracker microVMs for this use case:
+- **ZFS access via bind mount** — the ZFS dataset is bind-mounted directly into the container. No virtio-fs, NFS, or rootfs extraction needed. Native filesystem performance.
+- **Runs on any EC2 instance** — no bare-metal or nested virtualization required.
+- **No nested virtualization performance penalty** — gVisor has no hypervisor layer.
+- **Comparable boot times** — ~50-150ms container start.
+- **Strong isolation** — syscall interception in user-space with a memory-safe kernel. Sufficient for agent-generated code.
+
+Firecracker or other VM runtimes (Kata Containers) remain a future option if hardware-level isolation is ever required.
+
+### Eliminated Alternatives
+
+- **ZFS-on-EBS + Fargate:** Fargate cannot attach EBS volumes. Fundamental gap.
+- **ZFS-on-EBS + EC2 (start/stop):** EC2 instance types are fixed at launch. Cannot dynamically resize per tool call.
+- **Kubernetes + PV Snapshots:** EBS snapshots take seconds-to-minutes. Incompatible with per-turn snapshot frequency.
+- **Firecracker microVMs + Overlay Snapshots:** Overlay snapshots degrade at depth (hundreds of layers hurt read performance). Firecracker also requires bare-metal EC2 or nested virtualization, adding cost and operational complexity.
+- **Firecracker microVMs + ZFS:** Firecracker can't bind-mount host filesystems (needs virtio-fs/NFS workarounds). Requires bare-metal or nested-virt EC2 instances with 10-30% performance overhead. gVisor solves both problems.
+
+---
+
 ## Open Questions
 
 ### ~~OQ1: Cloud Provider Portability~~ (Resolved)
@@ -1220,7 +1419,7 @@ See Resolved Questions below.
 ### Resolved Questions
 
 - **~~Cloud Provider Portability~~** — The core sandbox host only requires ZFS + gVisor (or any OCI-compatible runtime), neither of which is AWS-specific. The AWS-specific piece is EBS for durable storage. A "generic host" deployment mode is supported where ZFS lives on local disk (or any block device) — this works on Mac minis, VPSs, dedicated servers, and bare metal without any cloud provider dependency. Multi-host routing is manual initially (pin agents to hosts based on where their ZFS datasets live), with ZFS send/recv available for dataset migration between hosts.
-- **~~RPC Protocol~~** — Use our own RPC (ConnectRPC/gRPC with custom protobuf) for the sandbox backend. MCP is the wrong fit for built-in tool dispatch because it lacks per-call resource sizing, snapshot correlation, session affinity, and two-tier routing. MCP is used for 3rd party external tool integration (discovered at runtime, standard schemas). Both sit behind the same `AgentTool` interface — different transports underneath.
+- **~~RPC Protocol~~** — Use ConnectRPC for the sandbox backend. MCP is the wrong fit for built-in tool dispatch because it lacks per-call resource sizing, snapshot correlation, session affinity, and two-tier routing. MCP is used for 3rd party external tool integration (discovered at runtime, standard schemas). Both sit behind the same `AgentTool` interface — different transports underneath.
 - **~~3rd Party Driver Snapshot Granularity~~** — Snapshot when the driver transitions to Idle (between turns). This is the natural turn boundary — the driver finished its batch of tool calls, responded, and is waiting. Same as the native driver default.
 - **~~Snapshot Granularity (default)~~** — Per-turn snapshots as the default (snapshot when agent goes idle between turns). Per-tool-call snapshots available as opt-in for debugging/audit. Per-turn captures every meaningful state boundary with ~10x fewer snapshots. If something goes wrong mid-turn, roll back to end of previous turn and replay the user prompt.
 - **~~Partial JSON Parsing~~** — Use `karminski/streaming-json-go` for streaming partial JSON completion during SSE provider responses. Single library, no fallback — fork and fix gaps if needed. Decision: resolved before provider implementation.
