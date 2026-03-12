@@ -33,13 +33,21 @@ Check:
 ### P3. Snapshot Trigger Cardinality
 
 Invariant:
-- Each successful turn completion emits exactly one snapshot trigger boundary sequence: `turn_completed` then `state_change(idle)`.
+- Each successful turn emits exactly one `turn_completed` snapshot-trigger event.
+- `state_change(idle)` is emitted exactly once after the final turn in a complete turn-sequence (when follow-up queue is drained), not after every turn.
 
 Generator:
 - Random turns with/without tool calls and with optional follow-up chaining.
 
 Check:
-- boundary count equals completed turns.
+- `count(turn_completed) == completed_turns`
+- `count(state_change(idle)) == completed_turn_sequences`
+
+## Round 2 Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-2-sea | P1 | Snapshot trigger cardinality property contradicts follow-up semantics | Incorporated | Rewrote P3 invariant/check to model per-turn `turn_completed` and per-sequence idle emission. |
 
 ### P4. Session ID Authority
 

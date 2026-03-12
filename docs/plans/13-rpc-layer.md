@@ -95,8 +95,8 @@ sequenceDiagram
     ES-->>RC: Recv() → AgentEvent
     Agent->>ES: Send(AgentEvent)
     ES-->>RC: Recv() → AgentEvent
-    Agent->>ES: Send(session_completed)
-    ES-->>RC: Recv() → session_completed (terminal)
+    Agent->>ES: Send(session_ended)
+    ES-->>RC: Recv() → session_ended (terminal)
     Agent->>ES: Close()
     ES-->>RC: Recv() → io.EOF
 ```
@@ -134,7 +134,7 @@ type AgentEventService interface {
     // StreamAgentEvents opens a server-streaming RPC. The server (agent-side)
     // writes events via AgentEventSender; the client (RuntimeController-side)
     // reads events via AgentEventReceiver.
-    StreamAgentEvents(ctx context.Context, req *StreamAgentEventsRequest) (AgentEventSender, error)
+    StreamAgentEvents(ctx context.Context, req *StreamAgentEventsRequest) (AgentEventReceiver, error)
 }
 
 // AgentEventSender is the producer-side handle (agent process).
@@ -156,9 +156,10 @@ The event stream has well-defined lifecycle behavior tied to session state chang
 
 | Session State Change | Stream Behavior |
 |---------------------|-----------------|
-| **Session pause** | Stream sends a `session_paused` event, then closes gracefully. Consumer receives the terminal event followed by `io.EOF`. |
-| **Session destroy** | Stream sends a `session_destroyed` event, then closes gracefully. Consumer receives the terminal event followed by `io.EOF`. |
-| **Agent run completion** | Stream sends a `session_completed` event, then closes gracefully. Consumer receives the terminal event followed by `io.EOF`. |
+| **Session start** | Stream begins after a `session_started` lifecycle event and remains open while the session is active. |
+| **Session pause** | Stream sends `state_change(paused)` and then closes gracefully. Consumer receives the terminal state event followed by `io.EOF`. |
+| **Session destroy** | Stream sends `session_ended` (reason: destroyed), then closes gracefully. Consumer receives the terminal event followed by `io.EOF`. |
+| **Agent run completion** | Stream sends `session_ended` (reason: completed) and then closes gracefully. Consumer receives the terminal event followed by `io.EOF`. |
 | **Session crash / connection loss** | Stream closes abnormally. Consumer receives an RPC error with code `unavailable` (network loss) or `internal` (process crash). No terminal event is sent. |
 
 Consumers must distinguish between graceful closure (terminal event followed by `io.EOF`) and abnormal closure (RPC error without terminal event). On abnormal closure, the consumer should treat the session state as unknown and query session status via `GetSession` before attempting reconnection.
@@ -435,19 +436,30 @@ This metadata is included in `ExecuteToolResponse` so that the agent and Runtime
 
 ---
 
-## R1 Review Disposition (reviewer-sea)
+## Round 1 Review Disposition
 
 **Review:** [13-rpc-layer-review-reviewer-sea.md](./13-rpc-layer-review-reviewer-sea.md)
 **Incorporated by:** coder-2-sea
 **Date:** 2026-03-12
 
-| Finding | Severity | Disposition | Notes |
-|---------|----------|-------------|-------|
-| F1 | P1 | Incorporated | Split AgentEventStream into sender/receiver interfaces |
-| F2 | P2 | Incorporated | Added terminal event semantics for session state changes |
-| F3 | P2 | Incorporated | Added ToolCallID to request and response paths |
-| F4 | P2 | Incorporated | Added versioning strategy (protobuf evolution + x-api-version header) |
-| F5 | P2 | Incorporated | Added SandboxBackend lifecycle documentation |
-| F6 | P3 | Incorporated | Added max 16MB message size + truncation behavior |
-| F7 | P3 | Incorporated | Strengthened P5 invariant definition |
-| F8 | P2 | Incorporated | Added idempotency key specification using tool_call_id |
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P1 | Event stream interface directionality was ambiguous | Incorporated | Split producer (`AgentEventSender`) and consumer (`AgentEventReceiver`) interface roles. |
+| 2 | reviewer-sea | P2 | Terminal event behavior on session lifecycle transitions | Incorporated | Added explicit graceful/abnormal closure semantics and lifecycle-linked terminal behavior. |
+| 3 | reviewer-sea | P2 | Missing tool-call correlation ID in request/response contract | Incorporated | Added `tool_call_id` to request and echoed response contract. |
+| 4 | reviewer-sea | P2 | Versioning/compatibility strategy underspecified | Incorporated | Added additive protobuf evolution + `x-api-version` signaling policy. |
+| 5 | reviewer-sea | P2 | SandboxBackend lifecycle wiring not explicit | Incorporated | Added lifecycle sequencing and ownership expectations for backend adapter. |
+| 6 | reviewer-sea | P3 | Message-size limits and truncation behavior unspecified | Incorporated | Added 16MB cap and truncation/error behavior expectations. |
+| 7 | reviewer-sea | P3 | P5 invariant too loose | Incorporated | Strengthened invariant definition in testing/acceptance criteria. |
+| 8 | reviewer-sea | P2 | Idempotency strategy for retries missing | Incorporated | Added idempotency guidance keyed on `tool_call_id`. |
+
+## Round 2 Review Disposition
+
+**Review:** [13-rpc-layer-review-coder-1-sea.md](./13-rpc-layer-review-coder-1-sea.md)
+**Incorporated by:** coder-1-sea
+**Date:** 2026-03-12
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | Server-streaming API returned producer-side type | Incorporated | `StreamAgentEvents` now returns `AgentEventReceiver` for RuntimeController consumers. |
+| 2 | coder-1-sea | P1 | Event taxonomy drifted from canonical agent lifecycle names | Incorporated | Terminal/lifecycle semantics now align to `session_started`/`session_ended` with `state_change` transitions. |

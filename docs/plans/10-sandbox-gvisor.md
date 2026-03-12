@@ -356,12 +356,12 @@ type ContainerResult struct {
     // StderrTruncated is true if stderr was truncated due to MaxOutputBytes.
     StderrTruncated bool
 
-    // Duration is the wall-clock time from container start to exit.
+    // Duration is the end-to-end wall-clock time for Run():
+    // spec/build + runsc execution + cleanup.
     Duration time.Duration
 
-    // BootDuration is the time from Run() call to the user process starting.
-    // Measured as the time between runsc invocation and first output or
-    // process exit — whichever comes first.
+    // BootDuration is the runsc-managed execution time measured inside
+    // runContainer (cmd.Start() -> cmd.Wait()).
     BootDuration time.Duration
 
     // Status indicates how the container exited.
@@ -1048,12 +1048,15 @@ func (m *Manager) runContainer(
         }
     }
 
-    // Check for OOM kill
-    result.OOMKilled = m.checkOOMKill(containerID, result.ExitCode)
-    if result.OOMKilled {
-        result.Status = StatusOOMKilled
-        if m.oomKillCount != nil {
-            m.oomKillCount.Add(ctx, 1)
+    // Check for OOM kill only for SIGKILL exits when status is still "exited".
+    // Do not override timeout/cancellation/status-error outcomes.
+    if result.Status == StatusExited && result.ExitCode == 137 {
+        result.OOMKilled = m.checkOOMKill(containerID, result.ExitCode)
+        if result.OOMKilled {
+            result.Status = StatusOOMKilled
+            if m.oomKillCount != nil {
+                m.oomKillCount.Add(ctx, 1)
+            }
         }
     }
 
@@ -1089,6 +1092,10 @@ func (m *Manager) deleteContainer(containerID string) {
 
 // checkOOMKill checks if a container was OOM-killed.
 func (m *Manager) checkOOMKill(containerID string, exitCode int) bool {
+    if exitCode != 137 {
+        return false
+    }
+
     // runsc events can report OOM, but the simplest check is via state
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
@@ -1102,7 +1109,8 @@ func (m *Manager) checkOOMKill(containerID string, exitCode int) bool {
         return false
     }
 
-    // Parse state JSON, check for OOM indication
+    // Parse state JSON. Future refinement can inspect explicit OOM fields when
+    // present in runsc state/events payloads for stronger attribution.
     var state struct {
         Status string `json:"status"`
     }
@@ -1110,9 +1118,9 @@ func (m *Manager) checkOOMKill(containerID string, exitCode int) bool {
         return false
     }
 
-    // If the process was SIGKILL'd (exit code 137) and we had memory limits,
-    // it's likely OOM. gVisor also reports via events.
-    return exitCode == 137 || exitCode == -1
+    // Conservatively classify only SIGKILL exits (137) as OOM candidates here.
+    // Timeout/cancel paths use exitCode=-1 and are handled earlier in Run().
+    return exitCode == 137
 }
 ```
 
@@ -1697,3 +1705,10 @@ Should we capture runsc's debug logs for troubleshooting? Options:
 | 5 | coder-2-sea | P3 | Missing OOM behavior validation coverage | Incorporated | Added dedicated OOM-behavior security test in harness. |
 | 6 | coder-2-sea | P2 | `Close()` contract underspecified | Incorporated | Added explicit `Close()` semantics and `ErrManagerClosed` behavior in §4.1. |
 | 7 | coder-2-sea | P3 | Output capture benchmark lacks explicit baseline comparison | Incorporated | Harness B4 now specifies baseline-vs-capture comparative benchmark. |
+
+## Round 2 Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P1 | `checkOOMKill` could misclassify timeout/cancel sentinel exits | Incorporated | OOM detection now runs only for `StatusExited` + `exitCode==137`; timeout/cancel statuses are no longer overridden. |
+| 2 | reviewer-sea | P2 | `Duration` vs `BootDuration` semantics and metrics clarity | Incorporated | Clarified field semantics and ensured end-to-end `Duration` remains separately recorded from runsc execution `BootDuration`. |

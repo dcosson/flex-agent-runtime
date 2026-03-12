@@ -867,6 +867,8 @@ func mapFinishReason(reason string) ai.StopReason {
     case "STOP":
         return ai.StopReasonStop
     case "MAX_TOKENS":
+        // Canonical cross-provider mapping for token-limit termination.
+        // Note: older docs may refer to this semantic as "MaxTokens".
         return ai.StopReasonLength
     case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
         return ai.StopReasonContentFilter
@@ -1003,7 +1005,7 @@ func classifyHTTPError(statusCode int, body []byte) *ai.ProviderError {
         return ai.NewProviderError(ai.ErrAuth, msg)
     case statusCode == 429 || apiErr.Error.Status == "RESOURCE_EXHAUSTED":
         return ai.NewProviderError(ai.ErrRateLimit, msg)
-    case statusCode == 400 && isContextOverflow(msg):
+    case statusCode == 400 && ai.IsContextOverflow(msg):
         return ai.NewProviderError(ai.ErrContextOverflow, msg)
     case statusCode == 400:
         return ai.NewProviderError(ai.ErrBadRequest, msg)
@@ -1014,13 +1016,6 @@ func classifyHTTPError(statusCode int, body []byte) *ai.ProviderError {
     default:
         return ai.NewProviderError(ai.ErrUnknown, msg)
     }
-}
-
-func isContextOverflow(msg string) bool {
-    lower := strings.ToLower(msg)
-    return strings.Contains(lower, "token") &&
-        (strings.Contains(lower, "limit") || strings.Contains(lower, "exceed") ||
-         strings.Contains(lower, "too long") || strings.Contains(lower, "maximum"))
 }
 ```
 
@@ -1183,3 +1178,10 @@ Note: Unlike the Anthropic and OpenAI providers, the Google provider does **not*
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
 | 1 | coder-1-sea | P1 | Safety-blocked responses can leak partial content before error | Incorporated | §5.5 stream loop reordered: finishReason/safety checked before processCandidateParts; blocked candidates skip content emission |
+
+## Round 2 Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-2-sea | P2 | StopReason mapping mismatch for max-token termination | Incorporated | Clarified canonical mapping for max-token termination in `mapFinishReason`. |
+| 2 | coder-2-sea | P3 | Local context-overflow detector diverges from shared helper | Incorporated | Switched HTTP error classification path to shared `ai.IsContextOverflow` utility. |

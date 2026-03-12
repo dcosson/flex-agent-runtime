@@ -157,14 +157,14 @@ Harness requirements:
 **Canonical event sequence (happy-path multi-turn):**
 
 ```
-session_created → tool_started → tool_completed → turn_completed → tool_started → tool_completed → turn_completed → session_completed
+session_started → tool_started → tool_completed → turn_completed → tool_started → tool_completed → turn_completed → session_ended
 ```
 
 Event ordering guarantees (referencing event types from plan 05 — agent):
-- `session_created` is always the first event for a session.
+- `session_started` is always the first lifecycle event for a session.
 - `tool_started` and `tool_completed` always appear as matched pairs in order per tool call.
 - `turn_completed` appears after all tool calls in a turn have emitted `tool_completed`.
-- `session_completed` is always the final event (on success) or `session_failed` (on error).
+- `session_ended` is always the final lifecycle event (both success and error carry outcome metadata).
 - Within a single turn, multiple `tool_started → tool_completed` pairs may appear sequentially.
 - Events across turns are strictly ordered: all events for turn N complete before any events for turn N+1.
 
@@ -313,17 +313,27 @@ On failure, capture:
 
 ---
 
-## R1 Review Disposition (reviewer-sea)
+## Round 1 Review Disposition
 
 **Review:** [14-mode3-e2e-review-reviewer-sea.md](./14-mode3-e2e-review-reviewer-sea.md)
 **Incorporated by:** coder-2-sea
 **Date:** 2026-03-12
 
-| Finding | Severity | Disposition | Notes |
-|---------|----------|-------------|-------|
-| F1 | P1 | Incorporated | Added MemorySandboxService spec with in-memory state, snapshot/rollback, tier classification |
-| F2 | P2 | Incorporated | Added network-level fault injection scenarios F6-F8 using TCP proxy |
-| F3 | P2 | Incorporated | Defined canonical event sequence for happy-path scenario |
-| F4 | P2 | Incorporated | Defined semantic equivalence criteria with explicit divergence allow-list |
-| F5 | P3 | Incorporated | Added cross-reference to plan 08 fixture infrastructure |
-| F6 | P3 | Incorporated | Defined small fixture dataset size and "ready" state criteria |
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P1 | Missing deterministic in-memory sandbox service for test lane | Incorporated | Added `MemorySandboxService` contract (state, snapshots, rollback, tier classification). |
+| 2 | reviewer-sea | P2 | Network fault-injection coverage incomplete | Incorporated | Added F6-F8 network fault scenarios with TCP proxy injection. |
+| 3 | reviewer-sea | P2 | Canonical happy-path event sequence not explicit | Incorporated | Added explicit canonical event sequence assertions for happy path. |
+| 4 | reviewer-sea | P2 | Semantic-equivalence criteria lacked divergence policy | Incorporated | Added explicit divergence allow-list for parity checks. |
+| 5 | reviewer-sea | P3 | Fixture infrastructure linkage was unclear | Incorporated | Added cross-reference to plan 08 fixture infrastructure. |
+| 6 | reviewer-sea | P3 | Fixture dataset sizing/readiness criteria unspecified | Incorporated | Added small fixture size bounds and explicit "ready" criteria. |
+
+## Round 2 Review Disposition
+
+**Review:** [14-mode3-e2e-review-coder-1-sea.md](./14-mode3-e2e-review-coder-1-sea.md)
+**Incorporated by:** coder-1-sea
+**Date:** 2026-03-12
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | Event assertions referenced non-canonical lifecycle names | Incorporated | Canonical sequence/order assertions now use plan-05 lifecycle taxonomy (`session_started`, `session_ended`). |

@@ -414,3 +414,9 @@ The `RuntimeController` (defined in architecture doc) is the control plane that 
 |---|----------|----------|---------|-------------|-------|
 | 1 | coder-1-sea | P1 | Plan omits RuntimeController seam required by architecture | Incorporated | §7.1 added with controller-facing lifecycle, subscription, session lookup, and sandbox boundary contracts |
 | 2 | coder-1-sea | P1 | Per-turn snapshots conflict with follow-up chaining semantics | Incorporated | §5.5 rewritten: turn_completed is primary snapshot trigger independent of idle; idle is informational only |
+
+## Round 2 Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-2-sea | P1 | Snapshot trigger cardinality in companion harness conflicted with follow-up semantics | Incorporated | Companion harness P3 updated to per-turn `turn_completed` and per-sequence idle semantics. |

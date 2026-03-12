@@ -852,10 +852,12 @@ func (svc *SandboxHostService) TurnComplete(ctx context.Context, sessionID strin
     snapName := fmt.Sprintf("%s-%04d", svc.config.SnapshotPrefix, prospectiveTurn)
     sess.mu.RUnlock()
 
+    snapshotStart := time.Now()
     info, err := svc.zfs.CreateSnapshot(ctx, sess.dataset, snapName)
     if err != nil {
         return nil, fmt.Errorf("snapshot turn %d: %w", prospectiveTurn, err)
     }
+    snapshotDuration := time.Since(snapshotStart)
 
     // Snapshot succeeded — now commit the state change.
     sess.mu.Lock()
@@ -869,11 +871,12 @@ func (svc *SandboxHostService) TurnComplete(ctx context.Context, sessionID strin
     }
 
     svc.metrics.snapshotsTaken.Add(ctx, 1)
-    svc.metrics.snapshotLatency.Record(ctx, info.Used)
+    svc.metrics.snapshotLatency.Record(ctx, snapshotDuration.Seconds())
+    svc.metrics.snapshotSpaceUsed.Record(ctx, float64(info.Used))
 
     return &SnapshotResult{
         SnapshotID: snapName,
-        TurnNumber: turnNum,
+        TurnNumber: prospectiveTurn,
         SpaceUsed:  info.Used,
     }, nil
 }
@@ -1449,22 +1452,33 @@ Should sessions have a configurable time-to-live after which they are automatica
 
 ---
 
-## R1 Review Disposition (reviewer-sea)
+## Round 1 Review Disposition
 
 **Review:** [11-sandbox-host-service-review-reviewer-sea.md](./11-sandbox-host-service-review-reviewer-sea.md)
 **Incorporated by:** coder-2-sea
 **Date:** 2026-03-12
 
-| Finding | Severity | Disposition | Notes |
-|---------|----------|-------------|-------|
-| F1 | P1 | Incorporated | Added sessionsMu mutex for atomic capacity-check + store |
-| F2 | P1 | Incorporated | Moved turnCount increment after successful snapshot |
-| F3 | P2 | Incorporated | Added SnapshotEntry struct with isTurnSnapshot flag |
-| F4 | P2 | Incorporated | Removed RollingBack from state diagram (rollback is synchronous) |
-| F5 | P2 | Incorporated | Added in-flight tool drain-with-timeout to DestroySession |
-| F6 | P3 | Incorporated | Implemented wait-with-timeout for PauseSession |
-| F7 | P2 | Incorporated | Added validatePath helper in tier1 executor |
-| F8 | P3 | Incorporated | Fixed to use SetProperty for quota; errors not swallowed |
-| F9 | P3 | Incorporated | Unified to single lock hold for check-and-remove |
-| F10 | P3 | Incorporated | Default case returns error instead of shell command |
-| F11 | P2 | Incorporated | Added shadow state machine to P1 test (see test harness) |
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P1 | Atomic session-capacity check/store race | Incorporated | Added `sessionsMu` to guard capacity check + store atomically. |
+| 2 | reviewer-sea | P1 | `turnCount` incremented before snapshot success | Incorporated | Moved turn counter commit to post-success path. |
+| 3 | reviewer-sea | P2 | Turn-count recompute ignored explicit snapshots | Incorporated | Added `SnapshotEntry` metadata with `IsTurnSnapshot` and recompute by counting turn snapshots only. |
+| 4 | reviewer-sea | P2 | Rollback state machine introduced async `RollingBack` state | Incorporated | Removed `RollingBack`; rollback remains synchronous in the canonical state model. |
+| 5 | reviewer-sea | P2 | Destroy race with in-flight tools | Incorporated | Added drain-with-timeout for in-flight tools before teardown. |
+| 6 | reviewer-sea | P3 | Pause completion/wait semantics underspecified | Incorporated | Added wait-with-timeout behavior in `PauseSession`. |
+| 7 | reviewer-sea | P2 | Tier1 path validation missing/underspecified | Incorporated | Added `validatePath` helper and containment checks in Tier1 executor. |
+| 8 | reviewer-sea | P3 | Quota update example used wrong helper and masked errors | Incorporated | Updated to explicit `SetProperty` call with surfaced errors. |
+| 9 | reviewer-sea | P3 | Session remove path locking not atomic | Incorporated | Unified to single lock-hold check-and-remove sequence. |
+| 10 | reviewer-sea | P3 | Unknown Tier2 tool fallback risked shell execution | Incorporated | Default case now returns typed error for unknown tool. |
+| 11 | reviewer-sea | P2 | State-machine tests lacked shadow-model verification | Incorporated | Added explicit shadow state-machine check in test harness. |
+
+## Round 2 Review Disposition
+
+**Review:** [11-sandbox-host-service-review-coder-1-sea.md](./11-sandbox-host-service-review-coder-1-sea.md)
+**Incorporated by:** coder-1-sea
+**Date:** 2026-03-12
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | `TurnComplete` returned undefined `turnNum` symbol | Incorporated | Return value now uses committed `prospectiveTurn` consistently. |
+| 2 | coder-1-sea | P2 | Snapshot latency metric recorded bytes-used value | Incorporated | Added explicit timing around `CreateSnapshot`; `snapshotLatency` and `snapshotSpaceUsed` are recorded separately. |
