@@ -14,7 +14,7 @@ This plan defines the runtime's agent orchestration core: the `Agent` API and th
 Primary goals:
 - Implement the native loop (`LLM -> tools -> LLM`) with streaming events.
 - Define uniform `AgentDriver` contracts so Native/ClaudeCode/Codex share one observable API.
-- Define session/state/event types consumed by orchestrator and sandbox infrastructure.
+- Define session/state/event types consumed by RuntimeController and sandbox infrastructure.
 - Support steering and follow-up injection without race conditions.
 - Support terminal tools that intentionally end the loop with structured outputs.
 - Preserve architecture decisions: session ID disambiguation, tool backend neutrality, and per-turn snapshot trigger semantics.
@@ -63,7 +63,7 @@ graph TB
 
 ```mermaid
 sequenceDiagram
-    participant User as Orchestrator/User
+    participant User as RuntimeController/User
     participant Agent as Agent
     participant Driver as NativeDriver
     participant AI as ai.Provider
@@ -133,7 +133,7 @@ type Session struct {
 ```
 
 Session ID disambiguation rule:
-- `Session.ID` is runtime-owned and authoritative for snapshots, rollback, pause/resume, RPC addressing, and orchestrator bookkeeping.
+- `Session.ID` is runtime-owned and authoritative for snapshots, rollback, pause/resume, RPC addressing, and RuntimeController bookkeeping.
 - `Session.DriverSessionID` stores the CLI/tool-native ID (Claude/Codex/etc.) only for correlation/debugging and must never drive control-plane operations.
 
 ### 3.2 AgentDriver Contract
@@ -240,15 +240,17 @@ Import boundaries:
 Terminal tools are declared in options by tool name. When one returns:
 - Emit `terminal_tool_completed` with structured payload.
 - End turn and transition to idle without additional LLM continuation.
-- Return structured terminal result to caller/orchestrator.
+- Return structured terminal result to caller/RuntimeController.
 
 ### 5.5 Per-turn Snapshot Trigger Seam
 
 Architecture decision implementation contract:
 - Agent runtime does not take filesystem snapshots directly.
-- It emits deterministic turn-boundary signals: `turn_completed` then `state_change(idle)`.
-- Sandbox/orchestrator layers subscribe to these events and trigger snapshot creation when session backend supports snapshots.
-- This yields per-turn snapshots by default; per-tool-call snapshots remain optional backend policy.
+- It emits a `turn_completed` event at every turn boundary (including intermediate turns in follow-up chains).
+- `turn_completed` is the primary snapshot trigger signal. Subscribers (sandbox host, RuntimeController) use this event to create snapshots regardless of whether the agent transitions to idle.
+- `state_change(idle)` is emitted only when the follow-up queue is empty and no more turns will execute. This is an informational signal, not a snapshot trigger.
+- This design ensures follow-up chains still produce per-turn snapshots even though the agent never reaches idle between chained turns.
+- Per-tool-call snapshots remain optional backend policy (via `Snapshot` flag on `ExecuteToolRequest`).
 
 ---
 
@@ -276,7 +278,29 @@ Implementation patterns:
 | `internal/tools` | Tool execution | `[]AgentTool` with `Execute` callback contract |
 | `internal/termmux` | 3rd-party drivers | Adapter from termmux driver events to canonical `AgentEvent` |
 | `internal/rpc` (future) | Remote event transport | canonical `AgentEvent` stream serializable over RPC |
-| Sandbox host/orchestrator | Snapshot trigger | `turn_completed` + `state_change(idle)` boundary events keyed by `Session.ID` |
+| Sandbox host/RuntimeController | Snapshot trigger | `turn_completed` + `state_change(idle)` boundary events keyed by `Session.ID` |
+| `RuntimeController` | Session lifecycle control | Controller-facing APIs for session create/pause/resume/stop, event subscription, and state queries |
+
+### 7.1 RuntimeController Integration Contract
+
+The `RuntimeController` (defined in architecture doc) is the control plane that manages sessions. `internal/agent` exposes the following integration surface for controller implementations:
+
+**Lifecycle delegation:**
+- `Agent.Start(ctx, session, prompt)` — controller calls this after creating a session. The agent does not own session creation.
+- `Agent.Stop(ctx)` — controller calls this to stop the agent. Agent transitions to `Exited` state.
+- Pause/Resume are controller-level operations that gate agent interactions; the agent itself does not implement pause state — the controller prevents new `Prompt`/`Continue` calls while paused.
+
+**Event subscription:**
+- `Agent.Subscribe(fn func(AgentEvent))` returns an unsubscribe handle. Controller subscribes to receive all canonical events for routing to remote consumers, snapshot triggers, and state tracking.
+- Events are keyed by `Session.ID` (runtime session ID), never by driver-native IDs.
+
+**Session lookup:**
+- Agent holds a reference to its `Session` but does not manage a session registry. The `RuntimeController` (e.g., `DefaultController`) maintains the session registry and maps session IDs to `Agent` instances.
+- `Agent.Session()` returns the current session for state queries.
+
+**Boundary with sandbox infrastructure:**
+- Agent emits `turn_completed` and `state_change(idle)` events. The controller (or sandbox host) subscribes to these and triggers snapshot creation when the session backend supports snapshots.
+- Agent does NOT call snapshot APIs directly — this separation keeps the agent backend-agnostic.
 
 ---
 
@@ -376,7 +400,17 @@ Implementation patterns:
 2. NativeDriver completes `LLM -> tools -> LLM` cycles with streaming event output.
 3. Canonical `AgentEvent` model implemented and emitted consistently by NativeDriver.
 4. Session ID disambiguation enforced: runtime session ID authoritative everywhere.
-5. Snapshot trigger seam implemented via deterministic idle-boundary events.
+5. Snapshot trigger seam implemented via deterministic `turn_completed` events (not idle-dependent).
 6. Terminal tool path implemented and tested.
 7. Unit + component tests pass under `-race`.
 8. Integration test with real provider passes when credentials are supplied.
+9. RuntimeController integration contract documented and validated with `DefaultController`.
+
+---
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | Plan omits RuntimeController seam required by architecture | Incorporated | §7.1 added with controller-facing lifecycle, subscription, session lookup, and sandbox boundary contracts |
+| 2 | coder-1-sea | P1 | Per-turn snapshots conflict with follow-up chaining semantics | Incorporated | §5.5 rewritten: turn_completed is primary snapshot trigger independent of idle; idle is informational only |

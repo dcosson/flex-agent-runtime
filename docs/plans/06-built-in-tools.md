@@ -116,7 +116,14 @@ sequenceDiagram
 
 ```go
 type ToolBackend interface {
-    ExecuteTool(ctx context.Context, req ToolRequest) (*ToolResponse, error)
+    ExecuteTool(ctx context.Context, req ToolRequest, onProgress func(ToolProgress)) (*ToolResponse, error)
+}
+
+// ToolProgress carries incremental output during long-running tool execution.
+// For remote backends (SandboxBackend), progress is propagated via RPC streaming.
+type ToolProgress struct {
+    Content string // incremental output chunk (stdout/stderr for bash, etc.)
+    IsError bool   // true if this is stderr content
 }
 
 type ToolRequest struct {
@@ -240,11 +247,22 @@ Future hook:
 
 ### 4.8 `git_*`
 
-Scope in V1:
-- `git_status`, `git_diff`, `git_log`, `git_show`, `git_add`, `git_commit`.
+#### V1 Git Command Matrix
 
-Policy:
-- Commands with potential remote/network effects (`push`, `fetch`, `pull`, `clone`) excluded from default tool set in V1 or treated as Tier 2 with stricter policy gates.
+| Command | Tier | Included in V1 | Policy |
+|---------|------|----------------|--------|
+| `git_status` | 1 | Yes | Read-only, safe |
+| `git_diff` | 1 | Yes | Read-only, safe |
+| `git_log` | 1 | Yes | Read-only, safe |
+| `git_show` | 1 | Yes | Read-only, safe |
+| `git_add` | 2 | Yes | Mutating (index), requires container isolation |
+| `git_commit` | 2 | Yes | Mutating (history), requires container isolation |
+| `git_push` | 2 | No (V2) | Network + mutating, requires policy approval gate |
+| `git_fetch` | 2 | No (V2) | Network, requires policy approval gate |
+| `git_pull` | 2 | No (V2) | Network + mutating, requires policy approval gate |
+| `git_clone` | 2 | No (V2) | Network + large I/O, requires policy approval gate |
+
+**Unsupported command handling:** Any `git_*` tool name not in the V1 matrix returns a structured error: `{"error": "unsupported_git_command", "command": "<name>", "message": "This git command is not available in V1. Supported: status, diff, log, show, add, commit."}`
 
 ---
 
@@ -261,6 +279,7 @@ Policy:
 - Thin RPC client adapter implementing `ToolBackend`.
 - Forwards `SessionID`, `ToolCallID`, tool name, params, resource hints.
 - Returns backend-populated `SnapshotID` and exit code fields.
+- **Progress streaming:** For Tier 2 tools (bash), SandboxBackend receives incremental output via RPC server-streaming and invokes the `onProgress` callback. The RPC layer (plan 13) must support streaming `ToolProgress` messages within an `ExecuteTool` response stream. For Tier 1 tools, progress callbacks are not used (execution is fast).
 
 ### 5.3 Tier Classification Policy
 
@@ -384,3 +403,13 @@ Classifier is centralized and shared to prevent drift across tools/backends.
 6. Grep implemented in pure Go with benchmark targets met.
 7. Tool package tests pass under `-race`.
 8. Integration tests for git and sandbox routing pass in gated environments.
+9. Progress streaming works through both LocalBackend and SandboxBackend for bash tool.
+
+---
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | ToolBackend contract cannot carry remote progress updates | Incorporated | §3.1 ToolBackend.ExecuteTool now accepts onProgress callback; §5.2 SandboxBackend specifies RPC streaming for progress |
+| 2 | coder-1-sea | P2 | Git tool surface is underspecified for deterministic implementation | Incorporated | §4.8 adds explicit V1 git command matrix with tier assignments and unsupported command handling |

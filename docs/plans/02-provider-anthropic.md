@@ -20,9 +20,9 @@ Primary goals:
 - Track usage fields (input/output/cache read/cache write tokens) and compute cost via `ai.CalculateCost`.
 
 Non-goals:
-- Provider-specific retry middleware (deferred; handled by caller/orchestrator policy).
+- Provider-specific retry middleware (deferred; handled by caller/RuntimeController policy).
 - UI rendering concerns for partial tool JSON (provider emits typed events only).
-- Multi-provider failover policy (belongs in agent/orchestrator layer).
+- Multi-provider failover policy (belongs in agent/RuntimeController layer).
 
 ---
 
@@ -255,8 +255,9 @@ For each `input_json_delta` chunk:
 - keep prior `lastValid`, continue buffering raw input
 7. On `content_block_stop`:
 - parse full raw input strictly
-- if strict parse fails but `lastValid` exists, use `lastValid` and emit warning metadata in debug logs
-- construct final `ai.ToolCall` and emit `toolcall_end`
+- if strict parse succeeds, use the parsed result
+- if strict parse fails, emit a terminal `ProviderError` (tool-call parse failure) — do NOT fall back to `lastValid` or emit `toolcall_end` with stale/truncated arguments
+- construct final `ai.ToolCall` and emit `toolcall_end` only on successful parse
 
 This is the concrete architecture decision from plan index OQ4 resolution: use `github.com/karminski/streaming-json-go` for robust partial JSON completion.
 
@@ -303,7 +304,7 @@ No reverse import is allowed from core packages into provider internals.
 ## 8. Acceptance Criteria
 
 1. **Streaming prompt in CLI path**
-- Steps: orchestrator invokes agent with Anthropic model, user submits prompt.
+- Steps: RuntimeController invokes agent with Anthropic model, user submits prompt.
 - Expected: user sees incremental text deltas and final assistant response with usage/cost.
 
 2. **Tool call round-trip across agent boundary**
@@ -320,7 +321,7 @@ No reverse import is allowed from core packages into provider internals.
 
 5. **Context overflow surfaced as typed failure**
 - Steps: send overlong prompt that exceeds model context.
-- Expected: final stream error is classified as `context_overflow` and surfaced through agent/orchestrator UX.
+- Expected: final stream error is classified as `context_overflow` and surfaced through agent/RuntimeController UX.
 
 6. **Partial tool JSON over SSE chunks**
 - Steps: provider emits fragmented tool input JSON across multiple deltas.
@@ -401,3 +402,11 @@ No reverse import is allowed from core packages into provider internals.
 6. Provider error classification returns typed errors (`auth`, `rate_limit`, `context_overflow`, `server_error`, `unknown`).
 7. Unit + component tests pass under `-race`.
 8. Integration smoke tests pass when credentials are provided.
+
+---
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | Final tool-call arguments can be silently corrupted on parse failure | Incorporated | §5.3 step 7 rewritten: strict parse required at finalization, emit ProviderError on failure instead of falling back to lastValid |

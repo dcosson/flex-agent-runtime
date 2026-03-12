@@ -23,7 +23,7 @@ Primary goals:
 - Track usage fields (`promptTokenCount`, `candidatesTokenCount`, `cachedContentTokenCount`, `thoughtsTokenCount`) and compute cost via `ai.CalculateCost`.
 
 Non-goals:
-- Provider-specific retry middleware (deferred; handled by caller/orchestrator policy).
+- Provider-specific retry middleware (deferred; handled by caller/RuntimeController policy).
 - Vertex AI endpoint support (future work — different auth, same wire format).
 - File upload / media API (separate utility, not core provider).
 - Google Search grounding, code execution, URL context, or MCP server tools (Gemini-specific meta-tools, out of scope).
@@ -693,15 +693,20 @@ func (p *Provider) processStream(ctx context.Context, resp *http.Response, model
         // Process candidates (we only use candidate 0)
         if len(chunk.Candidates) > 0 {
             cand := &chunk.Candidates[0]
-            processCandidateParts(es, acc, cand, model)
 
+            // Check safety status BEFORE emitting content to avoid
+            // leaking partial content from blocked responses.
             if cand.FinishReason != "" {
                 acc.stopReason = mapFinishReason(cand.FinishReason)
-                if cand.FinishReason == "SAFETY" {
+                if isSafetyBlock(cand.FinishReason) {
                     acc.safetyBlocked = true
                     acc.safetyDetails = formatSafetyRatings(cand.SafetyRatings)
+                    // Do NOT process parts from safety-blocked candidates
+                    continue
                 }
             }
+
+            processCandidateParts(es, acc, cand, model)
         }
 
         // Usage from final chunk
@@ -1055,7 +1060,7 @@ No reverse import is allowed from core packages into provider internals.
 
 ### AC1. Streaming Prompt via CLI
 
-**Steps:** Orchestrator invokes agent with Gemini model (e.g., gemini-2.5-flash), user submits text prompt.
+**Steps:** RuntimeController invokes agent with Gemini model (e.g., gemini-2.5-flash), user submits text prompt.
 **Expected:** User sees incremental text deltas and final assistant response with usage/cost.
 
 ### AC2. Tool Call Round-Trip
@@ -1076,7 +1081,7 @@ No reverse import is allowed from core packages into provider internals.
 ### AC5. Context Overflow Surfaced as Typed Failure
 
 **Steps:** Send overlong prompt that exceeds model context window.
-**Expected:** Final stream error is classified as `context_overflow` and surfaced through agent/orchestrator UX.
+**Expected:** Final stream error is classified as `context_overflow` and surfaced through agent/RuntimeController UX.
 
 ### AC6. Safety Block Surfaced with Details
 
@@ -1170,3 +1175,11 @@ Note: Unlike the Anthropic and OpenAI providers, the Google provider does **not*
 7. Provider error classification returns typed errors for all error categories including safety blocks.
 8. Unit + component tests pass under `-race`.
 9. Integration smoke tests pass when `GOOGLE_API_KEY` is provided.
+
+---
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | Safety-blocked responses can leak partial content before error | Incorporated | §5.5 stream loop reordered: finishReason/safety checked before processCandidateParts; blocked candidates skip content emission |

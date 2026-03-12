@@ -28,7 +28,7 @@ Primary goals:
 - Support the full matrix of `ModelCompat` flags for OpenAI-compatible endpoints.
 
 Non-goals:
-- Provider-specific retry middleware (deferred; handled by caller/orchestrator).
+- Provider-specific retry middleware (deferred; handled by caller/RuntimeController).
 - Assistants API, Files API, or other OpenAI endpoints beyond Chat Completions.
 - Realtime/WebSocket streaming (future work if needed).
 
@@ -585,17 +585,26 @@ On `finish_reason: "tool_calls"`, finalize all pending tool call states:
 // sse_parser.go
 
 func finalizeToolCalls(es *ai.EventStream, acc *streamAccumulator) {
-    for idx, state := range acc.toolStates {
+    // Sort indices to ensure deterministic finalization order matching
+    // the model's emitted tool call sequence.
+    indices := make([]int, 0, len(acc.toolStates))
+    for idx := range acc.toolStates {
+        indices = append(indices, idx)
+    }
+    sort.Ints(indices)
+
+    for _, idx := range indices {
+        state := acc.toolStates[idx]
         rawJSON := state.rawArgs.String()
         var finalArgs map[string]any
 
         if err := json.Unmarshal([]byte(rawJSON), &finalArgs); err != nil {
-            // Strict parse failed — use lastValid with warning
-            if state.lastValid != nil {
-                finalArgs = state.lastValid
-            } else {
-                finalArgs = map[string]any{}
-            }
+            // Strict parse failed — emit error, do NOT fall back to
+            // lastValid or empty args which could execute tools with
+            // stale/truncated arguments.
+            emitError(es, "tool call parse failure",
+                fmt.Errorf("tool %q (index %d): final argument JSON parse failed: %w", state.name, idx, err))
+            return
         }
 
         es.Send(ai.AssistantMessageEvent{
@@ -793,7 +802,7 @@ No reverse import is allowed from core packages into provider internals.
 
 ### AC1. Streaming Prompt via CLI
 
-**Steps:** Orchestrator invokes agent with OpenAI model (e.g., GPT-4o), user submits text prompt.
+**Steps:** RuntimeController invokes agent with OpenAI model (e.g., GPT-4o), user submits text prompt.
 **Expected:** User sees incremental text deltas and final assistant response with usage/cost.
 
 ### AC2. Tool Call Round-Trip
@@ -814,7 +823,7 @@ No reverse import is allowed from core packages into provider internals.
 ### AC5. Context Overflow Typed Failure
 
 **Steps:** Send overlong prompt that exceeds model context window.
-**Expected:** Final stream error is classified as `context_overflow` and surfaced through agent/orchestrator UX. Works for both OpenAI proper and compat endpoints (which may return different error formats).
+**Expected:** Final stream error is classified as `context_overflow` and surfaced through agent/RuntimeController UX. Works for both OpenAI proper and compat endpoints (which may return different error formats).
 
 ### AC6. Multi-Tool Call in Single Response
 
@@ -906,3 +915,12 @@ Live OpenAI API smoke tests behind env var (`OPENAI_API_KEY`):
 8. At least two compat endpoint formats (Groq, Mistral) have fixture tests passing.
 9. Unit + component tests pass under `-race`.
 10. Integration smoke tests pass when `OPENAI_API_KEY` is provided.
+
+---
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | Tool-call finalization order is nondeterministic | Incorporated | §5.6 finalizeToolCalls now sorts indices before emitting end events |
+| 2 | coder-1-sea | P1 | Final tool-call arguments can degrade to stale/empty payloads | Incorporated | §5.6 now requires strict parse; emits error instead of falling back to lastValid or empty {} |
