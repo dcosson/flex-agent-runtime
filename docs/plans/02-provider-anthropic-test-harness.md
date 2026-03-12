@@ -1,0 +1,212 @@
+# 02: Anthropic Provider — Test Harness
+
+**Companion to:** [02-provider-anthropic.md](./02-provider-anthropic.md)
+**Scope:** High-assurance validation beyond ordinary unit tests for Anthropic provider behavior.
+
+---
+
+## 1. Property-Based Tests
+
+### P1. Stream Event Ordering and Terminal Uniqueness
+
+Invariant:
+- Event order emitted by provider matches Anthropic SSE order constraints.
+- Exactly one terminal event (`done` or `error`) appears.
+
+Generator:
+- Produce valid synthetic Anthropic event traces (including text/thinking/tool branches).
+
+Checks:
+- No out-of-order content index updates.
+- `EventStream.Result()` returns once.
+
+### P2. Tool JSON Delta Convergence
+
+Invariant:
+- For any JSON object `J`, splitting `J` into arbitrary chunks and feeding as `input_json_delta` yields final parsed args equal to `J`.
+
+Generator:
+- Random JSON objects with depth/array/string edge cases.
+- Random chunk boundaries (including 1-byte chunks).
+
+Checks:
+- zero panics
+- final `toolcall_end` args deep-equal original JSON object
+
+### P3. Usage/Cost Arithmetic Consistency
+
+Invariant:
+- `usage.Cost.Total == Input + Output + CacheRead + CacheWrite` within epsilon.
+
+Generator:
+- Random valid token counts, randomized model prices.
+
+Checks:
+- deterministic output
+- non-negative costs
+
+### P4. Error Classification Stability
+
+Invariant:
+- Known Anthropic error forms always map to expected `ProviderErrorCode`.
+- Unknown errors never misclassify as known typed codes unless explicit matcher is hit.
+
+---
+
+## 2. Fault Injection and Chaos Tests
+
+### F1. Mid-stream TCP reset
+
+- Inject network disconnect after N SSE events.
+- Expect terminal `error` event and no goroutine leaks.
+
+### F2. Malformed SSE payload
+
+- Corrupt random event JSON payload.
+- Expect typed parse failure path; stream closes safely.
+
+### F3. API throttling storm
+
+- Return bursts of HTTP 429 and validate stable `rate_limit` mapping and clean shutdown.
+
+### F4. Slow-consumer backpressure
+
+- Consumer intentionally sleeps between reads.
+- Verify provider does not deadlock; closes with timeout/cancel semantics when context expires.
+
+### F5. Context cancellation races
+
+- Cancel context at random points in stream lifecycle (before first event, mid tool delta, near terminal event).
+- Ensure no double-close and no send-on-closed-channel panic.
+
+---
+
+## 3. Comparison/Oracle Tests
+
+### O1. Recorded Trace Replay Oracle
+
+- Capture real Anthropic SSE transcripts (sanitized).
+- Replay through parser and compare output against golden `AssistantMessageEvent` sequences.
+
+### O2. SDK Output Consistency Oracle (optional nightly)
+
+- For a small canonical prompt set, compare semantic outputs (stop reason category, tool call structure, usage shape) between direct HTTP implementation and official SDK reference run.
+- Purpose: detect wire-contract drift.
+
+---
+
+## 4. Deterministic Simulation Tests
+
+### S1. Event FSM Validator
+
+- Simulate legal and illegal Anthropic event transitions.
+- Legal traces must parse to completion.
+- Illegal traces must fail deterministically with categorized errors.
+
+### S2. Multi-tool Parallel-block simulation
+
+- Simulate responses that open multiple tool content blocks.
+- Validate per-block parser isolation and ID/name association.
+
+### S3. Thinking + tool interleaving
+
+- Simulate interleaving thinking deltas with tool JSON deltas.
+- Validate independent accumulation and correct final content order.
+
+---
+
+## 5. Benchmarks and Performance Targets
+
+### B1. SSE Throughput Benchmark
+
+Target:
+- Parse >= 50k SSE events/sec on developer workstation baseline.
+
+### B2. Allocation Budget
+
+Target:
+- <= 3 allocations per `content_block_delta` event on steady-state text stream.
+
+### B3. Tool JSON Incremental Parse Overhead
+
+Target:
+- `CompleteJSON()+Unmarshal` median < 100us for 4KB cumulative tool JSON.
+
+### B4. End-to-End Stream Latency Overhead
+
+Target:
+- Provider processing overhead < 5ms p95 per 1k events vs raw scanner-only baseline.
+
+---
+
+## 6. Stress and Soak Tests
+
+### ST1. Long session soak
+
+- 8-hour replay with mixed text/thinking/tool traces.
+- Assertions: no memory growth trend beyond defined ceiling, no goroutine leak.
+
+### ST2. Concurrency stress
+
+- 500 concurrent provider streams against mock server.
+- Assertions: no races under `-race`, stable completion ratio, bounded CPU.
+
+### ST3. Burst tool-call stress
+
+- High-frequency `input_json_delta` streams for large tool args.
+- Assertions: parser stability and no progressive slowdown.
+
+---
+
+## 7. Security Tests
+
+### SEC1. Prompt/data injection in tool JSON
+
+- Feed malicious strings and escaped payloads through `input_json_delta`.
+- Validate strict JSON object parsing and no code execution paths.
+
+### SEC2. Header/config leakage
+
+- Ensure request logging and error surfaces never expose API keys.
+
+### SEC3. Oversized payload protection
+
+- Enforce maximum event/body limits in parser path.
+- Validate graceful failure for oversized deltas.
+
+---
+
+## 8. Manual QA Plan
+
+1. Run live Anthropic stream with visible incremental output; verify perceived latency and event progression quality.
+2. Execute a known tool-call prompt and inspect emitted tool args snapshots for realism and stability.
+3. Force an over-context prompt and verify user-facing classification message is clear and actionable.
+4. Run two-turn caching scenario and manually verify cache token fields/cost delta in logs.
+
+---
+
+## 9. CI Tier Mapping
+
+| Tier | Runs | Contents |
+|------|------|----------|
+| PR-fast | every PR | core unit tests, deterministic SSE fixtures, error mapping |
+| PR-standard | every PR | property tests (bounded iterations), race tests for provider package |
+| Nightly | nightly | long property runs, chaos/fault injection, benchmark trend capture |
+| Weekly | weekly | 8-hour soak, high-concurrency stress, live API integration suite |
+
+Credentialed live tests are gated by secrets and skipped in fork PRs.
+
+---
+
+## 10. Exit Criteria
+
+Implementation for Anthropic provider is complete only when all are true:
+
+1. Property tests P1-P4 pass consistently across repeated runs.
+2. Fault injection tests F1-F5 pass with no goroutine leaks.
+3. Deterministic simulations S1-S3 pass and illegal traces fail with expected categories.
+4. Benchmark targets B1-B4 are met or documented with approved regression rationale.
+5. Stress/soak tests ST1-ST3 pass on scheduled CI.
+6. Security tests SEC1-SEC3 pass; no sensitive-data leakage in logs.
+7. Manual QA checklist executed and recorded for at least one release-candidate commit.
+8. CI tier matrix is wired and green.

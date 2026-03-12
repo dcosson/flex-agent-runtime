@@ -2,7 +2,7 @@
   "id": "aiag-oaj.1",
   "title": "Draft 02-provider-anthropic",
   "description": "Draft plan doc + test harness for Anthropic provider. First provider — establishes patterns for OpenAI and Google.",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-oaj",
@@ -31,6 +31,15 @@
   "labels": [
     "project=ai-agent-go"
   ],
+  "assignee": "Danny Cosson",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Drafted docs/plans/02-provider-anthropic.md and docs/plans/02-provider-anthropic-test-harness.md. Ready for plan-review.",
+      "created_at": "2026-03-12T14:24:05.898219-07:00"
+    }
+  ],
   "created_at": "2026-03-12T14:19:54.584009-07:00",
-  "updated_at": "2026-03-12T14:19:54.584009-07:00"
+  "updated_at": "2026-03-12T14:24:05.8984-07:00"
 }
