@@ -1,0 +1,22 @@
+{
+  "id": "aiag-oaj.17",
+  "title": "R1 Review: Batch C (sandbox-host + rpc + e2e + harness)",
+  "description": "Round 1 batch review of: 11-sandbox-host-service, 13-rpc-layer, 14-mode3-e2e, 15-mode2-e2e, 16-runtime-test-harness (and their test harnesses)",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-oaj",
+  "dependencies": [
+    {
+      "id": "aiag-oaj",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=ai-agent-go"
+  ],
+  "created_at": "2026-03-12T15:03:09.15877-07:00",
+  "updated_at": "2026-03-12T15:03:09.15877-07:00"
+}
