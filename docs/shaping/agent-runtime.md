@@ -28,7 +28,7 @@ Building an AI coding agent today requires choosing a rigid, all-in-one harness 
 
 A flexible agent runtime where:
 - The three core layers (orchestrator, agent loop, tools) can be placed independently — all local, partially remote, or fully distributed
-- Multiple execution backends are supported for tools, from local filesystem to production sandbox hosts with ZFS snapshots and Firecracker microVMs
+- Multiple execution backends are supported for tools, from local filesystem to production sandbox hosts with ZFS snapshots and gVisor containers
 - 3rd party agent harnesses (Claude Code, etc.) can be integrated within the framework
 - Agents can pause, resume, and roll back with full filesystem state preservation
 - The system scales from a single developer's laptop to thousands of concurrent agents
@@ -92,22 +92,24 @@ Tools on a sandbox host are split into two tiers based on isolation needs:
 - Microsecond latency
 - No isolation boundary (operations are constrained to session dataset with path validation)
 
-**Tier 2 — Process execution (VM required):**
+**Tier 2 — Process execution (container sandbox required):**
 - Bash, shell commands, builds, test runs, linters
-- Execute in Firecracker microVMs with per-call resource sizing
-- ~125ms boot overhead per call
-- Full KVM isolation — arbitrary code cannot affect host or other sessions
+- Execute in gVisor (runsc) containers with per-call resource sizing via cgroups
+- ZFS dataset bind-mounted directly into the container — native filesystem performance
+- ~50-150ms container start overhead per call
+- Strong syscall-level isolation (user-space kernel, used by GKE Sandbox and Cloud Run) — arbitrary code cannot affect host or other sessions
+- Runs on any standard EC2 instance — no bare-metal or nested virtualization required
 
 ZFS snapshots are taken after every tool call regardless of tier.
 
-### VM Lifecycle: Per-Tool-Call
+### Container Lifecycle: Per-Tool-Call
 
-VMs are spun up per tool call and destroyed after completion — NOT kept alive during LLM thinking time. At scale this matters:
+Containers are spun up per tool call and destroyed after completion — NOT kept alive during LLM thinking time. At scale this matters:
 
-- 50 agents x 12 hours x 85% idle = 510 VM-hours wasted if kept alive
-- Boot overhead: 125ms per call x 200 calls = 27 seconds total over 12 hours (negligible)
+- 50 agents x 12 hours x 85% idle = 510 container-hours wasted if kept alive
+- Boot overhead: ~100ms per call x 200 calls = 20 seconds total over 12 hours (negligible)
 - Default: spin up, execute, snapshot, destroy
-- Potential optimization: batch rapid sequential tool calls in one VM session
+- Potential optimization: batch rapid sequential tool calls in one container session
 
 ---
 
@@ -164,79 +166,76 @@ The three layers can be arranged in multiple configurations:
 
 ---
 
-## Shapes
+## Solution: ZFS-on-EBS + gVisor
 
-### Shape C: Firecracker microVMs + Overlay Snapshots
+Combines ZFS on EBS for instantly-snapshotable filesystem with gVisor containers for fast, dynamically-sized, isolated execution.
 
-Uses Firecracker microVMs for fast-launching, lightweight isolation. Filesystem snapshots via overlay filesystem approach.
+### Why gVisor
 
-| Part | Mechanism |
-|------|-----------|
-| **C1** | **Durable filesystem:** Overlay filesystem (OverlayFS or device-mapper thin provisioning) on top of a base image stored in durable block storage. Each tool call writes to a new overlay layer. |
-| **C2** | **Execution environment:** Firecracker microVMs. Sub-second boot (~125ms). CPU/memory configurable per VM. |
-| **C3** | **Snapshot lifecycle:** After each tool call, the overlay diff is persisted as a snapshot layer. Snapshots are additive — each references its parent. |
-| **C4** | **Pause/resume:** On pause, VM terminated. Filesystem overlays persisted durably. On resume, fresh VM booted with overlay stack at last point. |
-| **C5** | **Rollback:** Discard overlay layers after the target point. Re-launch VM from that point. |
-| **C6** | **Initial snapshot:** Base VM images pre-built with repo, deps, toolchain. New sessions layer on top. |
-| **C7** | **Dynamic sizing:** Firecracker allows specifying vCPUs and memory per microVM at creation time. |
+gVisor (runsc) is a user-space container runtime that intercepts syscalls through a reimplemented Linux kernel interface (written in Go, memory-safe). It is used in production by Google (GKE Sandbox, Cloud Run).
 
-**Tradeoff:** Overlay snapshots are simpler than ZFS but less space-efficient and harder to manage at depth (many layers degrade read performance).
+Key advantages over Firecracker microVMs for this use case:
+- **ZFS access via bind mount** — the ZFS dataset is bind-mounted directly into the container. No virtio-fs, NFS, or rootfs extraction needed. Native filesystem performance.
+- **Runs on any EC2 instance** — no bare-metal or nested virtualization required. Firecracker needs KVM, which means `.metal` instances or nested-virt-capable types when running inside EC2 (VM within a VM). gVisor runs in user-space.
+- **No nested virtualization performance penalty** — Firecracker inside EC2 suffers 10-30% overhead from double address translation and double I/O virtualization. gVisor has no hypervisor layer.
+- **Comparable boot times** — ~50-150ms container start, similar to Firecracker's ~125ms VM boot.
+- **Strong isolation** — syscall interception in user-space with a memory-safe kernel. Not hardware-level (KVM) isolation, but sufficient for executing agent-generated code where we're protecting against accidental damage and runaway processes, not adversarial kernel exploits.
 
-### Shape E: ZFS-on-EBS + Firecracker (Hybrid) — Leading
+Firecracker or other VM runtimes (Kata Containers) remain a future option if hardware-level isolation is ever required (e.g., running fully untrusted third-party code).
 
-Combines ZFS on EBS for instantly-snapshotable filesystem with Firecracker microVMs for fast, dynamically-sized execution.
+### Solution Components
 
 | Part | Mechanism |
 |------|-----------|
-| **E1** | **Durable filesystem:** ZFS pool on EBS volume(s). ZFS provides instant COW snapshots. EBS provides durability. |
-| **E2** | **Execution environment:** Tier 1 (file ops) as Go functions on the host. Tier 2 (bash/builds) in Firecracker microVMs. ZFS pool lives on the host; microVMs access filesystem via virtio-fs or shared mount. |
-| **E3** | **Snapshot lifecycle:** `zfs snapshot` after each tool call. Instant (microseconds), space-efficient (COW — only changed blocks stored). Named with monotonic IDs correlated to agent event log. |
-| **E4** | **Pause/resume:** No VM running between tool calls or when paused. ZFS pool on EBS persists. On resume: attach EBS (if needed), import ZFS pool, ready. |
-| **E5** | **Rollback:** `zfs rollback` to any named snapshot. Agent session reconstructed from event log. |
-| **E6** | **Initial snapshot:** Base ZFS snapshots pre-built. New sessions `zfs clone` from base (~instant). |
-| **E7** | **Dynamic sizing:** Firecracker vCPU/memory per VM. Tier 1 calls need zero VM resources. |
-| **E8** | **Host management:** "Sandbox host" service on EC2 manages ZFS pool + Firecracker VMs. Exposes RPC API. Multiple agent sessions per host (each with own ZFS dataset). |
+| **S1** | **Durable filesystem:** ZFS pool on EBS volume(s). ZFS provides instant COW snapshots. EBS provides durability across host lifecycle. |
+| **S2** | **Execution environment:** Tier 1 (file ops) as Go functions on the host with direct ZFS access. Tier 2 (bash/builds) in gVisor containers with ZFS dataset bind-mounted. CPU/memory limits set via cgroups per container. |
+| **S3** | **Snapshot lifecycle:** `zfs snapshot` after each tool call. Instant (microseconds), space-efficient (COW — only changed blocks stored). Named with monotonic IDs correlated to agent event log. |
+| **S4** | **Pause/resume:** No container running between tool calls or when paused. ZFS pool on EBS persists. On resume: attach EBS (if needed), import ZFS pool, ready. |
+| **S5** | **Rollback:** `zfs rollback` to any named snapshot. Agent session reconstructed from event log. |
+| **S6** | **Initial snapshot:** Base ZFS snapshots pre-built. New sessions `zfs clone` from base (~instant). |
+| **S7** | **Dynamic sizing:** gVisor container CPU/memory limits set via cgroups per tool call. Tier 1 calls need zero container resources. |
+| **S8** | **Host management:** "Sandbox host" service on EC2 manages ZFS pool + gVisor containers. Exposes RPC API. Multiple agent sessions per host (each with own ZFS dataset). |
 
 ---
 
 ## Fit Check
 
-| Req | Requirement | C | E |
-|-----|-------------|---|---|
-| R0 | Three-layer architecture with RPC interfaces | ✅ | ✅ |
-| R1 | Each layer can run locally or remotely | ✅ | ✅ |
-| R2 | Isolated tool execution with configurable resources | ✅ | ✅ |
-| R3 | Per-tool-call filesystem snapshots | ✅ | ✅ |
-| R4 | Pause/resume with zero idle compute | ✅ | ✅ |
-| R5 | Synchronized rollback of session + filesystem | ✅ | ✅ |
-| R6 | 3rd party harness integration (Mode 2) | ✅ | ✅ |
-| R7 | Tool scripting meta-tool support | ✅ | ✅ |
-| R8 | Multi-agent orchestration | ✅ | ✅ |
-| R9 | Initialization from pre-built snapshot | ✅ | ✅ |
-| R10 | Low snapshot overhead | ⚠️ | ✅ |
+| Req | Requirement | Status |
+|-----|-------------|--------|
+| R0 | Three-layer architecture with RPC interfaces | ✅ |
+| R1 | Each layer can run locally or remotely | ✅ |
+| R2 | Isolated tool execution with configurable resources | ✅ |
+| R3 | Per-tool-call filesystem snapshots | ✅ |
+| R4 | Pause/resume with zero idle compute | ✅ |
+| R5 | Synchronized rollback of session + filesystem | ✅ |
+| R6 | 3rd party harness integration (Mode 2) | ✅ |
+| R7 | Tool scripting meta-tool support | ✅ |
+| R8 | Multi-agent orchestration | ✅ |
+| R9 | Initialization from pre-built snapshot | ✅ |
+| R10 | Low snapshot overhead | ✅ |
 
-**R10 note for Shape C:** Overlay snapshots are fast but degrade at depth. After hundreds of layers, read performance suffers as the filesystem must traverse the overlay stack. Periodic flattening needed. ZFS (Shape E) has no such degradation.
+All requirements pass with ZFS-on-EBS + gVisor.
 
 ---
 
 ## Analysis
 
-### Eliminated Shapes (from previous iteration)
+### Eliminated Alternatives
 
 - **ZFS-on-EBS + Fargate:** Fargate cannot attach EBS volumes. Fundamental gap.
 - **ZFS-on-EBS + EC2 (start/stop):** EC2 instance types are fixed at launch. Cannot dynamically resize per tool call.
 - **Kubernetes + PV Snapshots:** EBS snapshots take seconds-to-minutes. Incompatible with per-tool-call snapshot frequency.
+- **Firecracker microVMs + Overlay Snapshots:** Overlay snapshots degrade at depth (hundreds of layers hurt read performance). Firecracker also requires bare-metal EC2 or nested virtualization, adding cost and operational complexity.
+- **Firecracker microVMs + ZFS:** Firecracker can't bind-mount host filesystems (needs virtio-fs/NFS workarounds). Requires bare-metal or nested-virt EC2 instances with 10-30% performance overhead. gVisor solves both problems.
 
-### Leading Shape
-
-**Shape E (ZFS-on-EBS + Firecracker)** passes all requirements. Key properties:
+### Key Properties of Chosen Solution
 
 - **ZFS snapshots** are instant (microseconds) and space-efficient (COW). An agent session with 500 tool calls changing a few files each might use a few hundred MB of snapshot storage.
-- **Two-tier execution** eliminates VM overhead for ~80% of tool calls (file operations). Only bash/builds spin up VMs.
-- **Per-tool-call VM lifecycle** avoids idle compute waste at scale.
+- **Two-tier execution** eliminates container overhead for ~80% of tool calls (file operations). Only bash/builds spin up gVisor containers.
+- **Per-tool-call container lifecycle** avoids idle compute waste at scale.
+- **gVisor bind mounts** give containers native filesystem performance on ZFS — no virtio-fs or NFS indirection.
+- **Standard EC2 instances** — no bare-metal or nested virtualization needed. Wider instance selection, lower cost.
 - **EBS durability** survives host failure. Volumes can be detached and reattached to different hosts for resume.
-
-Shape C is a viable fallback if ZFS operational complexity is a concern, at the cost of snapshot depth management.
 
 ---
 
@@ -271,7 +270,7 @@ Our `ai-agent-go` agent framework is the default and most capable option. It sup
 
 ---
 
-## Architecture Sketch (Mode 3: Split Tools with Shape E)
+## Architecture Sketch (Mode 3: Split Tools)
 
 ```mermaid
 graph TB
@@ -286,11 +285,11 @@ graph TB
             SHS1[Sandbox Host Service<br/>RPC API]
             ZFS1[ZFS Pool on EBS<br/>session datasets + snapshots]
             T1_1[Tier 1: Go functions<br/>read, write, grep, glob]
-            T2_1[Tier 2: Firecracker VMs<br/>bash, build, test]
+            T2_1[Tier 2: gVisor containers<br/>bash, build, test]
             SHS1 --> T1_1
             SHS1 --> T2_1
             T1_1 --> ZFS1
-            T2_1 -.->|mount| ZFS1
+            T2_1 -.->|bind mount| ZFS1
         end
 
         subgraph "Host N"
@@ -320,7 +319,7 @@ sequenceDiagram
     participant Agent as Agent Loop
     participant Host as Sandbox Host Service
     participant ZFS as ZFS Pool
-    participant VM as Firecracker VM
+    participant GV as gVisor Container
 
     Note over Agent: LLM responds with tool call: read_file("main.go")
 
@@ -333,11 +332,11 @@ sequenceDiagram
     Note over Agent: LLM responds with tool call: bash("go build ./...")
 
     Agent->>Host: RPC: ExecuteTool(session, "bash", {cmd: "go build"}, resources: {cpu: 4, mem: "8G"})
-    Host->>VM: Launch Firecracker (4 vCPU, 8GB, mount dataset)
-    Note over VM: Boot ~125ms
-    VM->>VM: go build ./...
-    VM-->>Host: exit_code: 0, stdout: "..."
-    Host->>VM: Destroy VM
+    Host->>GV: Launch gVisor container (4 CPU, 8GB, bind-mount dataset)
+    Note over GV: Start ~100ms
+    GV->>GV: go build ./...
+    GV-->>Host: exit_code: 0, stdout: "..."
+    Host->>GV: Destroy container
     Host->>ZFS: zfs snapshot (microseconds)
     Host-->>Agent: ToolResult + snapshot_id
 ```
@@ -371,37 +370,33 @@ sequenceDiagram
 
 ## Open Questions
 
-### OQ1: Firecracker + ZFS Filesystem Sharing
-
-How does the Firecracker microVM access the ZFS filesystem on the host? Options: virtio-fs (experimental in Firecracker), NFS/9p, rootfs extraction. Highest-risk technical question — needs a spike.
-
-### OQ2: Firecracker vs Container Isolation
-
-Firecracker requires bare-metal or nested-virt EC2 instances. If container-level isolation (gVisor, cgroups) is acceptable for Tier 2, deployment simplifies significantly. Needs a security/isolation requirements discussion.
-
-### OQ3: RPC Protocol Between Layers
+### OQ1: RPC Protocol Between Layers
 
 What protocol for the inter-layer RPCs? gRPC (typed, streaming), HTTP/JSON (simple), or custom binary. Affects latency, tooling, and observability. Should align with everything-db patterns if integrating.
 
-### OQ4: 3rd Party Harness Snapshot Granularity
+### OQ2: 3rd Party Harness Snapshot Granularity
 
 In Mode 2 with 3rd party harnesses, how do we trigger snapshots without per-tool-call hooks? Options: periodic timer, inotify/fswatch on filesystem changes, git commit hooks, or accept coarser granularity.
 
-### OQ5: Orchestrator ↔ Workflow Engine Relationship
+### OQ3: Orchestrator ↔ Workflow Engine Relationship
 
 Is the orchestrator a standalone service, or is it the everything-db workflow engine? The workflow engine already has activity dispatch, credential management, and durable execution. The orchestrator role may be a thin layer on top of it rather than a separate system.
 
-### OQ6: Cloud Provider Portability
+### OQ4: Cloud Provider Portability
 
-Shape E as described is AWS-specific (EBS, EC2). ZFS and Firecracker are portable to any KVM-capable Linux. The AWS-specific piece is EBS for durable block storage — GCP has Persistent Disks, Azure has Managed Disks. Orchestration layer would need provider adapters.
+Solution as described is AWS-specific (EBS, EC2). ZFS and gVisor are portable to any Linux host. The AWS-specific piece is EBS for durable block storage — GCP has Persistent Disks, Azure has Managed Disks. Orchestration layer would need provider adapters.
+
+### Resolved Questions
+
+- **~~Firecracker + ZFS filesystem sharing~~** — Resolved by choosing gVisor. Bind-mount ZFS dataset directly into container. No virtio-fs/NFS needed.
+- **~~Firecracker vs container isolation~~** — Resolved: gVisor. Sufficient isolation for agent-generated code, runs on standard EC2, no nested virtualization overhead.
 
 ---
 
 ## Next Steps
 
-1. **Resolve OQ1** — Spike on Firecracker + ZFS filesystem sharing mechanism
-2. **Resolve OQ2** — Decide Firecracker vs container isolation (affects deployment complexity and cost)
-3. **Prototype ZFS snapshot performance** — Benchmark per-tool-call snapshot latency and space consumption
-4. **Design RPC interfaces** between the three layers (OQ3)
-5. **Detail Shape E** into concrete components (sandbox host service, orchestrator API, tool dispatch protocol)
-6. **Slice for implementation** — Vertical increments starting with Mode 1 (all local) and building toward Mode 3
+1. **Prototype ZFS snapshot performance** — Benchmark per-tool-call snapshot latency and space consumption
+2. **Prototype gVisor container lifecycle** — Benchmark start/destroy time with ZFS bind mounts under realistic workloads
+3. **Design RPC interfaces** between the three layers (OQ1)
+4. **Detail solution** into concrete components (sandbox host service, orchestrator API, tool dispatch protocol)
+5. **Slice for implementation** — Vertical increments starting with Mode 1 (all local) and building toward Mode 3
