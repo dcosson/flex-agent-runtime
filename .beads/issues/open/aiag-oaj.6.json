@@ -2,7 +2,7 @@
   "id": "aiag-oaj.6",
   "title": "Draft 07-tool-scripting",
   "description": "Draft plan doc + test harness for Starlark meta-tool (progressive discovery, multi-step workflows).",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-oaj",
@@ -31,6 +31,15 @@
   "labels": [
     "project=ai-agent-go"
   ],
+  "assignee": "Danny Cosson",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Drafted docs/plans/07-tool-scripting.md and docs/plans/07-tool-scripting-test-harness.md. Ready for plan-review.",
+      "created_at": "2026-03-12T14:31:03.834511-07:00"
+    }
+  ],
   "created_at": "2026-03-12T14:19:54.743764-07:00",
-  "updated_at": "2026-03-12T14:19:54.743764-07:00"
+  "updated_at": "2026-03-12T14:31:03.835593-07:00"
 }
