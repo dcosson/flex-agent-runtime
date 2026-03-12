@@ -646,7 +646,7 @@ func mapStopReason(reason *string) ai.StopReason {
     case "tool_calls":
         return ai.StopReasonToolUse
     case "length":
-        return ai.StopReasonMaxTokens
+        return ai.StopReasonLength
     case "content_filter":
         return ai.StopReasonContentFilter
     default:
