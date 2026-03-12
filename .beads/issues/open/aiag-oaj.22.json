@@ -1,0 +1,22 @@
+{
+  "id": "aiag-oaj.22",
+  "title": "R2 Review: Batch A (rotated)",
+  "description": "R2 batch review: 02-provider-anthropic, 03-provider-openai, 04-provider-google, 05-agent, 06-built-in-tools. Rotated from R1.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-oaj",
+  "dependencies": [
+    {
+      "id": "aiag-oaj",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=ai-agent-go"
+  ],
+  "created_at": "2026-03-12T15:39:45.728859-07:00",
+  "updated_at": "2026-03-12T15:39:45.728859-07:00"
+}
