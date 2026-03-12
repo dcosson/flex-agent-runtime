@@ -2,7 +2,7 @@
   "id": "aiag-oaj.15",
   "title": "R1 Review: Batch A (providers + agent + tools)",
   "description": "Round 1 batch review of: 02-provider-anthropic, 03-provider-openai, 04-provider-google, 05-agent, 06-built-in-tools (and their test harnesses)",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-oaj",
@@ -17,6 +17,7 @@
   "labels": [
     "project=ai-agent-go"
   ],
+  "assignee": "Danny Cosson",
   "created_at": "2026-03-12T15:03:09.097265-07:00",
-  "updated_at": "2026-03-12T15:03:09.097265-07:00"
+  "updated_at": "2026-03-12T15:03:39.449478-07:00"
 }
