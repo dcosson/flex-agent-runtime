@@ -1,0 +1,40 @@
+{
+  "id": "aiag-oaj.7",
+  "title": "Draft 08-agent-tools-e2e",
+  "description": "Draft plan doc for agent + local tools E2E tests.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-oaj",
+  "dependencies": [
+    {
+      "id": "aiag-oaj",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.4",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-oaj.5",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-oaj.6",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-oaj.12",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=ai-agent-go"
+  ],
+  "created_at": "2026-03-12T14:19:54.778065-07:00",
+  "updated_at": "2026-03-12T14:19:54.778065-07:00"
+}

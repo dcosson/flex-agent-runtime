@@ -1,0 +1,44 @@
+{
+  "id": "aiag-oaj.10",
+  "title": "Draft 11-sandbox-host-service",
+  "description": "Draft plan doc + test harness for sandbox host service (session mgmt, two-tier routing, per-turn snapshots).",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-oaj",
+  "dependencies": [
+    {
+      "id": "aiag-oaj",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.8",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-oaj.9",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-oaj.5",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-oaj.11",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-oaj.13",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=ai-agent-go"
+  ],
+  "created_at": "2026-03-12T14:19:54.874929-07:00",
+  "updated_at": "2026-03-12T14:19:54.874929-07:00"
+}
