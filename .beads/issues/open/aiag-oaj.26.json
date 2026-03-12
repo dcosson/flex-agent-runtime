@@ -1,0 +1,22 @@
+{
+  "id": "aiag-oaj.26",
+  "title": "Seam Review: All batches",
+  "description": "Cross-plan interface compatibility review. Verify that connected components agree on shared interfaces at every boundary.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-oaj",
+  "dependencies": [
+    {
+      "id": "aiag-oaj",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=ai-agent-go"
+  ],
+  "created_at": "2026-03-12T16:31:40.246021-07:00",
+  "updated_at": "2026-03-12T16:31:40.246021-07:00"
+}
