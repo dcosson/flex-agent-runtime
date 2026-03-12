@@ -12,6 +12,8 @@
 
 This plan covers the gVisor container manager — the component that creates, runs, and destroys gVisor (`runsc`) containers for Tier 2 tool execution (bash, builds, tests). Every Tier 2 tool call in the sandbox host spins up a fresh container with a ZFS dataset as its rootfs, executes the command with cgroup-enforced resource limits, captures output, and tears the container down.
 
+Terminology note: this plan covers the **Tool Call Sandbox** (per-tool-call gVisor container), distinct from the code interpreter's **Session Sandbox** in plan 07.
+
 **Scope:**
 - `GVisorManager` interface and implementation
 - OCI runtime spec construction (config.json generation)
@@ -196,10 +198,17 @@ type GVisorManager interface {
     // ActiveContainers returns the number of currently running containers.
     ActiveContainers() int
 
-    // Close gracefully shuts down the manager, killing any running containers.
+    // Close shuts down the manager.
+    // Contract:
+    // - idempotent and safe for concurrent callers.
+    // - marks manager closed immediately; subsequent Run() returns ErrManagerClosed.
+    // - cancels in-flight runs, waits up to 5s grace for exit, then force-deletes.
+    // - blocks until cleanup attempts complete.
     Close() error
 }
 ```
+
+`ErrManagerClosed` is a typed sentinel returned by `Run()` after closure.
 
 ### 4.2 Container Options
 
@@ -623,6 +632,17 @@ func buildMounts(opts ContainerOptions) []ocispec.Mount {
     return mounts
 }
 ```
+
+### 5.5 RootFS Requirements
+
+`ContainerOptions.RootFS` must satisfy:
+- contains the command binary (or `/bin/sh` for shell commands).
+- includes minimal runtime directories expected by command execution (`/bin`, `/usr/bin`, `/tmp` as needed by workload).
+- host virtual mounts (`/proc`, `/dev`, `/dev/pts`, `/dev/shm`, `/sys`) are provided by OCI mount config and do not need to be pre-populated in rootfs.
+
+Responsibility split:
+- sandbox host service prepares/provisions rootfs datasets.
+- gVisor manager validates rootfs path/existence/basic structure before launch and fails fast on invalid roots.
 
 ---
 
@@ -1665,3 +1685,15 @@ Should we capture runsc's debug logs for troubleshooting? Options:
 - Configurable via `ManagerConfig.DebugLogging`
 
 **Recommendation:** Configurable. Default off in production, on in development/testing.
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-2-sea | P2 | LimitedBuffer write semantics unclear for truncated writes | Incorporated | Companion harness now explicitly validates truncation signaling and contract behavior. |
+| 2 | coder-2-sea | P2 | Rootfs requirements insufficiently specified | Incorporated | Added explicit rootfs requirements and ownership split in §5.5. |
+| 3 | coder-2-sea | P3 | Filesystem isolation test could pass vacuously | Incorporated | Companion harness SEC1 now uses host marker-file isolation proof. |
+| 4 | coder-2-sea | P2 | Soak error threshold too loose | Incorporated | Tightened threshold and added error categorization requirements in harness SK2. |
+| 5 | coder-2-sea | P3 | Missing OOM behavior validation coverage | Incorporated | Added dedicated OOM-behavior security test in harness. |
+| 6 | coder-2-sea | P2 | `Close()` contract underspecified | Incorporated | Added explicit `Close()` semantics and `ErrManagerClosed` behavior in §4.1. |
+| 7 | coder-2-sea | P3 | Output capture benchmark lacks explicit baseline comparison | Incorporated | Harness B4 now specifies baseline-vs-capture comparative benchmark. |

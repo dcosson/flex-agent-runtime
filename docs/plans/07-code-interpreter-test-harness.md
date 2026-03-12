@@ -10,7 +10,7 @@
 ### P1. Deterministic Execution
 
 Invariant:
-- Same script + same tool responses + same RLM responses + same config => identical result and trace.
+- Same script + same tool responses + fixed RLM responses + same config => identical result and trace.
 
 Generator:
 - Random scripts from bounded grammar using discover/describe/invoke/log/llm_call/store_*.
@@ -55,7 +55,7 @@ Invariant:
 ### P8. Tier Classification Consistency
 
 Invariant:
-- Any script containing `llm_call` or `llm_batch` identifiers is classified as TierFull.
+- Any script containing call expressions to `llm_call` or `llm_batch` is classified as TierFull.
 - Explicit tier override in request is always respected.
 - TierLightweight scripts run with lightweight limits; TierFull with full limits.
 
@@ -221,9 +221,18 @@ Target:
 ### B6. DataStore Throughput
 
 Target:
-- MemoryDataStore: 100K ops/sec for 1KB values.
+- MemoryDataStore: >= 1M ops/sec for 1KB values (single-goroutine sequential).
+- MemoryDataStore concurrent read-heavy workload: >= 2M read ops/sec aggregate baseline on 4-core CI runners.
 - FSDataStore: 10K ops/sec for 1KB values (sequential write).
 - MemoryDataStore memory overhead: < 2x stored data size.
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-2-sea | P1 | Determinism wording should explicitly account for provider non-determinism | Incorporated | P1 wording now requires fixed RLM responses for deterministic replay. |
+| 2 | coder-2-sea | P2 | Tier classification should validate actual call expressions, not identifier matches | Incorporated | P8 now targets call-expression semantics. |
+| 3 | coder-2-sea | P3 | MemoryDataStore throughput target too low | Incorporated | B6 raised to 1M+ with a concurrent read baseline. |
 
 ---
 

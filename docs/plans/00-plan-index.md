@@ -66,6 +66,8 @@ The sandbox host, terminal mux, and RPC layer. These are the components that ena
 | [09-h2-termmux-port](./09-h2-termmux-port.md) | `internal/termmux` | Port from h2: terminal multiplexer (PTY, session lifecycle, multi-client attach/detach, panic recovery, hung child detection), three-source event handler (OTEL server, hooks, session log JSONL), agent state machine (Active/Idle/Exited with sub-states), agent drivers for Claude Code and Codex, bidirectional session log conversion. See detailed plan for h2 source mapping. | 05-agent | Draft |
 | [13-rpc-layer](./13-rpc-layer.md) | `internal/rpc` | RPC protocol implementation: sandbox client/server (session CRUD, tool dispatch, snapshot management), event streaming protocol, protocol choice (ConnectRPC recommended). SandboxTools factory for remote tool dispatch. | 11-sandbox-host-service, 05-agent | Not started |
 
+Disambiguation note: `09-sandbox-zfs` and `09-h2-termmux-port` intentionally share the `09` prefix. Use full doc IDs (not just number) in cross-plan references to avoid ambiguity.
+
 ## Batch 5: Integration & Polish
 
 Full system integration tests, Mode 2/3/4 E2E tests, and any cross-cutting polish.

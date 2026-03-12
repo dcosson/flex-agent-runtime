@@ -160,6 +160,9 @@ func TestMockManagerConsistency(t *testing.T) {
 }
 ```
 
+Conformance extension:
+- Add `TestMockManagerConformanceAgainstRealZFS` (integration-tagged) that replays the same operation trace against `MockManager` and `CLIManager` and compares normalized outcomes (existence checks, snapshot ordering, rollback behavior, error classes).
+
 ### P5. ValidateSnapshotFullName Decomposition
 
 **Invariant:** `ValidateSnapshotFullName(dataset + "@" + snap)` succeeds if and only if both `ValidateName(dataset)` and `ValidateSnapshotName(snap)` succeed.
@@ -512,13 +515,17 @@ func BenchmarkRollback(b *testing.B) {
     _, err := mgr.CreateSnapshot(ctx, ds, "base")
     require.NoError(b, err)
 
-    b.ResetTimer()
+    // Pre-create snapshots so benchmark isolates rollback latency.
     for i := 0; i < b.N; i++ {
-        // Write some data, snapshot, rollback
         mount, _ := mgr.GetMountpoint(ctx, ds)
         os.WriteFile(filepath.Join(mount, "bench.txt"), []byte(fmt.Sprintf("iter-%d", i)), 0644)
         mgr.CreateSnapshot(ctx, ds, fmt.Sprintf("iter-%d", i))
-        err := mgr.Rollback(ctx, ds, "base", zfs.RollbackOptions{DestroyLater: true})
+    }
+
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        target := fmt.Sprintf("iter-%d", i)
+        err := mgr.Rollback(ctx, ds, target, zfs.RollbackOptions{DestroyLater: true})
         if err != nil {
             b.Fatal(err)
         }
@@ -636,7 +643,6 @@ func TestRapidSnapshotCycle(t *testing.T) {
     mount, _ := mgr.GetMountpoint(ctx, ds)
 
     const iterations = 10_000
-    snapCount := 0
 
     for i := 0; i < iterations; i++ {
         // Write some data
@@ -644,24 +650,32 @@ func TestRapidSnapshotCycle(t *testing.T) {
             []byte(fmt.Sprintf("data-%d", i)), 0644)
 
         // Take snapshot
-        snapName := fmt.Sprintf("turn-%05d", snapCount)
+        snapsBefore, err := mgr.ListSnapshots(ctx, ds)
+        require.NoError(t, err)
+        snapName := fmt.Sprintf("turn-%05d", len(snapsBefore))
         _, err := mgr.CreateSnapshot(ctx, ds, snapName)
         require.NoError(t, err)
-        snapCount++
 
         // Occasionally rollback (5% of the time)
         if i > 10 && i%20 == 0 {
-            target := fmt.Sprintf("turn-%05d", snapCount-5)
+            snaps, err := mgr.ListSnapshots(ctx, ds)
+            require.NoError(t, err)
+            if len(snaps) < 5 {
+                continue
+            }
+            target := snaps[len(snaps)-5].Name
             err := mgr.Rollback(ctx, ds, target, zfs.RollbackOptions{DestroyLater: true})
             require.NoError(t, err)
-            snapCount -= 4 // rolled back 4 snapshots
         }
     }
 
     // Verify final state
     snaps, err := mgr.ListSnapshots(ctx, ds)
     require.NoError(t, err)
-    assert.Equal(t, snapCount, len(snaps))
+    assert.Greater(t, len(snaps), 0)
+    for i := 1; i < len(snaps); i++ {
+        assert.False(t, snaps[i].Creation.Before(snaps[i-1].Creation))
+    }
 
     // Check pool health
     status, err := mgr.PoolStatus(ctx, pool)
@@ -843,10 +857,34 @@ func TestMountpointPathTraversal(t *testing.T) {
 
     for _, path := range traversalAttempts {
         err := mgr.SetMountpoint(ctx, ds, path)
-        // ZFS itself may allow this, but our wrapper should reject obvious traversal
-        // (or the sandbox host service layer handles this — document either way)
-        t.Logf("SetMountpoint(%q): %v", path, err)
+        require.Error(t, err)
     }
+}
+```
+
+### Sec4. Pool Export/Import Cycle
+
+Verify pool export/import behavior for migration workflows:
+
+```go
+func TestPoolExportImportCycle(t *testing.T) {
+    pool := setupTestPool(t)
+    mgr := setupManager(t, pool)
+    ctx := context.Background()
+
+    ds := pool + "/expimp"
+    require.NoError(t, mgr.CreateDataset(ctx, ds, zfs.DatasetOptions{}))
+    mp, _ := mgr.GetMountpoint(ctx, ds)
+    require.NoError(t, os.WriteFile(filepath.Join(mp, "marker.txt"), []byte("ok"), 0o644))
+
+    require.NoError(t, mgr.ExportPool(ctx, pool))
+    require.NoError(t, mgr.ImportPool(ctx, pool, testPoolDevicePath(t, pool)))
+
+    mp2, err := mgr.GetMountpoint(ctx, ds)
+    require.NoError(t, err)
+    data, err := os.ReadFile(filepath.Join(mp2, "marker.txt"))
+    require.NoError(t, err)
+    assert.Equal(t, "ok", string(data))
 }
 ```
 
@@ -970,3 +1008,13 @@ Before `09-sandbox-zfs` implementation is considered complete:
 | Go stdlib `testing` | Benchmarks, test framework |
 | Go stdlib `os/exec` | Test pool setup (zpool create/destroy) |
 | Linux + `zfsutils-linux` | Integration/stress/benchmark tests |
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-2-sea | P2 | Need mock-vs-real conformance to prevent drift | Incorporated | Added conformance extension for replaying traces across mock and real implementations. |
+| 2 | coder-2-sea | P3 | SetMountpoint validation ownership/expectation unclear | Incorporated | Security test now requires rejection of traversal mountpoints. |
+| 3 | coder-2-sea | P2 | Pool import/export missing from coverage | Incorporated | Added explicit export/import cycle security/integration test. |
+| 4 | coder-2-sea | P3 | Rollback benchmark currently measures create+rollback combined | Incorporated | B3 now pre-creates snapshots and times rollback path only. |
+| 5 | coder-2-sea | P3 | Stress snapshot count bookkeeping is brittle | Incorporated | ST1 now derives expectations from `ListSnapshots` and validates ordering. |

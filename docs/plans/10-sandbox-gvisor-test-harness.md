@@ -102,6 +102,9 @@ func TestValidateResourcesProperty(t *testing.T) {
 ### P5. LimitedBuffer Never Exceeds Max
 
 **Invariant:** A `limitedBuffer` with max N bytes must never hold more than N bytes, regardless of write patterns.
+Contract note:
+- `Write` may intentionally return `len(p), nil` even when truncation occurs to preserve compatibility with streaming copy loops.
+- Callers must inspect `Truncated()` to detect loss.
 
 ```go
 func TestLimitedBufferCapProperty(t *testing.T) {
@@ -120,6 +123,9 @@ func TestLimitedBufferCapProperty(t *testing.T) {
         }
 
         assert.LessOrEqual(t, int64(len(buf.Bytes())), maxBytes)
+        if int64(numWrites*2048) > maxBytes {
+            assert.True(t, buf.Truncated() || int64(len(buf.Bytes())) == maxBytes)
+        }
     })
 }
 ```
@@ -423,7 +429,7 @@ func BenchmarkConcurrentContainers(b *testing.B) {
 
 ### B4. Output Capture Overhead
 
-**Target:** < 5% overhead vs direct pipe for 10MB output.
+**Target:** < 5% overhead vs baseline mode for 10MB output.
 
 ```go
 func BenchmarkOutputCapture(b *testing.B) {
@@ -431,6 +437,18 @@ func BenchmarkOutputCapture(b *testing.B) {
     defer mgr.Close()
     rootfs := prepareMinimalRootFS(b)
 
+    b.Run("baseline-no-capture", func(b *testing.B) {
+        for i := 0; i < b.N; i++ {
+            mgr.Run(context.Background(), ContainerOptions{
+                Command:  []string{"/bin/dd", "if=/dev/zero", "of=/dev/null", "bs=1M", "count=10"},
+                WorkDir:  "/",
+                RootFS:   rootfs,
+                Resources: ResourceSpec{CPUs: 1, MemoryMB: 256, MaxOutputBytes: 0},
+            })
+        }
+    })
+
+    b.Run("capture-enabled", func(b *testing.B) {
     b.ResetTimer()
     for i := 0; i < b.N; i++ {
         mgr.Run(context.Background(), ContainerOptions{
@@ -440,6 +458,7 @@ func BenchmarkOutputCapture(b *testing.B) {
             Resources: ResourceSpec{CPUs: 1, MemoryMB: 256, MaxOutputBytes: 11 * 1024 * 1024},
         })
     }
+    })
 }
 ```
 
@@ -515,7 +534,8 @@ Run a sustained workload of 20 concurrent containers for 30 minutes. Each contai
 - No degradation in boot times over the soak period
 - No memory growth in the manager process
 - No accumulation of zombie containers
-- Error rate stays below 0.1%
+- Error rate stays below 0.01%
+- Error accounting is categorized (timeout, OOM, infra, non-zero-exit)
 
 ```go
 func TestSoak_SustainedConcurrentLoad(t *testing.T) {
@@ -569,7 +589,7 @@ func TestSoak_SustainedConcurrentLoad(t *testing.T) {
         totalRuns.Load(), errors.Load(), errorRate*100)
     t.Logf("Boot time p50: %s, p99: %s", bootTimes.P50(), bootTimes.P99())
 
-    assert.Less(t, errorRate, 0.001) // < 0.1%
+    assert.Less(t, errorRate, 0.0001) // < 0.01%
 }
 ```
 
@@ -597,19 +617,19 @@ func TestSecurity_FilesystemIsolation(t *testing.T) {
     mgr := newRealTestManager(t)
     rootfs := prepareMinimalRootFS(t)
 
+    marker := filepath.Join(t.TempDir(), "host-only-marker.txt")
+    require.NoError(t, os.WriteFile(marker, []byte("host-secret-marker"), 0o600))
+
     result, err := mgr.Run(context.Background(), ContainerOptions{
-        Command:  []string{"/bin/cat", "/etc/shadow"},
+        Command:  []string{"/bin/cat", marker},
         WorkDir:  "/",
         RootFS:   rootfs,
         Resources: ResourceSpec{CPUs: 1, MemoryMB: 256},
     })
 
     assert.NoError(t, err)
-    // The container should see its own rootfs, not the host's /etc/shadow.
-    // If rootfs doesn't have /etc/shadow, this should fail.
-    // The key check: the content should NOT be the host's /etc/shadow.
-    hostShadow, _ := os.ReadFile("/etc/shadow")
-    assert.NotEqual(t, hostShadow, result.Stdout)
+    assert.NotContains(t, string(result.Stdout), "host-secret-marker")
+    assert.NotEqual(t, 0, result.ExitCode)
 }
 ```
 
@@ -725,6 +745,27 @@ func TestSecurity_CapabilityRestriction(t *testing.T) {
     assert.NoError(t, err)
     // gVisor intercepts mount syscalls; without CAP_SYS_ADMIN it should fail
     assert.Contains(t, string(result.Stdout)+string(result.Stderr), "DENIED")
+}
+```
+
+### SEC7. OOM Kill Behavior
+
+Verify memory-limit OOM signals are surfaced consistently.
+
+```go
+func TestSecurity_OOMBehavior(t *testing.T) {
+    mgr := newRealTestManager(t)
+    rootfs := prepareMinimalRootFS(t)
+
+    result, err := mgr.Run(context.Background(), ContainerOptions{
+        Command:  []string{"/bin/sh", "-c", "python3 - <<'PY'\na=[]\nwhile True:\n a.append('x'*1024*1024)\nPY"},
+        WorkDir:  "/",
+        RootFS:   rootfs,
+        Resources: ResourceSpec{CPUs: 1, MemoryMB: 128, Timeout: 30 * time.Second},
+    })
+
+    assert.NoError(t, err)
+    assert.True(t, result.OOMKilled || result.Status == StatusOOMKilled)
 }
 ```
 
@@ -845,7 +886,7 @@ Implementation is considered complete when ALL of the following pass:
 
 ### Should Pass
 
-- [ ] Soak test SK2 (30-min sustained): error rate < 0.1%, no boot time degradation
+- [ ] Soak test SK2 (30-min sustained): error rate < 0.01%, no boot time degradation
 - [ ] Manual QA1-QA5 performed and documented
 - [ ] Benchmark regression check integrated into CI (Tier 5)
 - [ ] Coverage > 85% for unit-testable code (spec.go, cgroups.go, bundle.go, exec.go logic)
@@ -854,3 +895,13 @@ Implementation is considered complete when ALL of the following pass:
 
 - [ ] Comparison oracle O2 (Docker comparison) validates critical spec fields
 - [ ] Boot time optimization: p50 < 75ms (if pre-warming proves needed, revisit D1)
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-2-sea | P2 | LimitedBuffer truncation semantics need explicit detection path | Incorporated | P5 now codifies `Truncated()` contract alongside capacity invariant. |
+| 2 | coder-2-sea | P3 | Filesystem isolation check could pass vacuously | Incorporated | SEC1 now validates host marker-file isolation directly. |
+| 3 | coder-2-sea | P2 | Sustained-load error threshold too permissive | Incorporated | SK2 threshold tightened to <0.01% with categorized error accounting. |
+| 4 | coder-2-sea | P3 | Missing explicit OOM behavior test | Incorporated | Added SEC7 OOM behavior test. |
+| 5 | coder-2-sea | P3 | Output-capture benchmark lacks baseline comparison | Incorporated | B4 now runs baseline and capture-enabled sub-benchmarks. |

@@ -42,7 +42,7 @@ graph TB
     end
 
     subgraph "internal/termmux/driver"
-        HI[AgentDriver interface]
+        HI[TermmuxDriverAdapter interface]
         HC[claudecode/driver.go<br/>Claude Code]
         HX[codex/driver.go<br/>Codex]
         HI --> HC
@@ -130,11 +130,12 @@ stateDiagram-v2
 
 ## 3. Key Types
 
-### 3.1 AgentDriver Interface
+### 3.1 TermmuxDriverAdapter Interface
 
 ```go
-// AgentDriver abstracts a 3rd party agent CLI (Claude Code, Codex, etc.)
-type AgentDriver interface {
+// TermmuxDriverAdapter abstracts a 3rd party agent CLI for termmux session control.
+// Name intentionally differs from internal/agent.AgentDriver to avoid ambiguity.
+type TermmuxDriverAdapter interface {
     // Identity
     Name() string
     Command() string
@@ -173,7 +174,7 @@ type Session struct {
     ID       string
     Config   SessionConfig
     VT       *VirtualTerminal
-    driver   AgentDriver
+    driver   TermmuxDriverAdapter
     monitor  *AgentMonitor
 
     // Multi-client support
@@ -245,28 +246,14 @@ type AgentMonitor struct {
 }
 ```
 
-### 3.5 Event Types
+### 3.5 Event Types and Ownership
+
+Canonical `AgentEvent` and `AgentEventType` ownership is in `internal/agent` (plan 05). Termmux imports those types. If driver-specific raw payloads require intermediate shaping, termmux maps private intermediary structs into canonical `internal/agent` events before publish.
 
 ```go
-type AgentEvent struct {
-    Type      AgentEventType
-    Timestamp time.Time
-    Data      any           // Typed per event (see below)
-}
-
-type AgentEventType string
-
-const (
-    EventSessionStarted     AgentEventType = "session_started"
-    EventUserPrompt         AgentEventType = "user_prompt"
-    EventTurnCompleted      AgentEventType = "turn_completed"
-    EventToolStarted        AgentEventType = "tool_started"
-    EventToolCompleted      AgentEventType = "tool_completed"
-    EventApprovalRequested  AgentEventType = "approval_requested"
-    EventAgentMessage       AgentEventType = "agent_message"
-    EventStateChange        AgentEventType = "state_change"
-    EventSessionEnded       AgentEventType = "session_ended"
-)
+// Imported from internal/agent:
+// type AgentEvent struct { Type AgentEventType; Timestamp time.Time; Data any }
+// type AgentEventType string
 
 // Data payloads
 type SessionStartedData struct {
@@ -404,6 +391,12 @@ Per-session HTTP server on `127.0.0.1:0` (random port). Receives:
 
 The port is injected into the child process via environment variable. Each driver's event handler registers callbacks for the raw payloads and parses them into normalized events.
 
+Lifecycle contract:
+- server starts before launching the child process.
+- `BuildCommandEnvVars` injects `OTEL_EXPORTER_OTLP_ENDPOINT` in the child env.
+- startup bind/listen failure is a hard session-start error.
+- shutdown is tied to session context cancellation, with graceful drain timeout (default 2s) followed by forced close.
+
 ### 5.2 Hooks
 
 Supported hook events (Claude Code only currently):
@@ -416,7 +409,7 @@ Hooks are called by the child process via a hook command mechanism. The driver r
 
 ### 5.3 Session Log Tailer
 
-Polls a JSONL file (e.g., Claude Code's `session.jsonl`) at 500ms intervals:
+Polls a JSONL file (e.g., Claude Code's `session.jsonl`) at configurable intervals (default 500ms):
 - Waits for file to appear (file may not exist at session start)
 - Handles partial lines across polls
 - Calls `onLine` callback for each complete JSON line
@@ -448,6 +441,18 @@ Config directory management is a critical runtime concern for 3rd party agent dr
 
 Each driver session needs a config directory at a stable, known filesystem path. The runtime creates and manages these directories as part of session lifecycle. The path must be deterministic and reproducible given the session identity, so that the same session always resolves to the same config directory location.
 
+```go
+type ConfigDirManager struct {
+    BaseDir string // e.g. /var/lib/h2-agent/config
+}
+
+func (m *ConfigDirManager) StablePath(sessionID string) string
+func (m *ConfigDirManager) EnsureDir(sessionID string) (string, error)
+func (m *ConfigDirManager) Cleanup(sessionID string) error
+```
+
+Stable path scheme for V1: `<BaseDir>/<session-id>/` (session ID is stable and unique in runtime).
+
 ### 7.2 Auth Token Storage
 
 Drivers like Claude Code perform browser-based OAuth sign-in that writes tokens to the config directory. These tokens are path-sensitive — moving the config directory invalidates auth. The runtime must ensure config dir paths don't change across pause/resume/re-launch of a session. This is especially important for durable execution: if a session is paused and resumed later (potentially on a different machine with the same filesystem), the config directory path must remain the same so that cached auth tokens continue to work without forcing re-authentication.
@@ -467,11 +472,11 @@ New drivers added in the future must document their config directory expectation
 
 ### 7.5 Env Var Configuration
 
-The runtime sets appropriate environment variables to point drivers at the managed config directory before launch. This is part of `BuildCommandEnvVars()` in the `AgentDriver` interface (Section 3.1). For example, for Claude Code the runtime sets `CLAUDE_CONFIG_DIR` to the managed directory path. Each driver implementation is responsible for knowing which environment variables control its config directory location and returning them from `BuildCommandEnvVars()`.
+The runtime sets appropriate environment variables to point drivers at the managed config directory before launch. This is part of `BuildCommandEnvVars()` in the `TermmuxDriverAdapter` interface (Section 3.1). For example, for Claude Code the runtime sets `CLAUDE_CONFIG_DIR` to the managed directory path. Each driver implementation is responsible for knowing which environment variables control its config directory location and returning them from `BuildCommandEnvVars()`.
 
 ### 7.6 Relationship to PrepareForLaunch
 
-Config directory setup — creating the directory, ensuring the path is stable, and verifying any pre-existing auth tokens — is part of `PrepareForLaunch()` in the `AgentDriver` interface. When `PrepareForLaunch()` is called, the driver implementation must:
+Config directory setup — creating the directory, ensuring the path is stable, and verifying any pre-existing auth tokens — is part of `PrepareForLaunch()` in the `TermmuxDriverAdapter` interface. When `PrepareForLaunch()` is called, the driver implementation must:
 
 1. Ensure the config directory exists at the expected stable path.
 2. Validate or migrate any existing auth tokens if the directory already exists from a prior session.
@@ -483,7 +488,7 @@ The orchestrator-injected files (Section 7.3) are written into the config direct
 
 ## 8. Bidirectional Session Log Conversion
 
-Each AgentDriver for a 3rd party agent must implement bidirectional conversion between the agent's native session log format and our canonical conversation format. This is expressed in the `AgentDriver` interface (Section 3.1) as:
+Each `TermmuxDriverAdapter` for a 3rd party agent must implement bidirectional conversion between the agent's native session log format and our canonical conversation format. This is expressed in the interface (Section 3.1) as:
 
 ```go
 // ParseSessionLog reads the driver's native session log and returns
@@ -547,8 +552,9 @@ type TokenUsage struct {
 - Writes back to the same `session.jsonl` format for resume
 
 **Codex (`codex/session_log.go`)**:
-- Parses whatever Codex's native log format is (needs investigation — may be a different JSONL schema or a structured log directory)
-- Writes back to the same format for resume
+- V1 scope: live event normalization and runtime operation.
+- V1 non-goal: bidirectional session log conversion for Codex until format investigation is complete.
+- Follow-up bead tracks Codex session-log conversion investigation and implementation.
 
 ---
 
@@ -583,7 +589,7 @@ internal/termmux/
 │   └── eventstore/
 │       └── store.go         # JSONL event persistence (append, read, tail)
 └── driver/
-    ├── driver.go            # AgentDriver interface, canonical conversation types
+    ├── driver.go            # TermmuxDriverAdapter interface, canonical conversation types
     ├── claudecode/
     │   ├── driver.go        # Claude Code driver implementation
     │   ├── event_handler.go # Three-source normalization for Claude
@@ -596,7 +602,19 @@ internal/termmux/
 
 ---
 
-## 11. Testing Strategy
+## 11. Acceptance Criteria
+
+1. `internal/termmux` can launch, attach, detach, and stop Claude Code sessions without deadlock or panic.
+2. Canonical `internal/agent` events are emitted with correct ordering under mixed OTEL, hook, and session-log input.
+3. OTEL server lifecycle is clean: startup failure surfaces immediately; teardown drains and closes within timeout.
+4. Session log tailer interval is configurable and covered by tests.
+5. Config directory manager enforces stable per-session paths and supports cleanup.
+6. Codex driver is operational for live session handling; conversion remains explicitly out-of-scope for V1.
+7. Robustness tests (`-race`, panic recovery, hung child handling, multi-client attach/detach) pass.
+
+---
+
+## 12. Testing Strategy
 
 ### Unit Tests
 - State machine transitions: every event type → correct state/substate
@@ -619,7 +637,7 @@ internal/termmux/
 
 ---
 
-## 12. Migration Notes
+## 13. Migration Notes
 
 ### From h2 repo
 - `internal/session/session.go` → `internal/termmux/session.go` (strip TUI rendering, message delivery)
@@ -638,3 +656,17 @@ internal/termmux/
 - `internal/session/listener.go` — h2-specific socket protocol
 - TUI rendering, status bar, message queue integration
 - Profile/role system, automation triggers
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-2-sea | P0 | Missing companion test harness document | Incorporated | Added `09-h2-termmux-port-test-harness.md` in this round. |
+| 2 | coder-2-sea | P1 | Name collision with plan 05 `AgentDriver` | Incorporated | Renamed interface to `TermmuxDriverAdapter`. |
+| 3 | coder-2-sea | P1 | Event type ownership duplicated with plan 05 | Incorporated | Clarified canonical ownership in `internal/agent`; termmux maps into those types. |
+| 4 | coder-2-sea | P2 | OTEL server lifecycle details underspecified | Incorporated | Added startup/teardown/error/env-injection lifecycle contract. |
+| 5 | coder-2-sea | P2 | Session log tailer interval hardcoded | Incorporated | Polling interval is now configurable with 500ms default. |
+| 6 | coder-2-sea | P2 | Codex session log conversion unspecified | Incorporated | Marked conversion explicitly out-of-scope for V1 with follow-up tracking. |
+| 7 | coder-2-sea | P3 | Config directory manager lacks concrete types | Incorporated | Added `ConfigDirManager` type and stable path scheme. |
+| 8 | coder-2-sea | P2 | Acceptance criteria section missing | Incorporated | Added explicit acceptance criteria section. |
+| 9 | coder-2-sea | P3 | Plan numbering collision with `09-sandbox-zfs` | Not Incorporated | Numbering unchanged in this round; disambiguation note added in plan index. |

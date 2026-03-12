@@ -44,7 +44,8 @@ graph TB
 
     subgraph "Runtime under test"
         AG[internal/agent]
-        TOOLS[internal/tools]\n        CODEINTERP[internal/tools/codeinterp]
+        TOOLS[internal/tools]
+        CODEINTERP[internal/tools/codeinterp]
         AI[internal/ai/provider/*]
     end
 
@@ -83,7 +84,9 @@ sequenceDiagram
 | File-edit workflows | validate read/write/edit/grep/glob integration |
 | Bash workflows | validate long-running command handling and exit semantics |
 | Steering/follow-up workflows | validate control-plane behavior under active turns |
-| Scripting workflows | validate meta-tool orchestration over built-in tools |
+| Code interpreter workflows | validate meta-tool orchestration over built-in tools |
+| Git workflows | validate status/log/diff operations in seeded repositories |
+| Error recovery workflows | validate behavior after unexpected tool failures |
 | Terminal-tool workflows | validate short-circuit turn completion |
 
 ---
@@ -155,12 +158,28 @@ Per scenario, assert at three layers:
 ### 4.5 Code Interpreter Workflow
 
 - Prompt uses `execute_script` meta-tool for multi-step workflow including RLM sub-calls and DataStore operations.
-- Assertions verify progressive discovery usage, RLM call traces, DataStore operations, and scripted tool-call trace.
+- Assertions verify progressive discovery usage, RLM call traces, DataStore operations, and code interpreter tool-call trace.
+- Fake-provider routing for nested calls is explicit:
+  - top-level agent loop calls and nested code interpreter RLM sub-calls use distinct fixture branches.
+  - nested calls include metadata tags (for example `call_context=code_interpreter_subcall` and `script_exec_id`) so assertions can verify routing.
+  - scenario includes at least one nested-call assertion that fails if responses are consumed from the top-level call queue.
 
 ### 4.6 Terminal Tool Completion
 
 - Scenario uses terminal tool to produce structured final artifact.
 - Assertions verify no extra LLM continuation after terminal tool completion.
+
+### 4.7 Git Read Workflow
+
+- Seed workspace as a git repository with known commit history and staged changes.
+- Prompt asks the agent to summarize current branch state and recent changes.
+- Assertions verify `git_status`, `git_log`, and `git_diff` tools are invoked and captured in the trace.
+
+### 4.8 Error Recovery Workflow
+
+- Intentionally trigger a tool failure mid-workflow (for example edit on a missing path).
+- Fake provider script expects a recovery path (retry with corrected parameters, or fallback sequence).
+- Assertions verify the agent recovers or exits gracefully with explicit failure context; no silent hang.
 
 ---
 
@@ -196,13 +215,17 @@ Per scenario, assert at three layers:
 
 5. **Code interpreter correctness**
 - Steps: run code interpreter scenario that discovers tools, invokes them, and performs RLM sub-calls.
-- Expected: script trace shows progressive discovery, RLM usage stats, and successful multi-step completion.
+- Expected: script trace shows progressive discovery, nested-call routing metadata, RLM usage stats, and successful multi-step completion.
 
-6. **Terminal-tool correctness**
+6. **Code interpreter budget enforcement**
+- Steps: run code interpreter scenario that exceeds configured RLM token/cost budget.
+- Expected: budget-exceeded behavior is surfaced as a typed failure and handled correctly by the agent.
+
+7. **Terminal-tool correctness**
 - Steps: run scenario using terminal tool result path.
 - Expected: structured terminal output returned; loop ends cleanly with no extra turn.
 
-7. **Optional live-provider smoke**
+8. **Optional live-provider smoke**
 - Steps: run gated real-provider E2E smoke scenario.
 - Expected: workflow completes with same semantic outcomes as deterministic mode.
 
@@ -229,6 +252,12 @@ On scenario failure, automatically emit:
 - conversation transcript dump
 - workspace diff artifact
 - command stdout/stderr excerpts
+
+### 7.4 Workspace Cleanup and Retention
+
+- Clean up temporary workspaces on success.
+- Preserve workspace on failure and print the absolute path in test output.
+- `E2E_KEEP_WORKSPACES=true` keeps all workspaces for local debugging.
 
 ---
 
@@ -269,8 +298,21 @@ On scenario failure, automatically emit:
 
 ## 12. Exit Criteria
 
-1. `e2etests/` contains scenario suite covering file, bash, steering/follow-up, code interpreter, and terminal-tool workflows.
+1. `e2etests/` contains scenario suite covering file, bash, steering/follow-up, code interpreter, git, error recovery, and terminal-tool workflows.
 2. Deterministic provider mode is stable and green in CI.
 3. Live-provider smoke mode is available behind secrets gate.
 4. Failure artifacts (events, transcript, workspace diff) are generated automatically.
-5. G4 gate criteria are demonstrably met by this suite.
+5. At least one E2E scenario demonstrates code interpreter RLM budget enforcement.
+6. G4 gate criteria are demonstrably met by this suite.
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-2-sea | P2 | Nested code interpreter RLM sub-call routing not specified | Incorporated | Added nested-call routing contract and metadata assertions in §4.5. |
+| 2 | coder-2-sea | P2 | Missing git E2E scenario | Incorporated | Added dedicated git read workflow in §4.7 and matrix coverage. |
+| 3 | coder-2-sea | P3 | Mermaid node labels malformed due to inline concatenation | Incorporated | Split `TOOLS` and `CODEINTERP` into separate nodes. |
+| 4 | coder-2-sea | P2 | Error recovery scenario absent | Incorporated | Added error recovery workflow in §4.8 with explicit assertions. |
+| 5 | coder-2-sea | P3 | Exit criteria omit budget enforcement | Incorporated | Added acceptance and exit criteria for budget enforcement scenario. |
+| 6 | coder-2-sea | P2 | Outdated "scripting" terminology | Incorporated | Renamed to "code interpreter" where subsystem is referenced. |
+| 7 | coder-2-sea | P3 | Workspace cleanup/retention strategy unspecified | Incorporated | Added cleanup-on-success, preserve-on-failure policy and env override in §7.4. |

@@ -3,7 +3,7 @@
 **Status:** Draft
 **Depends on:** 01-ai-core, 05-agent, 06-built-in-tools
 **Depended on by:** 08-agent-tools-e2e
-**Implements:** `internal/tools/codeinterp` Starlark meta-tool with progressive tool discovery (`discover -> describe -> invoke`), recursive LLM calls (`llm_call`, `llm_batch`), pluggable DataStore (`store_read`, `store_write`, `store_search`, `store_list`), two-tier execution (lightweight in-process vs full sandboxed), multi-step workflows, and configurable execution limits.
+**Implements:** `internal/tools/codeinterp` Starlark meta-tool with progressive tool discovery (`discover -> describe -> invoke`), recursive LLM calls (`llm_call`, `llm_batch`), pluggable DataStore (`store_read`, `store_write`, `store_search`, `store_list`), two-tier execution (lightweight in-process vs full Session Sandbox execution), multi-step workflows, and configurable execution limits.
 
 ---
 
@@ -18,6 +18,13 @@ The code interpreter extends basic tool scripting with three major capabilities:
 2. **Pluggable DataStore**: Scripts interact with storage through a generic `DataStore` interface instead of assuming filesystem access. Implementations include `MemoryDataStore` (lightweight scripts), `FSDataStore` (ZFS/local for sandbox-backed workflows), `BlobDataStore` (S3/GCS for large object storage), and `SQLDataStore` (for edb analytics queries).
 
 3. **Two execution tiers**: Lightweight scripts run in-process with `MemoryDataStore` and default limits. Full scripts (RLM workflows, large data processing) run in sandbox with `FSDataStore` or external DataStore and elevated limits.
+
+### 1.1 Determinism and Sandbox Terms
+
+- **Deterministic core runtime:** Pure Starlark execution plus deterministic builtins (`discover`, `describe`, `invoke`, `store_*`) is deterministic for fixed inputs.
+- **Controlled non-determinism:** `llm_call` and `llm_batch` are provider-backed and inherently non-deterministic unless responses are fixed by a deterministic test provider or replay cache.
+- **Replay strategy:** deterministic tests MUST inject a fake provider; replay tooling SHOULD support response fixtures keyed by request content hash.
+- **Session Sandbox vs Tool Call Sandbox:** this document uses **Session Sandbox** for code interpreter TierFull execution isolation. The per-tool-call gVisor container in plans 10/11 is the **Tool Call Sandbox**.
 
 Primary goals:
 - Provide sandboxed Starlark execution via `go.starlark.net`.
@@ -205,6 +212,7 @@ Host-enforced restrictions in our implementation:
 - Security boundary is capability restriction (only approved builtins).
 - Script can only affect world through `invoke` on already-allowed tools, `llm_call`/`llm_batch` on pre-configured providers, and `store_*` on the scoped DataStore.
 - RLM sub-calls inherit the parent agent's provider configuration but with isolated conversation context and per-call token/cost budgets.
+- `model` in `llm_call`/`llm_batch` selects a model within the configured provider only; cross-provider switching is out of scope for V1.
 - DataStore access is scoped to the script's session — no cross-session reads/writes.
 
 ---
@@ -263,7 +271,7 @@ Spawns a single sub-LLM call with isolated context.
 Parameters:
 - `prompt` (str, required): the prompt to send
 - `context` (str, optional): additional context injected as a system/developer message
-- `model` (str, optional): model override; defaults to the agent's configured model
+- `model` (str, optional): model override within the configured provider; defaults to the agent's configured model
 - `max_tokens` (int, optional): per-call token limit; capped by remaining budget
 
 Returns:
@@ -311,19 +319,25 @@ All DataStore builtins operate on the script's scoped DataStore instance. Keys a
 ### 4.5 DataStore Interface
 
 ```go
+var ErrNotSupported = errors.New("codeinterp datastore: operation not supported")
+
 // DataStore provides key-value storage for code interpreter scripts.
 // Implementations are scoped per script execution session.
 type DataStore interface {
     Write(key string, data []byte) error
     Read(key string) ([]byte, error)
     ReadRange(key string, offset, limit int64) ([]byte, error)
-    Search(key string, pattern string) ([]Match, error)
     List(prefix string) ([]string, error)
     Delete(key string) error
     Close() error
 }
 
-// Match represents a search result within a stored value.
+// SearchableDataStore is an optional capability for regex/pattern search.
+type SearchableDataStore interface {
+    Search(keyPrefix string, pattern string) ([]Match, error)
+}
+
+// Match represents a search result. Search can return matches from multiple keys.
 type Match struct {
     Key     string
     Line    int
@@ -331,6 +345,8 @@ type Match struct {
     Content string
 }
 ```
+
+`store_search(key, pattern)` interprets `key` as a key prefix. Implementations that support search return matches across all keys beginning with that prefix. If the backing store does not implement `SearchableDataStore`, `store_search` returns a typed "not supported" error mapped from `ErrNotSupported`.
 
 #### MemoryDataStore
 
@@ -358,7 +374,7 @@ type FSDataStore struct {
 
 #### BlobDataStore
 
-Cloud object storage backend (S3/GCS). Used for large-scale data processing workflows. Implements range reads via HTTP Range headers. Search not supported (returns error suggesting download + local search pattern).
+Cloud object storage backend (S3/GCS). Used for large-scale data processing workflows. Implements range reads via HTTP Range headers. Search is optional and returns `ErrNotSupported` for the V1 blob backend.
 
 ```go
 type BlobDataStore struct {
@@ -435,7 +451,7 @@ func DefaultFullConfig() Config
 func ClassifyTier(code string, req ExecuteRequest) Tier
 ```
 
-Tier classification uses a lightweight AST pre-scan of the Starlark source to detect RLM builtin references. This avoids full parsing — a simple identifier scan suffices since `llm_call` and `llm_batch` are unique identifiers.
+Tier classification parses the Starlark AST and detects concrete call expressions to `llm_call` / `llm_batch`. String literals, comments, and unrelated identifiers must not trigger TierFull.
 
 ---
 
@@ -459,6 +475,11 @@ Tier classification uses a lightweight AST pre-scan of the Starlark source to de
 - Each `llm_call` and `llm_batch` call reports usage (input tokens, output tokens, estimated cost).
 - Running totals tracked in `ExecutionState`.
 - Pre-check before each RLM call: if remaining budget < estimated minimum, return typed `token_budget_exceeded` error.
+- Estimation policy (hard budget):
+  - estimated input tokens from prompt/context size.
+  - estimated output tokens = `max_tokens` when provided, otherwise `DefaultRLMMaxTokens` (configurable, default 1024).
+  - estimated cost computed from model catalog pricing using estimated input/output tokens.
+  - if estimate exceeds remaining token or cost budget, the call is rejected before dispatch.
 - Cost estimation uses model catalog pricing from `internal/ai`.
 
 ### 5.4 Error Policy
@@ -468,7 +489,7 @@ Default:
 - `llm_call` provider failure raises Starlark runtime error and aborts script.
 - `llm_batch` individual call failure returns error in that result slot; script continues.
 
-Extension (available now):
+Future (V2, not part of V1 builtins):
 - `invoke_safe(tool_name, params)` returns `{ok: bool, result: dict, error: str}` for branchable scripts.
 - `llm_call_safe(prompt, ...)` returns `{ok: bool, response: str, error: str}`.
 
@@ -505,7 +526,7 @@ internal/tools/codeinterp/
 ├── runtime.go           # VM init, execution orchestration, limits
 ├── builtins.go          # discover/describe/invoke/log implementations
 ├── rlm.go               # llm_call/llm_batch implementations
-├── datastore.go         # store_read/write/search/list builtin wrappers
+├── datastore.go         # store_read/write/read_range/search/list/delete builtin wrappers
 ├── sandbox.go           # load restrictions and capability wiring
 ├── convert.go           # Starlark<->Go conversion helpers
 ├── trace.go             # trace event types + serialization
@@ -532,6 +553,7 @@ internal/tools/codeinterp/
 | `internal/ai` | Provider for RLM | sub-calls use `ai.Provider.Complete()` with isolated context |
 | `internal/ai` | Result typing | outputs JSON-compatible blocks through normal tool result path |
 | `internal/ai` | Cost tracking | RLM usage accumulated and reported alongside tool result |
+| `internal/sandbox` | Session Sandbox execution | TierFull execution is isolated in Session Sandbox (not Tool Call Sandbox) |
 | `internal/sandbox/zfs` | FSDataStore root | FSDataStore rooted at ZFS dataset mountpoint in sandbox mode |
 | Observability layer | Trace emission | structured execution trace includes tool calls, RLM calls, and store ops |
 
@@ -673,6 +695,21 @@ internal/tools/codeinterp/
 5. `go.starlark.net` runtime is sandboxed with load disabled and limited builtins.
 6. Step-count, wall-clock, and token/cost limits are enforced with typed errors.
 7. Two-tier execution works with automatic classification.
-8. Multi-step workflows including RLM sub-calls run deterministically and return structured results.
+8. Multi-step workflows including RLM sub-calls return structured results; deterministic replay requires fixed provider responses.
 9. Local vs sandbox backend neutrality demonstrated in integration tests.
 10. Code interpreter package tests pass under `-race`.
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-2-sea | P1 | RLM sub-calls break absolute determinism claim | Incorporated | Added determinism carve-out and replay strategy in §1.1 and acceptance criteria updates. |
+| 2 | coder-2-sea | P1 | DataStore Search semantics and optional capability are ambiguous | Incorporated | Split `SearchableDataStore`, defined key-prefix search semantics, and typed not-supported behavior. |
+| 3 | coder-2-sea | P2 | Tier classification via identifier scan is fragile | Incorporated | Tier classification now specifies AST call-expression detection. |
+| 4 | coder-2-sea | P2 | DataStore cleanup lifecycle unclear | Incorporated | Lifecycle remains explicit through `Close()` contract and session-scoped store semantics. |
+| 5 | coder-2-sea | P2 | RLM budget estimation unspecified | Incorporated | Added explicit hard-budget estimation policy in §5.3. |
+| 6 | coder-2-sea | P2 | `invoke_safe` / `llm_call_safe` not fully specified | Incorporated | Reclassified as V2/future to avoid V1 ambiguity. |
+| 7 | coder-2-sea | P3 | `store_read_range`/`store_delete` inconsistent in package section | Incorporated | Updated package structure comment to include all datastore builtins. |
+| 8 | coder-2-sea | P1 | Provider resolution strategy unspecified | Incorporated | Pinned to configured provider; `model` only selects within provider in V1. |
+| 9 | coder-2-sea | P2 | Session Sandbox relationship to code interpreter unspecified | Incorporated | Added explicit Session Sandbox seam and terminology disambiguation. |
+| 10 | coder-2-sea | P3 | MemoryDataStore benchmark target too low | Incorporated | Raised benchmark target in companion test harness B6. |

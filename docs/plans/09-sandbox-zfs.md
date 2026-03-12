@@ -171,6 +171,8 @@ type ZFSManager interface {
     // Pool operations
     PoolStatus(ctx context.Context, pool string) (*PoolStatus, error)
     PoolSpace(ctx context.Context, pool string) (*PoolSpace, error)
+    ImportPool(ctx context.Context, pool, device string) error
+    ExportPool(ctx context.Context, pool string) error
 
     // Transfer operations (ZFS send/recv)
     EstimateSendSize(ctx context.Context, snapshot string, opts SendOptions) (int64, error)
@@ -310,6 +312,9 @@ type CLIManager struct {
     sudo      bool   // whether to prefix commands with sudo
     logger    *slog.Logger
     pool      string // pool name (for pool operations)
+    defaultCommandTimeout  time.Duration
+    metadataCommandTimeout time.Duration
+    transferCommandTimeout time.Duration
 
     // mu protects nothing — all operations are independent CLI invocations.
     // ZFS handles its own locking internally. Concurrent calls are safe.
@@ -323,6 +328,9 @@ func WithZPoolPath(path string) CLIOption
 func WithSudo(sudo bool) CLIOption
 func WithLogger(logger *slog.Logger) CLIOption
 func WithPool(pool string) CLIOption
+func WithDefaultCommandTimeout(timeout time.Duration) CLIOption
+func WithMetadataCommandTimeout(timeout time.Duration) CLIOption
+func WithTransferCommandTimeout(timeout time.Duration) CLIOption
 
 // NewCLIManager creates a ZFSManager backed by zfs/zpool CLI tools.
 // Returns ErrCommandNotFound if the binaries are not available.
@@ -334,7 +342,12 @@ func NewCLIManager(opts ...CLIOption) (*CLIManager, error)
 All ZFS operations are implemented by executing `zfs` or `zpool` CLI commands. The command execution layer handles:
 
 1. **Context cancellation**: All commands respect `ctx` — if the context is cancelled, the process is killed via `cmd.Cancel`.
-2. **Timeout propagation**: The caller's context deadline is the execution timeout. No additional default timeout is added (the sandbox host service applies its own timeouts).
+2. **Timeout propagation with safe defaults**:
+   - caller-provided context deadline always takes precedence.
+   - if caller has no deadline, `CLIManager` applies operation-class defaults:
+     - metadata operations (list/get/set/snapshot/rollback/destroy/import/export): default 30s
+     - transfer operations (`send` / `receive` / estimate): default 10m
+   - defaults are configurable via `WithMetadataCommandTimeout` and `WithTransferCommandTimeout`.
 3. **Structured logging**: Every command execution is logged at debug level with the full command, duration, exit code, and stderr (if non-empty).
 4. **Error classification**: Stderr is parsed by `classifyError()` to produce the appropriate sentinel error wrapped in `ZFSError`.
 
@@ -516,10 +529,15 @@ func (m *CLIManager) SetMountpoint(ctx context.Context, dataset, mountpoint stri
     if err := ValidateName(dataset); err != nil {
         return err
     }
+    if err := ValidateMountpoint(mountpoint); err != nil {
+        return err
+    }
     _, err := m.exec(ctx, "SetMountpoint", "set", "mountpoint="+mountpoint, dataset)
     return err
 }
 ```
+
+Mountpoint validation is enforced in this package as defense-in-depth (absolute path, no traversal components). The sandbox host service also validates mountpoints before passing them to gVisor.
 
 ### 5.5 GetDatasetInfo / ListDatasets / DatasetExists
 
@@ -745,6 +763,29 @@ func (m *CLIManager) PoolSpace(ctx context.Context, pool string) (*PoolSpace, er
 ```
 
 Pool operations are used by the sandbox host service for health monitoring and capacity planning. The service can check pool health before creating new sessions and alert on degraded pools or low space conditions.
+
+### 7.3 ImportPool / ExportPool
+
+```go
+func (m *CLIManager) ImportPool(ctx context.Context, pool, device string) error {
+    if err := ValidatePoolName(pool); err != nil {
+        return err
+    }
+    if err := ValidateDevicePath(device); err != nil {
+        return err
+    }
+    _, err := m.exec(ctx, "ImportPool", "zpool", "import", "-d", device, pool)
+    return err
+}
+
+func (m *CLIManager) ExportPool(ctx context.Context, pool string) error {
+    if err := ValidatePoolName(pool); err != nil {
+        return err
+    }
+    _, err := m.exec(ctx, "ExportPool", "zpool", "export", pool)
+    return err
+}
+```
 
 ---
 
@@ -1219,6 +1260,7 @@ func NewMockManager() *MockManager
 ```
 
 The mock is in the same package (exported) so that downstream packages can import it directly for testing.
+To prevent behavioral drift, the test harness includes a conformance suite that executes equivalent operation traces against `MockManager` and `CLIManager` and compares normalized results.
 
 ---
 
@@ -1341,3 +1383,14 @@ Should snapshot names include a monotonic counter, timestamp, or both? Options:
 ### OQ3: Sudo Configuration
 
 Some environments require `sudo` for ZFS operations. The `WithSudo` option handles this, but the sandbox host binary may need to be configured with appropriate sudoers rules. This is an operational concern documented here for awareness.
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-2-sea | P2 | MockManager may drift from CLI behavior over time | Incorporated | Added explicit mock-vs-real conformance requirement in §13.3 and harness coverage. |
+| 2 | coder-2-sea | P3 | SetMountpoint path validation ownership unclear | Incorporated | Added `ValidateMountpoint` contract and defense-in-depth ownership statement in §5.4. |
+| 3 | coder-2-sea | P2 | CLI command timeout defaults unspecified | Incorporated | Added operation-class default timeouts with override options in §4.2/§4.1. |
+| 4 | coder-2-sea | P3 | Rollback benchmark conflates snapshot creation and rollback | Incorporated | Updated companion harness benchmark design to isolate rollback cost. |
+| 5 | coder-2-sea | P2 | Pool import/export in scope but not covered | Incorporated | Added `ImportPool`/`ExportPool` interface and implementation outline in §3.1 and §7.3. |
+| 6 | coder-2-sea | P3 | Stress snapshot count bookkeeping is fragile | Incorporated | Companion harness now uses `ListSnapshots` assertions instead of manual counters. |

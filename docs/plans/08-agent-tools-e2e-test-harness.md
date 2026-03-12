@@ -22,10 +22,10 @@ Invariant:
 Invariant:
 - Queued follow-ups execute in insertion order across full E2E workflow.
 
-### P4. Scripting Trace Consistency
+### P4. Code Interpreter Trace Consistency
 
 Invariant:
-- Scripted flows always include discover/describe/invoke trace ordering when those calls are present.
+- Code interpreter flows always include discover/describe/invoke trace ordering when those calls are present.
 
 ### P5. Terminal-tool Short-circuit
 
@@ -191,3 +191,9 @@ Target:
 6. Stress/soak tests ST1-ST3 pass in scheduled CI.
 7. Security tests SEC1-SEC4 pass.
 8. Manual QA checklist completed for release-candidate commit.
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-2-sea | P2 | Property test terminology still uses legacy scripting language | Incorporated | Renamed P4 and invariant text to code interpreter terminology. |
