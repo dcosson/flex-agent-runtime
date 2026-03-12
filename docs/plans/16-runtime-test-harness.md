@@ -31,7 +31,7 @@ Non-goals:
 ```mermaid
 graph TB
     subgraph "Harness Controller"
-        ORCH[Scenario orchestrator\nload profiles + schedules]
+        ORCH[Harness Controller\nload profiles + schedules]
         GEN[Workload generator\nagent/task mixes]
         COL[Metrics/trace collector]
         ANA[Analysis + report generator]
@@ -69,6 +69,27 @@ graph TB
 - Mode 3 scenarios (plan 14) provide remote-dispatch workload templates.
 - Mode 2 scenarios (plan 15) provide driver/PTY lifecycle workload templates.
 - Harness composes and scales these workloads rather than inventing disconnected synthetic tests.
+
+### 2.4 Workload Composition Mechanism
+
+Prior E2E scenarios are adapted for the harness via a common `Workload` interface:
+
+```go
+type Workload interface {
+    Setup(ctx context.Context) error
+    Run(ctx context.Context, sessionID string) (*WorkloadResult, error)
+    Teardown(ctx context.Context) error
+}
+```
+
+**Wrapping pattern:** Each Mode 2 or Mode 3 E2E scenario is wrapped in a struct implementing `Workload`. `Setup` provisions fixture repos and any scenario-specific state. `Run` executes the scenario with the given `sessionID`, allowing the same scenario to run concurrently with different session identities and fixture repos. `Teardown` cleans up session-scoped resources.
+
+**Mixed workload composition:** The harness controller composes runs from multiple workload types using separate goroutine pools per workload type (e.g., one pool for Mode 2 workloads, another for Mode 3). Each pool is sized according to the mode mix ratio defined in the concurrency profile (§4.1). All pools share a single telemetry collector, so metrics from different workload types are tagged by mode and aggregated together. The controller manages:
+
+- **Concurrency:** Goroutine pool sizing per workload type, respecting per-profile caps.
+- **Session allocation:** Unique session IDs generated per workload invocation, mapped to sandbox host slots.
+- **Result collection:** `WorkloadResult` values collected from all goroutines and aggregated into per-profile summary metrics.
+- **Lifecycle:** Phased execution — all `Setup` calls complete before `Run` begins; `Teardown` runs after all `Run` calls finish (or on context cancellation).
 
 ---
 
@@ -118,18 +139,38 @@ Each profile defines:
 - 12h baseline soak (nightly/weekly)
 - 24h extended soak (weekly/monthly)
 
-Monitored drift dimensions:
-- goroutine count
-- RSS / heap / fd count
-- RPC error rate trend
-- snapshot count and space deltas
-- PTY session stability metrics
+Monitored drift dimensions and pass/fail thresholds (measured after a 1-hour warmup period to establish steady state):
+
+| Dimension | Threshold | Window |
+|-----------|-----------|--------|
+| Goroutine count growth | < 5% over steady-state baseline | Per soak duration |
+| RSS growth | < 10% over steady-state baseline | 12h / 24h |
+| fd count | Stable within ±2 of steady-state value | Per soak duration |
+| RPC error rate trend | Slope < 0.01%/hour | Per soak duration |
+| Snapshot count and space deltas | Growth rate linear with workload; no super-linear accumulation | Per soak duration |
+| PTY session stability metrics | Zero unexpected session drops | Per soak duration |
+
+These are initial targets to be refined as empirical data is gathered. The soak test fails if any dimension exceeds its threshold and emits per-dimension diagnostic reports identifying the breach.
 
 ### 4.3 Benchmark Profiles
 
 - Container cold-start benchmark (Tier 2 commands)
 - RPC unary + stream latency benchmark under variable concurrency
 - Snapshot creation/rollback latency under varying dataset sizes
+
+### 4.4 Infrastructure Requirements
+
+| Profile | Hosts | Est. CPU/host | Est. RAM/host | ZFS Pool/host | Cadence |
+|---------|-------|---------------|---------------|---------------|---------|
+| P-small | 1 | 4 cores | 16 GB | 50 GB | Every PR (CI quick baseline) |
+| P-medium | 2–3 | 8 cores | 32 GB | 100 GB | Nightly (daily performance) |
+| P-large | 10+ | 16 cores | 64 GB | 200 GB | Weekly (stress ceiling) |
+
+**Provisioning strategy:**
+- **PR / on-demand runs:** CI-provisioned hosts spun up for the run duration and torn down after.
+- **Nightly / weekly runs:** Static fleet of pre-provisioned hosts with persistent ZFS pools to avoid cold-start overhead.
+
+**Host discovery and management:** The harness controller uses a static configuration file listing available hosts per environment (CI vs. static fleet). Before each run, the controller performs a health check against each host (connectivity, ZFS pool availability, minimum free resources). Unhealthy hosts are excluded from the run and flagged in the report. The host list config is stored in-repo at `e2etests/runtime/config/hosts.yaml`.
 
 ---
 
@@ -145,9 +186,16 @@ Monitored drift dimensions:
 
 ### 5.2 Threshold Policy
 
-- Thresholds stored in versioned baseline files.
+- Thresholds stored in versioned baseline files under `e2etests/runtime/reports/baselines/`.
 - Regressions fail CI if above tolerated envelopes unless explicitly approved.
 - Trend-based alerts on monotonic degradation across recent runs.
+
+**Baseline management workflow:**
+
+1. **Storage:** Baselines are committed in-repo at `e2etests/runtime/reports/baselines/`, one file per profile/metric family (e.g., `p-medium-rpc-latency.json`).
+2. **Creation and update:** A dedicated "baseline update" CI job runs the target profile on the static fleet, produces updated baseline files, and commits them to the repo. This job is triggered manually or on-demand after architectural changes that are expected to shift performance characteristics.
+3. **Exceptions:** To merge a PR that exceeds baseline thresholds, the CI pipeline requires the `BASELINE_OVERRIDE=true` CI variable to be set. Setting this variable requires a linked issue tracking the expected regression and a justification comment on the PR.
+4. **Staleness detection:** CI emits a warning alert when any baseline file has not been updated in > 30 days. This ensures baselines stay representative of current system behavior and are not silently stale.
 
 ---
 
@@ -182,7 +230,7 @@ Per run produce:
 
 2. **Soak harness detects stability regressions**
 - Steps: run 12h soak profile with drift monitoring.
-- Expected: no unbounded resource growth; failures emit actionable diagnostics.
+- Expected: all drift dimensions remain within defined thresholds (goroutine growth < 5%, RSS growth < 10%, fd count ±2, RPC error slope < 0.01%/hour — see §4.2); threshold breaches fail the run and emit per-dimension diagnostic reports.
 
 3. **Snapshot growth analysis is automated**
 - Steps: run mutation-heavy workloads and collect snapshot/storage metrics.
@@ -236,7 +284,7 @@ On threshold breach, auto-capture:
 
 ## 11. Extreme Optimization
 
-1. Distributed benchmark runners to parallelize high-concurrency profiles.
+1. **Distributed benchmark runners** to parallelize high-concurrency profiles. Coordination model: a single harness controller process launches workloads across multiple sandbox hosts via RPC. Runners on each host execute their assigned workload slice independently — they do not coordinate with each other, only with the controller. The controller synchronizes test phases (ramp-up, steady state, ramp-down) by issuing phase-transition commands to all runners. Metrics are collected centrally via OTEL (each runner exports to the shared OTEL collector endpoint on the controller host). The controller aggregates results from all runners into a single unified report. Clock synchronization for cross-host latency measurements relies on NTP; the harness validates clock skew < 10ms across hosts before proceeding.
 2. Zero-copy telemetry ingestion path for high-cardinality event streams.
 3. Adaptive sampling for traces to preserve hot-path visibility at scale.
 
@@ -270,3 +318,20 @@ On threshold breach, auto-capture:
 4. Snapshot space growth reporting is automated and baseline-compared.
 5. Container boot and RPC latency benchmark lanes are operational.
 6. Baseline regression gating is wired into CI with documented override process.
+
+---
+
+## R1 Review Disposition (reviewer-sea)
+
+**Review:** [16-runtime-test-harness-review-reviewer-sea.md](./16-runtime-test-harness-review-reviewer-sea.md)
+**Incorporated by:** coder-2-sea
+**Date:** 2026-03-12
+
+| Finding | Severity | Disposition | Notes |
+|---------|----------|-------------|-------|
+| F1 | P2 | Incorporated | Added Workload interface and composition mechanism |
+| F2 | P2 | Incorporated | Added infrastructure requirements per profile |
+| F3 | P2 | Incorporated | Added specific soak test drift thresholds |
+| F4 | P2 | Incorporated | Added baseline management workflow |
+| F5 | P3 | Incorporated | Added priority annotations and implementation notes to meta-tests |
+| F6 | P3 | Incorporated | Defined controller-centric coordination model |

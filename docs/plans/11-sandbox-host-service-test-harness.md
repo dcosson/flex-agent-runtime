@@ -9,9 +9,49 @@
 
 ### P1. Session State Machine Validity
 
-**Invariant:** Every sequence of valid state transitions produces a valid final state. Invalid transitions are rejected without modifying session state.
+**Invariant:** Every sequence of valid state transitions produces a valid final state. Invalid transitions are rejected without modifying session state. A shadow state machine tracks the expected state and expected success/failure of each operation. After each operation, both the return value (success/error) and the resulting state are asserted against the shadow model.
 
 ```go
+// shadowState tracks expected session state for property-based validation.
+type shadowState struct {
+    state     SessionState
+    turnCount int
+    snapCount int
+    destroyed bool
+}
+
+func (ss *shadowState) expectResult(op int) (expectErr bool) {
+    switch op {
+    case 0: // ExecuteTool
+        return ss.state != SessionActive
+    case 1: // TurnComplete
+        return ss.state != SessionActive
+    case 2: // Pause
+        return ss.state != SessionActive
+    case 3: // Resume
+        return ss.state != SessionPaused
+    case 4: // Rollback
+        return ss.state != SessionActive || ss.snapCount == 0
+    case 5: // Destroy
+        return ss.destroyed
+    }
+    return false
+}
+
+func (ss *shadowState) applySuccess(op int) {
+    switch op {
+    case 1: // TurnComplete
+        ss.turnCount++
+        ss.snapCount++
+    case 2: // Pause
+        ss.state = SessionPaused
+    case 3: // Resume
+        ss.state = SessionActive
+    case 5: // Destroy
+        ss.destroyed = true
+    }
+}
+
 func TestSessionStateMachine(t *testing.T) {
     rapid.Check(t, func(t *rapid.T) {
         svc := newTestService(t)
@@ -22,42 +62,62 @@ func TestSessionStateMachine(t *testing.T) {
         })
         require.NoError(t, err)
 
+        shadow := &shadowState{state: SessionActive}
+
         ops := rapid.IntRange(1, 30).Draw(t, "opCount")
         for i := 0; i < ops; i++ {
             op := rapid.IntRange(0, 5).Draw(t, fmt.Sprintf("op-%d", i))
+            expectErr := shadow.expectResult(op)
+
+            var opErr error
             switch op {
             case 0: // ExecuteTool
-                _, err := svc.ExecuteTool(ctx, ExecuteToolRequest{
+                _, opErr = svc.ExecuteTool(ctx, ExecuteToolRequest{
                     SessionID: sess.ID, ToolName: "read_file",
                     Params: map[string]any{"path": "test.txt"},
                 })
-                if sess.State == SessionActive {
-                    // may succeed or fail, but should not panic
-                } else {
-                    assert.Error(t, err)
-                }
             case 1: // TurnComplete
-                svc.TurnComplete(ctx, sess.ID)
+                _, opErr = svc.TurnComplete(ctx, sess.ID)
             case 2: // Pause
-                svc.PauseSession(ctx, sess.ID)
+                opErr = svc.PauseSession(ctx, sess.ID)
             case 3: // Resume
-                svc.ResumeSession(ctx, sess.ID)
+                opErr = svc.ResumeSession(ctx, sess.ID)
             case 4: // Rollback
                 snaps, _ := svc.ListSnapshots(ctx, sess.ID)
                 if len(snaps) > 0 {
-                    svc.RollbackSession(ctx, sess.ID, snaps[0].Name)
+                    opErr = svc.RollbackSession(ctx, sess.ID, snaps[0].Name)
+                } else {
+                    continue // no snapshots to rollback to — skip
                 }
             case 5: // Destroy
-                svc.DestroySession(ctx, sess.ID)
+                opErr = svc.DestroySession(ctx, sess.ID)
+                if opErr == nil {
+                    shadow.applySuccess(op)
+                }
                 return // session is gone
             }
 
-            // Verify session is in a valid state
+            // Assert error expectation matches
+            if expectErr {
+                assert.Error(t, opErr, "op %d (type %d) should fail in state %s",
+                    i, op, shadow.state)
+            } else {
+                if opErr == nil {
+                    shadow.applySuccess(op)
+                }
+                // Note: tool calls may fail for non-state reasons (file not found, etc.)
+                // so we don't assert NoError for op 0 (ExecuteTool)
+                if op != 0 {
+                    assert.NoError(t, opErr, "op %d (type %d) should succeed in state %s",
+                        i, op, shadow.state)
+                }
+            }
+
+            // Verify actual state matches shadow state
             info, err := svc.GetSession(ctx, sess.ID)
             if err == nil {
-                assert.Contains(t, []SessionState{
-                    SessionActive, SessionPaused, SessionDestroying, SessionFailed,
-                }, info.State)
+                assert.Equal(t, shadow.state, info.State,
+                    "state mismatch after op %d (type %d)", i, op)
             }
         }
     })
@@ -268,7 +328,8 @@ func TestContextCancelDuringExec(t *testing.T) {
 ### FI5. Destroy During In-Flight Tool
 
 Call `DestroySession` while tools are executing. Verify:
-- Returns `ErrToolsInFlight` or waits for completion (depending on policy)
+- Waits for in-flight tools to drain (up to configured timeout)
+- If drain times out, proceeds with destroy (logs warning)
 - No data corruption
 
 ### FI6. Pool Exhaustion During Operations

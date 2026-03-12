@@ -11,6 +11,8 @@
 
 The sandbox host service is the coordinator that ties ZFS dataset management and gVisor container execution together into a coherent session-based tool execution environment. It runs on EC2 instances (or any Linux host with ZFS) and manages multiple agent sessions concurrently, each with isolated filesystems and snapshot histories.
 
+> **Terminology:** In this plan, "sandbox" refers to the **Tool Call Sandbox** — the ZFS + gVisor infrastructure that provides isolated filesystem and process execution for tool calls. This is distinct from the **Session Sandbox**, which is the container/environment where the agent process itself runs in Mode 2. The package name `internal/sandbox` and type names like `SandboxHostService` refer to the Tool Call Sandbox.
+
 This is the component that makes Modes 2, 3, and 4 possible. It receives tool execution requests, routes them to the appropriate tier (Go functions for file ops, gVisor containers for process execution), manages per-turn snapshots, and supports pause/resume/rollback of entire sessions.
 
 **Scope:**
@@ -173,10 +175,7 @@ stateDiagram-v2
     [*] --> Creating: CreateSession
     Creating --> Active: Clone + mount success
     Creating --> Failed: Clone / mount failure
-    Active --> Active: ExecuteTool, TurnComplete
-    Active --> RollingBack: RollbackSession
-    RollingBack --> Active: Rollback success
-    RollingBack --> Failed: Rollback failure
+    Active --> Active: ExecuteTool, TurnComplete, RollbackSession
     Active --> Paused: PauseSession
     Paused --> Active: ResumeSession
     Active --> Destroying: DestroySession
@@ -184,6 +183,10 @@ stateDiagram-v2
     Failed --> Destroying: DestroySession
     Destroying --> [*]: Cleanup complete
 ```
+
+> **Note:** ZFS rollback (`zfs rollback`) is a synchronous operation that completes
+> quickly (typically <100ms), so there is no need for a transient `RollingBack` state.
+> Rollback transitions `Active → Active` on success or `Active → Failed` on error.
 
 ---
 
@@ -198,12 +201,13 @@ stateDiagram-v2
 // It coordinates ZFS dataset management, gVisor container execution,
 // and tool dispatch. Safe for concurrent use.
 type SandboxHostService struct {
-    config   ServiceConfig
-    zfs      zfs.ZFSManager
-    gvisor   gvisor.GVisorManager
-    sessions sync.Map          // map[string]*Session
-    logger   *slog.Logger
-    metrics  *serviceMetrics   // OTEL counters/histograms
+    config     ServiceConfig
+    zfs        zfs.ZFSManager
+    gvisor     gvisor.GVisorManager
+    sessions   sync.Map          // map[string]*Session
+    sessionsMu sync.Mutex        // guards capacity-check + store atomicity in CreateSession
+    logger     *slog.Logger
+    metrics    *serviceMetrics   // OTEL counters/histograms
 }
 
 func NewSandboxHostService(cfg ServiceConfig, z zfs.ZFSManager, g gvisor.GVisorManager, logger *slog.Logger) *SandboxHostService
@@ -325,6 +329,9 @@ type ServiceConfig struct {
     PoolSpaceCritThreshold  float64 // critical when pool is this full (default: 0.95)
     HealthCheckInterval     time.Duration // how often to check pool health (default: 30s)
 
+    // Pause / Destroy drain
+    PauseDrainTimeout time.Duration // max time to wait for in-flight tools on pause (default: 30s)
+
     // Graceful shutdown
     ShutdownTimeout time.Duration // max time to wait for in-flight tools (default: 30s)
 }
@@ -353,8 +360,17 @@ type Session struct {
     labels     map[string]string
     activeTools atomic.Int32  // currently executing tool count
 
-    // Snapshot tracking
-    snapshots []string // ordered list of snapshot names
+    // Snapshot tracking — each entry records whether the snapshot was created
+    // by TurnComplete (isTurnSnapshot=true) or by an explicit CreateSnapshot call.
+    // This distinction is needed so that rollback can compute the correct turnCount
+    // by counting only turn-snapshots up to the rollback target.
+    snapshots []SnapshotEntry
+}
+
+// SnapshotEntry tracks a snapshot and whether it originated from a turn boundary.
+type SnapshotEntry struct {
+    Name           string
+    IsTurnSnapshot bool
 }
 
 func (s *Session) Info() SessionInfo
@@ -366,52 +382,63 @@ func (s *Session) Info() SessionInfo
 // service.go
 
 func (svc *SandboxHostService) CreateSession(ctx context.Context, req CreateSessionRequest) (*SessionInfo, error) {
-    // 1. Validate capacity
-    if svc.config.MaxSessions > 0 {
-        count := svc.sessionCount()
-        if count >= svc.config.MaxSessions {
-            return nil, ErrMaxSessionsReached
-        }
-    }
-
-    // 2. Generate session ID if not provided
+    // 1. Generate session ID if not provided
     sessionID := req.SessionID
     if sessionID == "" {
         sessionID = generateSessionID()
     }
 
-    // 3. Check for duplicate
+    // 2. Atomic capacity-check + store under sessionsMu to prevent TOCTOU race.
+    //    Without this mutex, two concurrent CreateSession calls could both pass the
+    //    capacity check and both store sessions, exceeding MaxSessions.
+    svc.sessionsMu.Lock()
+    if svc.config.MaxSessions > 0 {
+        count := svc.sessionCount()
+        if count >= svc.config.MaxSessions {
+            svc.sessionsMu.Unlock()
+            return nil, ErrMaxSessionsReached
+        }
+    }
     if _, loaded := svc.sessions.Load(sessionID); loaded {
+        svc.sessionsMu.Unlock()
         return nil, fmt.Errorf("%w: %s", ErrSessionExists, sessionID)
     }
+    // Reserve the slot with a placeholder to hold our position while we do I/O.
+    // This lets us release the mutex before the (slow) ZFS clone operation.
+    placeholder := &Session{id: sessionID, state: SessionCreating}
+    svc.sessions.Store(sessionID, placeholder)
+    svc.sessionsMu.Unlock()
 
-    // 4. Clone from base snapshot
+    // 3. Clone from base snapshot
     dataset := svc.config.SessionsDataset + "/" + sessionID
     if err := svc.zfs.CloneFromSnapshot(ctx, req.BaseSnapshot, dataset); err != nil {
+        svc.sessions.Delete(sessionID) // release the placeholder
         return nil, fmt.Errorf("clone base snapshot: %w", err)
     }
 
-    // 5. Set quota if configured
+    // 4. Set quota if configured (use SetProperty — dataset already exists from clone)
     quota := req.Quota
     if quota == 0 {
         quota = svc.config.DefaultSessionQuota
     }
     if quota > 0 {
-        if err := svc.zfs.CreateDataset(ctx, dataset, zfs.DatasetOptions{Quota: quota}); err != nil {
-            // Dataset already exists from clone — set property instead
-            // This is handled by the ZFS manager's SetProperty or via CreateDataset options
+        if err := svc.zfs.SetProperty(ctx, dataset, "quota", formatBytes(quota)); err != nil {
+            svc.zfs.DestroyDataset(ctx, dataset, zfs.DestroyOptions{Recursive: true, Force: true})
+            svc.sessions.Delete(sessionID)
+            return nil, fmt.Errorf("set quota: %w", err)
         }
     }
 
-    // 6. Get mountpoint
+    // 5. Get mountpoint
     mountpoint, err := svc.zfs.GetMountpoint(ctx, dataset)
     if err != nil {
         // Cleanup on failure
         svc.zfs.DestroyDataset(ctx, dataset, zfs.DestroyOptions{Recursive: true, Force: true})
+        svc.sessions.Delete(sessionID)
         return nil, fmt.Errorf("get mountpoint: %w", err)
     }
 
-    // 7. Create session object
+    // 6. Create session object (replaces the placeholder)
     sess := &Session{
         id:         sessionID,
         state:      SessionActive,
@@ -448,17 +475,36 @@ func (svc *SandboxHostService) PauseSession(ctx context.Context, sessionID strin
     }
 
     sess.mu.Lock()
-    defer sess.mu.Unlock()
+    if sess.state != SessionActive {
+        sess.mu.Unlock()
+        return fmt.Errorf("%w: session is %s, not active", ErrInvalidState, sess.state)
+    }
+    sess.mu.Unlock()
 
+    // Wait for in-flight tools to complete with a configurable timeout.
+    // This matches the pattern used in Shutdown and DestroySession. Callers
+    // expect pause to gracefully wait rather than immediately rejecting.
+    drainTimeout := svc.config.PauseDrainTimeout
+    if drainTimeout == 0 {
+        drainTimeout = 30 * time.Second
+    }
+    deadline := time.After(drainTimeout)
+    for sess.activeTools.Load() > 0 {
+        select {
+        case <-deadline:
+            return fmt.Errorf("%w: timed out waiting for %d in-flight tools",
+                ErrToolsInFlight, sess.activeTools.Load())
+        case <-time.After(50 * time.Millisecond):
+            continue
+        }
+    }
+
+    sess.mu.Lock()
+    defer sess.mu.Unlock()
+    // Re-check state after waiting — another operation may have changed it.
     if sess.state != SessionActive {
         return fmt.Errorf("%w: session is %s, not active", ErrInvalidState, sess.state)
     }
-
-    // Wait for in-flight tools to complete (with timeout)
-    if sess.activeTools.Load() > 0 {
-        return ErrToolsInFlight
-    }
-
     sess.state = SessionPaused
     svc.metrics.sessionsPaused.Add(ctx, 1)
     return nil
@@ -498,6 +544,26 @@ func (svc *SandboxHostService) DestroySession(ctx context.Context, sessionID str
     sess.state = SessionDestroying
     sess.mu.Unlock()
 
+    // Wait for in-flight tools to drain before destroying the dataset.
+    // Destroying while tools are reading/writing could cause panics or corruption.
+    // Uses the same wait-with-timeout pattern as Shutdown.
+    drainTimeout := svc.config.ShutdownTimeout
+    if drainTimeout == 0 {
+        drainTimeout = 30 * time.Second
+    }
+    deadline := time.After(drainTimeout)
+    for sess.activeTools.Load() > 0 {
+        select {
+        case <-deadline:
+            svc.logger.WarnContext(ctx, "destroy drain timeout — proceeding with active tools",
+                "session_id", sessionID, "active_tools", sess.activeTools.Load())
+            goto destroy
+        case <-time.After(50 * time.Millisecond):
+            continue
+        }
+    }
+
+destroy:
     // Destroy ZFS dataset (recursive — includes all snapshots)
     if err := svc.zfs.DestroyDataset(ctx, sess.dataset, zfs.DestroyOptions{
         Recursive: true,
@@ -614,6 +680,13 @@ func (svc *SandboxHostService) executeTier1(ctx context.Context, sess *Session, 
     mountpoint := sess.mountpoint
     sess.mu.RUnlock()
 
+    // Defense-in-depth: validate that any path parameter stays within the
+    // session mountpoint. This is the isolation boundary — the service must
+    // enforce containment regardless of individual tool implementation quality.
+    if err := validatePathParams(mountpoint, req.Params); err != nil {
+        return nil, fmt.Errorf("tier1 %s: path validation: %w", req.ToolName, err)
+    }
+
     // Execute tool using the built-in tool implementation
     result, err := svc.executeToolFunc(ctx, req.ToolName, mountpoint, req.Params)
     if err != nil {
@@ -623,6 +696,44 @@ func (svc *SandboxHostService) executeTier1(ctx context.Context, sess *Session, 
     return &ExecuteToolResponse{
         Content: result,
     }, nil
+}
+
+// validatePathParams checks all path-like parameters to ensure they resolve
+// within the given root directory. Rejects any path that escapes via "../".
+func validatePathParams(rootDir string, params map[string]any) error {
+    for key, val := range params {
+        if key != "path" && key != "file_path" && key != "directory" {
+            continue
+        }
+        p, ok := val.(string)
+        if !ok {
+            continue
+        }
+        if err := validatePath(rootDir, p); err != nil {
+            return err
+        }
+    }
+    return nil
+}
+
+// validatePath resolves a requested path against the root directory and rejects
+// any result that escapes the root. Uses filepath.Rel to detect traversal.
+func validatePath(rootDir, requested string) error {
+    // Resolve to absolute path within rootDir
+    abs := requested
+    if !filepath.IsAbs(requested) {
+        abs = filepath.Join(rootDir, requested)
+    }
+    abs = filepath.Clean(abs)
+
+    rel, err := filepath.Rel(rootDir, abs)
+    if err != nil {
+        return fmt.Errorf("path escape: cannot compute relative path: %w", err)
+    }
+    if strings.HasPrefix(rel, "..") {
+        return fmt.Errorf("path escape: %q resolves outside session root", requested)
+    }
+    return nil
 }
 
 // executeToolFunc dispatches to the appropriate Go function for file operations.
@@ -664,7 +775,10 @@ func (svc *SandboxHostService) executeTier2(ctx context.Context, sess *Session, 
         resources = *req.Resources
     }
 
-    cmd, env := buildTier2Command(req.ToolName, req.Params)
+    cmd, env, err := buildTier2Command(req.ToolName, req.Params)
+    if err != nil {
+        return nil, fmt.Errorf("tier2 %s: %w", req.ToolName, err)
+    }
 
     opts := gvisor.ContainerOptions{
         Command:   cmd,
@@ -691,19 +805,24 @@ func (svc *SandboxHostService) executeTier2(ctx context.Context, sess *Session, 
 }
 
 // buildTier2Command constructs the shell command for Tier 2 execution.
-func buildTier2Command(toolName string, params map[string]any) ([]string, map[string]string) {
+// Returns an error for unknown tools rather than constructing a shell command
+// with untrusted input (which would risk shell injection via toolName).
+func buildTier2Command(toolName string, params map[string]any) ([]string, map[string]string, error) {
     switch toolName {
     case "bash":
         cmd := params["cmd"].(string)
-        return []string{"/bin/bash", "-c", cmd}, nil
+        return []string{"/bin/bash", "-c", cmd}, nil, nil
     case "git_push", "git_clone", "git_fetch", "git_pull":
-        return buildGitCommand(toolName, params)
+        c, e := buildGitCommand(toolName, params)
+        return c, e, nil
     case "git_add":
-        return buildGitAddCommand(params)
+        c, e := buildGitAddCommand(params)
+        return c, e, nil
     case "git_commit":
-        return buildGitCommitCommand(params)
+        c, e := buildGitCommitCommand(params)
+        return c, e, nil
     default:
-        return []string{"/bin/bash", "-c", fmt.Sprintf("echo 'Unknown tool: %s'", toolName)}, nil
+        return nil, nil, fmt.Errorf("unknown Tier 2 tool: %s", toolName)
     }
 }
 ```
@@ -725,19 +844,23 @@ func (svc *SandboxHostService) TurnComplete(ctx context.Context, sessionID strin
         return nil, err
     }
 
-    sess.mu.Lock()
-    sess.turnCount++
-    turnNum := sess.turnCount
-    snapName := fmt.Sprintf("%s-%04d", svc.config.SnapshotPrefix, turnNum)
-    sess.mu.Unlock()
+    // Compute the snapshot name using the *prospective* turn number, but do NOT
+    // increment turnCount yet. Only increment after the snapshot succeeds. This
+    // prevents turnCount and actual snapshot count from diverging on failure.
+    sess.mu.RLock()
+    prospectiveTurn := sess.turnCount + 1
+    snapName := fmt.Sprintf("%s-%04d", svc.config.SnapshotPrefix, prospectiveTurn)
+    sess.mu.RUnlock()
 
     info, err := svc.zfs.CreateSnapshot(ctx, sess.dataset, snapName)
     if err != nil {
-        return nil, fmt.Errorf("snapshot turn %d: %w", turnNum, err)
+        return nil, fmt.Errorf("snapshot turn %d: %w", prospectiveTurn, err)
     }
 
+    // Snapshot succeeded — now commit the state change.
     sess.mu.Lock()
-    sess.snapshots = append(sess.snapshots, snapName)
+    sess.turnCount = prospectiveTurn
+    sess.snapshots = append(sess.snapshots, SnapshotEntry{Name: snapName, IsTurnSnapshot: true})
     sess.mu.Unlock()
 
     // Auto-cleanup old snapshots if limit is set
@@ -775,7 +898,7 @@ func (svc *SandboxHostService) CreateSnapshot(ctx context.Context, sessionID str
     }
 
     sess.mu.Lock()
-    sess.snapshots = append(sess.snapshots, name)
+    sess.snapshots = append(sess.snapshots, SnapshotEntry{Name: name, IsTurnSnapshot: false})
     sess.mu.Unlock()
 
     return &SnapshotResult{
@@ -808,19 +931,26 @@ func (svc *SandboxHostService) RollbackSession(ctx context.Context, sessionID st
         return fmt.Errorf("rollback to %s: %w", snapshotID, err)
     }
 
-    // Update session state — remove snapshots after the target
+    // Update session state — remove snapshots after the target and recompute
+    // turnCount by counting only turn-snapshots up to and including the target.
+    // This is correct even when explicit (non-turn) snapshots are interleaved.
     sess.mu.Lock()
     targetIdx := -1
     for i, s := range sess.snapshots {
-        if s == snapshotID {
+        if s.Name == snapshotID {
             targetIdx = i
             break
         }
     }
     if targetIdx >= 0 {
         sess.snapshots = sess.snapshots[:targetIdx+1]
-        // Reset turn count to match
-        sess.turnCount = targetIdx + 1
+        turnCount := 0
+        for _, s := range sess.snapshots {
+            if s.IsTurnSnapshot {
+                turnCount++
+            }
+        }
+        sess.turnCount = turnCount
     }
     sess.mu.Unlock()
 
@@ -837,27 +967,31 @@ When `MaxSnapshotsPerSession` is set, excess old snapshots are pruned (oldest fi
 // snapshot.go
 
 func (svc *SandboxHostService) cleanupOldSnapshots(ctx context.Context, sess *Session) {
+    maxSnaps := svc.config.MaxSnapshotsPerSession
+
+    // Perform the entire check-and-remove under a single lock hold to prevent
+    // a concurrent TurnComplete from modifying the snapshots slice between the
+    // check and the truncation (which could cause incorrect removal or index
+    // out of bounds).
     sess.mu.Lock()
     snapCount := len(sess.snapshots)
-    maxSnaps := svc.config.MaxSnapshotsPerSession
-    sess.mu.Unlock()
-
     if maxSnaps <= 0 || snapCount <= maxSnaps {
+        sess.mu.Unlock()
         return
     }
 
     toRemove := snapCount - maxSnaps
-    sess.mu.Lock()
-    removeNames := make([]string, toRemove)
-    copy(removeNames, sess.snapshots[:toRemove])
+    removeEntries := make([]SnapshotEntry, toRemove)
+    copy(removeEntries, sess.snapshots[:toRemove])
     sess.snapshots = sess.snapshots[toRemove:]
     sess.mu.Unlock()
 
-    for _, name := range removeNames {
-        if err := svc.zfs.DestroySnapshot(ctx, sess.dataset, name); err != nil {
+    // Destroy snapshots outside the lock (ZFS operations may be slow).
+    for _, entry := range removeEntries {
+        if err := svc.zfs.DestroySnapshot(ctx, sess.dataset, entry.Name); err != nil {
             // Log but don't fail — held snapshots will return ErrSnapshotHeld
             svc.logger.WarnContext(ctx, "cleanup snapshot failed",
-                "session_id", sess.id, "snapshot", name, "error", err)
+                "session_id", sess.id, "snapshot", entry.Name, "error", err)
         }
     }
 }
@@ -1110,9 +1244,9 @@ The RPC server wraps `SandboxHostService` and exposes it over the network. The s
 
 **Interface:** `SandboxHostService` struct methods (Go interface, not network protocol)
 
-### 11.5 Agent Loop / Orchestrator
+### 11.5 Agent Loop / RuntimeController
 
-In Mode 3, the agent loop calls `SandboxBackend.ExecuteTool()` which goes through RPC to this service. In Mode 2, the agent runs inside the sandbox and uses `LocalBackend` instead — the service is not involved in tool routing (only in session lifecycle via the orchestrator).
+In Mode 3, the agent loop calls `SandboxBackend.ExecuteTool()` which goes through RPC to this service. In Mode 2, the agent runs inside the Session Sandbox (the container/environment where the agent process runs) and uses `LocalBackend` instead — the service is not involved in tool routing (only in session lifecycle via the RuntimeController).
 
 ---
 
@@ -1245,7 +1379,7 @@ When multiple Tier 2 tool calls arrive for the same session in quick succession,
 
 ### 15.3 Snapshot Deduplication Monitoring
 
-Track the `used` property of snapshots to identify when sessions are creating excessive unique data (e.g., repeatedly generating large build artifacts). Surface this as a metric so the orchestrator can take action (increase quota, warn, or kill the session).
+Track the `used` property of snapshots to identify when sessions are creating excessive unique data (e.g., repeatedly generating large build artifacts). Surface this as a metric so the RuntimeController can take action (increase quota, warn, or kill the session).
 
 ---
 
@@ -1312,3 +1446,25 @@ The architecture doc says per-turn is the default with per-tool-call available a
 Should sessions have a configurable time-to-live after which they are automatically destroyed? This prevents resource leaks from crashed agents that never clean up.
 
 **Recommendation:** Yes. Add `SessionTTL` to `ServiceConfig` (default: 24h). The background health monitor checks session ages and destroys expired sessions.
+
+---
+
+## R1 Review Disposition (reviewer-sea)
+
+**Review:** [11-sandbox-host-service-review-reviewer-sea.md](./11-sandbox-host-service-review-reviewer-sea.md)
+**Incorporated by:** coder-2-sea
+**Date:** 2026-03-12
+
+| Finding | Severity | Disposition | Notes |
+|---------|----------|-------------|-------|
+| F1 | P1 | Incorporated | Added sessionsMu mutex for atomic capacity-check + store |
+| F2 | P1 | Incorporated | Moved turnCount increment after successful snapshot |
+| F3 | P2 | Incorporated | Added SnapshotEntry struct with isTurnSnapshot flag |
+| F4 | P2 | Incorporated | Removed RollingBack from state diagram (rollback is synchronous) |
+| F5 | P2 | Incorporated | Added in-flight tool drain-with-timeout to DestroySession |
+| F6 | P3 | Incorporated | Implemented wait-with-timeout for PauseSession |
+| F7 | P2 | Incorporated | Added validatePath helper in tier1 executor |
+| F8 | P3 | Incorporated | Fixed to use SetProperty for quota; errors not swallowed |
+| F9 | P3 | Incorporated | Unified to single lock hold for check-and-remove |
+| F10 | P3 | Incorporated | Default case returns error instead of shell command |
+| F11 | P2 | Incorporated | Added shadow state machine to P1 test (see test harness) |

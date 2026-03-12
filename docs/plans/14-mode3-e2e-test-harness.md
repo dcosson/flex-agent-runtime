@@ -1,7 +1,7 @@
 # 14: Mode 3 E2E — Test Harness
 
 **Companion to:** [14-mode3-e2e.md](./14-mode3-e2e.md)
-**Scope:** High-assurance harness for distributed Mode 3 behavior: RPC dispatch, remote lifecycle controls, snapshots, rollback, pause/resume, and event streaming.
+**Scope:** High-assurance harness for distributed Mode 3 behavior: RPC dispatch from RuntimeController to remote Tool Call Sandbox hosts, session lifecycle controls, snapshots, rollback, pause/resume, and event streaming.
 
 ---
 
@@ -42,7 +42,7 @@ Invariant:
 
 ### F2. Host restart during active session
 
-- Simulate sandbox-host restart and test reconnection/recovery path.
+- Simulate Tool Call Sandbox host restart and test reconnection/recovery path.
 
 ### F3. Rollback race with concurrent tool request
 
@@ -58,6 +58,23 @@ Invariant:
 
 - Drop stream connections mid-run and validate re-subscription behavior.
 
+### F6. Connection reset during ExecuteTool response transfer
+
+- Use a TCP proxy (e.g., toxiproxy) to reset the connection after ExecuteTool request is sent but before the response body is fully received.
+- Validate that the client detects the failure and retries or surfaces a typed error (not a silent data loss).
+
+### F7. TLS certificate rotation/expiry during active session
+
+- Rotate or expire the TLS certificate on the Tool Call Sandbox host while a session is active.
+- Validate that in-flight RPCs fail with a clear TLS error, and that new connections succeed after the client picks up the rotated certificate.
+
+### F8. Network partition between tool request send and response receive
+
+- Use a TCP proxy to introduce a full network partition after the ExecuteTool request is sent.
+- Validate timeout behavior, session state consistency (no phantom tool executions), and proper error propagation to the agent loop.
+
+> **Note:** F6-F8 use a TCP proxy (such as [toxiproxy](https://github.com/Shopify/toxiproxy)) interposed between the RPC client and the Tool Call Sandbox host to inject network-level faults without modifying application code.
+
 ---
 
 ## 3. Comparison / Oracle Tests
@@ -66,6 +83,16 @@ Invariant:
 
 - Run equivalent scenarios in local and remote modes.
 - Compare semantic outcomes (file diffs, tool sequence classes, terminal state).
+
+**Semantic equivalence criteria:**
+- File content changes must match (byte-for-byte comparison of all modified/created files).
+- Tool output content must match (ignoring timing metadata and filesystem path differences).
+- Exit codes must match for all tool invocations.
+
+**Allow-listed expected divergences:**
+- `snapshot_id` presence in Mode 3 tool responses (absent in Mode 1).
+- Filesystem path differences (e.g., `/var/lib/zfs/sessions/...` vs local working directory paths).
+- Timing metadata (latency fields, timestamps) may differ.
 
 ### O2. Snapshot oracle
 
@@ -109,6 +136,10 @@ Target:
 
 Target:
 - rollback-to-ready p95 <= 500ms for small fixture datasets.
+
+**"Small fixture dataset" definition:** base snapshot ~50MB, with ~5MB of changes between snapshots.
+
+**"Ready" definition:** ZFS rollback is complete, session state is reset to `active`, and the session is re-available for `ExecuteTool` calls. The timer starts at rollback request and ends when a subsequent `ExecuteTool` call can be accepted.
 
 ### B4. Event stream throughput
 
@@ -180,7 +211,7 @@ Target:
 ## 10. Exit Criteria
 
 1. Property tests P1-P5 pass consistently.
-2. Fault injection tests F1-F5 pass with expected behavior.
+2. Fault injection tests F1-F8 pass with expected behavior.
 3. Oracle tests O1-O3 pass or accepted divergences are documented.
 4. Deterministic simulations S1-S3 pass.
 5. Benchmark targets B1-B4 are met or approved exceptions recorded.

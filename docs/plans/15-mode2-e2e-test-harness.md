@@ -72,7 +72,8 @@ Invariant:
 ### O2. Driver parity oracle
 
 - Run equivalent scripted scenario on Claude and Codex adapters.
-- Compare normalized milestone semantics (allowing driver-specific text differences).
+- Compare normalized **lifecycle semantics** (launch, idle detection, pause/resume, exit) rather than task-level outcomes. These lifecycle patterns should be consistent regardless of the driver's conversation model (e.g., Claude's multi-turn vs. Codex's limited-turn interaction models).
+- Driver-specific text differences and task-level behavioral differences are expected and excluded from comparison.
 
 ### O3. Mode 1/Native reference oracle
 

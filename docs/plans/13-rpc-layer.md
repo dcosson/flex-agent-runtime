@@ -80,19 +80,25 @@ sequenceDiagram
     SB-->>Agent: AgentToolResult
 ```
 
-### 3.3 Agent Event Streaming Flow
+### 3.3 Agent Event Streaming Flow (Unidirectional: Agent → RuntimeController)
 
 ```mermaid
 sequenceDiagram
-    participant Agent as Agent process
-    participant ES as RPC Event Stream (server)
-    participant Orch as Orchestrator client
+    participant Agent as Agent process (AgentEventSender)
+    participant ES as RPC Event Stream (server-streaming)
+    participant RC as RuntimeController (AgentEventReceiver)
+
+    RC->>ES: StreamAgentEvents(req)
+    Note over ES: Stream opened
 
     Agent->>ES: Send(AgentEvent)
-    ES-->>Orch: stream event
+    ES-->>RC: Recv() → AgentEvent
     Agent->>ES: Send(AgentEvent)
-    ES-->>Orch: stream event
-    Agent->>ES: Close
+    ES-->>RC: Recv() → AgentEvent
+    Agent->>ES: Send(session_completed)
+    ES-->>RC: Recv() → session_completed (terminal)
+    Agent->>ES: Close()
+    ES-->>RC: Recv() → io.EOF
 ```
 
 ---
@@ -109,6 +115,9 @@ type SandboxService interface {
     ResumeSession(ctx context.Context, req *ResumeSessionRequest) (*ResumeSessionResponse, error)
     DestroySession(ctx context.Context, req *DestroySessionRequest) (*DestroySessionResponse, error)
 
+    // ExecuteTool dispatches a tool call. The request includes a ToolCallID for
+    // traceability, and the server echoes it back in the response for unambiguous
+    // correlation (critical under retries or concurrent calls).
     ExecuteTool(ctx context.Context, req *ExecuteToolRequest) (*ExecuteToolResponse, error)
 
     ListSnapshots(ctx context.Context, req *ListSnapshotsRequest) (*ListSnapshotsResponse, error)
@@ -118,23 +127,61 @@ type SandboxService interface {
 
 ### 4.2 Event Stream API
 
+The agent event stream is **unidirectional (server-streaming)**: the agent process produces events, and the RuntimeController consumes them. The interface is split into distinct sender and receiver types to enforce this directionality at the type level.
+
 ```go
 type AgentEventService interface {
-    StreamAgentEvents(ctx context.Context, req *StreamAgentEventsRequest) (AgentEventStream, error)
+    // StreamAgentEvents opens a server-streaming RPC. The server (agent-side)
+    // writes events via AgentEventSender; the client (RuntimeController-side)
+    // reads events via AgentEventReceiver.
+    StreamAgentEvents(ctx context.Context, req *StreamAgentEventsRequest) (AgentEventSender, error)
 }
 
-type AgentEventStream interface {
+// AgentEventSender is the producer-side handle (agent process).
+type AgentEventSender interface {
     Send(*AgentEventEnvelope) error
+    Close() error
+}
+
+// AgentEventReceiver is the consumer-side handle (RuntimeController).
+type AgentEventReceiver interface {
     Recv() (*AgentEventEnvelope, error)
     Close() error
 }
 ```
 
+#### 4.2.1 Terminal Event Semantics
+
+The event stream has well-defined lifecycle behavior tied to session state changes:
+
+| Session State Change | Stream Behavior |
+|---------------------|-----------------|
+| **Session pause** | Stream sends a `session_paused` event, then closes gracefully. Consumer receives the terminal event followed by `io.EOF`. |
+| **Session destroy** | Stream sends a `session_destroyed` event, then closes gracefully. Consumer receives the terminal event followed by `io.EOF`. |
+| **Agent run completion** | Stream sends a `session_completed` event, then closes gracefully. Consumer receives the terminal event followed by `io.EOF`. |
+| **Session crash / connection loss** | Stream closes abnormally. Consumer receives an RPC error with code `unavailable` (network loss) or `internal` (process crash). No terminal event is sent. |
+
+Consumers must distinguish between graceful closure (terminal event followed by `io.EOF`) and abnormal closure (RPC error without terminal event). On abnormal closure, the consumer should treat the session state as unknown and query session status via `GetSession` before attempting reconnection.
+
 ### 4.3 Message Mapping
 
 - Transport DTOs mirror domain request/response fields with explicit versioning.
 - `session_id` always uses runtime session ID, never driver-native ID.
-- `ToolResponse.snapshot_id` propagated unchanged to agent/orchestrator consumers.
+- `tool_call_id` is present in both `ExecuteToolRequest` and `ExecuteToolResponse`. The server echoes back the caller's `tool_call_id` in the response to enable unambiguous request-response correlation, which is critical for correctness under retries and concurrent tool calls.
+- `ToolResponse.snapshot_id` propagated unchanged to agent/RuntimeController consumers.
+
+#### 4.3.1 Versioning Strategy
+
+The RPC layer uses **protobuf evolution rules** for schema compatibility:
+- All field changes are **additive-only**: new fields are appended, existing fields are never removed or renumbered.
+- No breaking changes to existing message shapes.
+
+For **compatibility signaling**, a `x-api-version` header is attached to every RPC call via a ConnectRPC interceptor (client-side outgoing, server-side incoming). The header value is a monotonically increasing integer (e.g., `1`, `2`, `3`) that indicates the highest API version the caller supports.
+
+**Version mismatch behavior:**
+- If the server receives a request with a higher `x-api-version` than it supports, it processes the request using its own version (graceful degradation — unknown fields are ignored per protobuf rules).
+- If the server receives a request with a _lower_ `x-api-version` than the minimum it supports, it rejects the request with a typed error: code `failed_precondition`, detail `"unsupported API version: got N, minimum M"`.
+- The server includes its own `x-api-version` in response headers so clients can detect version skew.
 
 ---
 
@@ -173,16 +220,41 @@ type SandboxBackend struct {
 }
 
 func (b *SandboxBackend) ExecuteTool(ctx context.Context, req ToolRequest) (*ToolResponse, error) {
-    // map ToolRequest -> ExecuteTool RPC
-    // forward session/tool call IDs and resources
-    // map ExecuteToolResponse -> ToolResponse
+    rpcReq := &ExecuteToolRequest{
+        SessionID:  b.sessionID,
+        ToolCallID: req.ToolCallID, // propagate for traceability
+        ToolName:   req.ToolName,
+        Params:     req.Params,
+        Resources:  req.Resources,
+    }
+    rpcResp, err := b.client.ExecuteTool(ctx, rpcReq)
+    if err != nil {
+        return nil, wrapRPCError(err, b.sessionID, req.ToolName)
+    }
+    // Server echoes ToolCallID — verify it matches for safety
+    if rpcResp.ToolCallID != req.ToolCallID {
+        return nil, fmt.Errorf("tool_call_id mismatch: sent %q, received %q", req.ToolCallID, rpcResp.ToolCallID)
+    }
+    return mapToToolResponse(rpcResp), nil
 }
 ```
 
 Rules:
 - Request `SessionID` in `ToolRequest` must match backend-bound session unless explicitly overridden for tests.
-- Preserve tool call IDs for traceability across agent -> RPC -> sandbox.
+- `ToolCallID` is propagated in both request and response for end-to-end traceability across agent → RPC → sandbox boundaries. The server echoes the caller's `ToolCallID` in the response.
 - Wrap RPC errors with context fields (`session_id`, `tool_name`, `host`).
+
+### 6.1 SandboxBackend Lifecycle
+
+The `SandboxBackend` instance lifecycle is tied to the session it wraps:
+
+1. **Creation:** A `SandboxBackend` is created _after_ `CreateSession` succeeds, using the `sessionID` returned by the server. The caller (typically the RuntimeController or agent loop setup code) constructs it and passes it to the agent loop as the `ToolBackend`.
+
+2. **Usage:** During a session, `SandboxBackend` makes **independent RPC calls per tool invocation** — it does not hold a persistent streaming connection. Each `ExecuteTool` call is a standalone unary RPC. This simplifies connection management and avoids stale-connection issues.
+
+3. **Pause/Resume:** When a session is paused, the existing `SandboxBackend` is discarded. On resume (`ResumeSession`), a **new** `SandboxBackend` is created with the same `sessionID`. This ensures no stale connection state carries over from before the pause.
+
+4. **Destruction:** When `DestroySession` is called, the `SandboxBackend` is discarded. No cleanup RPC is needed from the backend itself — the `DestroySession` call handles server-side cleanup.
 
 ---
 
@@ -206,7 +278,24 @@ Retryable by default:
 Non-retryable:
 - `invalid_argument`, `not_found`, `permission_denied`.
 
-Retries are bounded with exponential backoff + jitter and idempotency safeguards for session-mutating calls.
+Retries are bounded with exponential backoff + jitter.
+
+#### 7.2.1 Idempotency Specification
+
+Safe retries require idempotency guarantees. The following table classifies each RPC method:
+
+| Method | Idempotency | Mechanism |
+|--------|-------------|-----------|
+| `CreateSession` | Naturally idempotent | Repeated calls with the same `session_id` return the existing session (no-op if already created). |
+| `GetSession` | Naturally idempotent | Read-only. |
+| `PauseSession` | Naturally idempotent | Pausing an already-paused session is a no-op. |
+| `ResumeSession` | Naturally idempotent | Resuming an already-active session is a no-op. |
+| `DestroySession` | Naturally idempotent | Destroying an already-destroyed session returns `not_found` (non-retryable). |
+| `ListSnapshots` | Naturally idempotent | Read-only. |
+| `RollbackSession` | Naturally idempotent | Rolling back to the same snapshot_id is a no-op if already at that state. |
+| **`ExecuteTool`** | **Requires explicit key** | Uses `tool_call_id` as the idempotency key. The server deduplicates `ExecuteTool` calls with the same `tool_call_id` within a configurable window (default: 5 minutes). If a duplicate is detected, the server returns the cached response without re-executing the tool. This prevents dangerous double-execution of side-effecting tools (e.g., running the same bash command twice). |
+
+The server maintains an in-memory idempotency cache keyed by `(session_id, tool_call_id)` with TTL-based expiry. Cache entries store the response (or error) from the first execution.
 
 ---
 
@@ -229,7 +318,7 @@ Retries are bounded with exponential backoff + jitter and idempotency safeguards
 | `internal/agent` | Event stream + tool dispatch | canonical `AgentEvent` envelope + `ToolBackend` dispatch path |
 | `internal/tools` | SandboxBackend adapter | `ToolBackend.ExecuteTool(ToolRequest) -> ToolResponse` |
 | `internal/sandbox` | RPC server backend | session CRUD + tool execution + snapshot operations |
-| Orchestrator layer | Remote telemetry/control | event stream consumption and session lifecycle calls |
+| RuntimeController | Remote telemetry/control | event stream consumption (via `AgentEventReceiver`) and session lifecycle calls |
 | External tools ecosystem | Protocol boundary | MCP explicitly excluded from sandbox backend path |
 
 ---
@@ -297,6 +386,22 @@ Retries are bounded with exponential backoff + jitter and idempotency safeguards
 2. Connection pooling and adaptive keepalive tuning for high agent concurrency.
 3. Stream backpressure controls with bounded buffers and fast-fail overload signaling.
 
+### 13.1 Max Message Size and Truncation
+
+The maximum single-message payload size is **16 MB**, configured on both ConnectRPC client and server via `connect.WithReadMaxBytes(16 << 20)` and `connect.WithSendMaxBytes(16 << 20)`.
+
+Tool output exceeding 16 MB is **truncated** by the sandbox host before constructing the RPC response. Truncated responses include metadata indicating truncation:
+
+```go
+type ToolOutputTruncation struct {
+    Truncated    bool  // true if output was truncated
+    OriginalSize int64 // original size in bytes before truncation
+    RetainedSize int64 // size after truncation
+}
+```
+
+This metadata is included in `ExecuteToolResponse` so that the agent and RuntimeController can detect and handle truncated output (e.g., by informing the LLM that output was cut short). The truncation boundary preserves valid UTF-8 and avoids splitting mid-line where possible.
+
 ---
 
 ## 14. Alien Artifacts
@@ -327,3 +432,22 @@ Retries are bounded with exponential backoff + jitter and idempotency safeguards
 5. Error mapping + retry behavior tested for transient vs permanent failure classes.
 6. No MCP dependency in sandbox backend path.
 7. RPC layer tests pass under `-race`.
+
+---
+
+## R1 Review Disposition (reviewer-sea)
+
+**Review:** [13-rpc-layer-review-reviewer-sea.md](./13-rpc-layer-review-reviewer-sea.md)
+**Incorporated by:** coder-2-sea
+**Date:** 2026-03-12
+
+| Finding | Severity | Disposition | Notes |
+|---------|----------|-------------|-------|
+| F1 | P1 | Incorporated | Split AgentEventStream into sender/receiver interfaces |
+| F2 | P2 | Incorporated | Added terminal event semantics for session state changes |
+| F3 | P2 | Incorporated | Added ToolCallID to request and response paths |
+| F4 | P2 | Incorporated | Added versioning strategy (protobuf evolution + x-api-version header) |
+| F5 | P2 | Incorporated | Added SandboxBackend lifecycle documentation |
+| F6 | P3 | Incorporated | Added max 16MB message size + truncation behavior |
+| F7 | P3 | Incorporated | Strengthened P5 invariant definition |
+| F8 | P2 | Incorporated | Added idempotency key specification using tool_call_id |

@@ -30,7 +30,8 @@ Invariant:
 ### P5. Session ID Authority
 
 Invariant:
-- All RPC calls and stream envelopes use runtime session ID fields consistently.
+- Every RPC request/response and event envelope contains a `session_id` field that matches the runtime session ID from `CreateSession`. No driver-native session IDs appear in any `session_id` field.
+- Specifically: after `CreateSession` returns a `session_id`, all subsequent `ExecuteToolRequest`, `ExecuteToolResponse`, `AgentEventEnvelope`, and session lifecycle RPC messages for that session must carry exactly that `session_id` value. The test generates random driver-native IDs that are distinct from the runtime ID and asserts none of them leak into any `session_id` field across the full request/response/event corpus.
 
 ---
 
