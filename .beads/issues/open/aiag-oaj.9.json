@@ -2,7 +2,7 @@
   "id": "aiag-oaj.9",
   "title": "Draft 10-sandbox-gvisor",
   "description": "Draft plan doc + test harness for gVisor container lifecycle + cgroups.",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-oaj",
@@ -24,6 +24,14 @@
     "project=ai-agent-go"
   ],
   "assignee": "reviewer-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Plan draft and test harness committed at b5ff154. Ready for review.",
+      "created_at": "2026-03-12T14:32:18.095966-07:00"
+    }
+  ],
   "created_at": "2026-03-12T14:19:54.842174-07:00",
-  "updated_at": "2026-03-12T14:21:55.314578-07:00"
+  "updated_at": "2026-03-12T14:32:22.805984-07:00"
 }
