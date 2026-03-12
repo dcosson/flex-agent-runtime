@@ -368,6 +368,73 @@ sequenceDiagram
 
 ---
 
+## Decisions
+
+### D1: Two-Repo Split
+
+The project is split into two repositories with a clean dependency direction:
+
+**`h2-agent-runtime`** (this repo):
+- Core agent loop (our own LLM abstraction + tool dispatch, inspired by pi-mono)
+- Tool interfaces and built-in tool implementations (read, write, bash, grep, glob)
+- Terminal multiplexer / session manager (for running CLI-based 3rd party agents like Claude Code, Codex, Aider — they need a PTY)
+- OTEL event normalization (parsing agent activity from 3rd party harnesses)
+- Sandbox host service (ZFS + gVisor)
+- Tool scripting meta-tool (Starlark/code-mode executor)
+- Importable as a Go library by everything-db or any other consumer
+
+**`h2` (orchestrator, separate repo):**
+- Profiles, roles, pods configuration system
+- Inter-agent messaging protocol
+- Plan/review/signoff framework
+- Work ledger / beads-lite task system
+- External integrations (Linear, etc.)
+- Pluggable UI layer (headless by default — TUI, web, desktop/mobile, Slack/Telegram, pure API)
+- Imports `h2-agent-runtime` as a dependency
+
+**Why two repos:**
+- Clean dependency direction: `h2` depends on `h2-agent-runtime`, never the reverse
+- everything-db imports `h2-agent-runtime` without pulling in orchestration opinions
+- Runtime is a stable general-purpose library; orchestrator is an opinionated framework with faster evolution
+- Separate release cadences
+
+### D2: Everything-DB Integration
+
+everything-db imports `h2-agent-runtime` as a Go library to implement its deferred `ActivityAgentLoop` and `ActivityLLMCall` workflow activity types.
+
+The `AgentTool` interface is the integration seam between placement modes:
+
+```go
+// edb workflow executor, Mode 1 (local — single laptop)
+tools := []AgentTool{localReadFile, localBash, localGrep}
+agent := agentruntime.NewAgentLoop(tools, llmConfig)
+
+// edb workflow executor, Mode 3 (remote sandbox — production)
+tools := []AgentTool{sandboxRPC.ReadFile, sandboxRPC.Bash, sandboxRPC.Grep}
+agent := agentruntime.NewAgentLoop(tools, llmConfig)
+```
+
+Same agent loop code, different tool backends. In Mode 1, everything runs in-process (just goroutines, no RPC, no sandbox host, no ZFS). In Mode 3, tool calls dispatch to sandbox hosts via RPC. The agent loop doesn't know or care — it just calls `AgentTool.Execute()`.
+
+This makes the agent feel built-in to edb rather than a separate piece of infrastructure. The workflow engine dispatches `ActivityAgentLoop` → runtime runs the loop → events flow back as activity progress/completion via the existing ERC patterns.
+
+### D3: Terminal Mux in the Runtime
+
+The terminal multiplexer (PTY allocation, session management, attach/detach) lives in `h2-agent-runtime`, not the orchestrator. 3rd party harnesses (Claude Code, Codex, Aider) are CLI processes that require a PTY to run. Without it, Mode 2 (run 3rd party harness in sandbox) doesn't work.
+
+The TUI (user-facing terminal interface) lives in `h2` orchestrator — it's a UI concern, distinct from the infrastructure that manages agent processes.
+
+### D4: Headless Orchestrator with Pluggable UI
+
+The h2 orchestrator is headless by default, exposing APIs that any UI can consume:
+- TUI (current h2 terminal experience)
+- Web interface
+- Desktop/mobile app
+- Chat integrations (Slack, Telegram — existing bridge pattern)
+- Pure API consumers (CI/CD, other services)
+
+---
+
 ## Open Questions
 
 ### OQ1: RPC Protocol Between Layers
@@ -378,11 +445,7 @@ What protocol for the inter-layer RPCs? gRPC (typed, streaming), HTTP/JSON (simp
 
 In Mode 2 with 3rd party harnesses, how do we trigger snapshots without per-tool-call hooks? Options: periodic timer, inotify/fswatch on filesystem changes, git commit hooks, or accept coarser granularity.
 
-### OQ3: Orchestrator ↔ Workflow Engine Relationship
-
-Is the orchestrator a standalone service, or is it the everything-db workflow engine? The workflow engine already has activity dispatch, credential management, and durable execution. The orchestrator role may be a thin layer on top of it rather than a separate system.
-
-### OQ4: Cloud Provider Portability
+### OQ3: Cloud Provider Portability
 
 Solution as described is AWS-specific (EBS, EC2). ZFS and gVisor are portable to any Linux host. The AWS-specific piece is EBS for durable block storage — GCP has Persistent Disks, Azure has Managed Disks. Orchestration layer would need provider adapters.
 
@@ -390,13 +453,4 @@ Solution as described is AWS-specific (EBS, EC2). ZFS and gVisor are portable to
 
 - **~~Firecracker + ZFS filesystem sharing~~** — Resolved by choosing gVisor. Bind-mount ZFS dataset directly into container. No virtio-fs/NFS needed.
 - **~~Firecracker vs container isolation~~** — Resolved: gVisor. Sufficient isolation for agent-generated code, runs on standard EC2, no nested virtualization overhead.
-
----
-
-## Next Steps
-
-1. **Prototype ZFS snapshot performance** — Benchmark per-tool-call snapshot latency and space consumption
-2. **Prototype gVisor container lifecycle** — Benchmark start/destroy time with ZFS bind mounts under realistic workloads
-3. **Design RPC interfaces** between the three layers (OQ1)
-4. **Detail solution** into concrete components (sandbox host service, orchestrator API, tool dispatch protocol)
-5. **Slice for implementation** — Vertical increments starting with Mode 1 (all local) and building toward Mode 3
+- **~~Orchestrator ↔ Workflow Engine relationship~~** — Resolved: the runtime is a Go library that edb imports. The orchestrator (h2) is a separate, higher-level framework. edb can use the runtime directly or optionally integrate with h2 orchestrator for multi-agent coordination.
