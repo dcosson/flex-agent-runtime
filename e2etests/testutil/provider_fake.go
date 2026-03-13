@@ -59,11 +59,11 @@ func NewScriptedProvider(api string, script []ScriptEntry) *ScriptedProvider {
 func (p *ScriptedProvider) API() string { return p.api }
 
 func (p *ScriptedProvider) Stream(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions) *ai.EventStream {
-	return p.streamNext(llmCtx)
+	return p.streamNext(ctx, llmCtx)
 }
 
 func (p *ScriptedProvider) StreamSimple(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.SimpleStreamOptions) *ai.EventStream {
-	return p.streamNext(llmCtx)
+	return p.streamNext(ctx, llmCtx)
 }
 
 // Calls returns the number of provider calls made.
@@ -73,7 +73,7 @@ func (p *ScriptedProvider) Calls() int {
 	return p.calls
 }
 
-func (p *ScriptedProvider) streamNext(llmCtx ai.Context) *ai.EventStream {
+func (p *ScriptedProvider) streamNext(ctx context.Context, llmCtx ai.Context) *ai.EventStream {
 	es := ai.NewEventStream()
 	go func() {
 		defer es.Close()
@@ -94,9 +94,24 @@ func (p *ScriptedProvider) streamNext(llmCtx ai.Context) *ai.EventStream {
 		gate := p.Gates[idx]
 		p.mu.Unlock()
 
-		// Wait for gate if one is set for this call index
+		// Wait for gate or context cancellation
 		if gate != nil {
-			<-gate
+			select {
+			case <-gate:
+			case <-ctx.Done():
+				es.Send(ai.AssistantMessageEvent{
+					Type:  ai.EventError,
+					Error: &ai.AssistantMessage{StopReason: ai.StopReasonError},
+				})
+				return
+			}
+		}
+		if ctx.Err() != nil {
+			es.Send(ai.AssistantMessageEvent{
+				Type:  ai.EventError,
+				Error: &ai.AssistantMessage{StopReason: ai.StopReasonError},
+			})
+			return
 		}
 
 		msg := buildMessage(entry)
