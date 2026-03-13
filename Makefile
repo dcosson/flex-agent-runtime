@@ -60,7 +60,7 @@ test-anthropic-harness-fast: ## Anthropic provider harness: property + stub/faul
 	$(GO) test ./internal/ai/provider/anthropic -run 'Test(P|S|F|D|SEC|O|ManualQA|HarnessCoverage)' -count=1
 
 test-anthropic-harness-race: ## Anthropic provider harness with race detector
-	$(GO) test -race ./internal/ai/provider/anthropic -run 'Test(P|S|F|D|SEC)' -count=1
+	$(GO) test -race ./internal/ai/provider/anthropic -run 'Test(P|S|F|D|SEC)' -skip 'TestST1_LongSoak|TestST3_BurstToolStress' -count=1
 
 test-anthropic-harness-bench: ## Anthropic provider harness benchmark lanes B1-B4
 	$(GO) test ./internal/ai/provider/anthropic -run '^$$' -bench 'BenchmarkB[1-4]_' -benchmem
