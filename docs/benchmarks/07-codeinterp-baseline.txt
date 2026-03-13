@@ -1,0 +1,12 @@
+goos: darwin
+goarch: arm64
+pkg: h2-agent-runtime/internal/tools/codeinterp
+cpu: Apple M1 Pro
+BenchmarkB1_ScriptStartupLatency-10       	  167259	      7381 ns/op	   10843 B/op	     139 allocs/op
+BenchmarkB2_BuiltinDispatchOverhead-10    	  103404	     11922 ns/op	   14408 B/op	     201 allocs/op
+BenchmarkB3_TraceSerializationCost-10     	  102392	     11921 ns/op	   11618 B/op	     172 allocs/op
+BenchmarkB4_RepeatedScriptRuns-10         	  101727	     11281 ns/op	   14656 B/op	     204 allocs/op
+BenchmarkB5_RLMDispatchOverhead-10        	   15747	     77701 ns/op	   31566 B/op	     239 allocs/op
+BenchmarkB6_DataStoreThroughput-10        	13282447	        89.96 ns/op	      32 B/op	       2 allocs/op
+PASS
+ok  	h2-agent-runtime/internal/tools/codeinterp	8.756s
