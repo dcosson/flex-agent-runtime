@@ -198,7 +198,7 @@ func TestST1_LongSessionSoak(t *testing.T) {
 }
 
 // ST2: Concurrency Stress
-// 200 concurrent provider streams against mock server.
+// Plan target: 500 concurrent. Reduced to 200 for CI stability on resource-constrained runners.
 func TestST2_ConcurrencyStress(t *testing.T) {
 	if testing.Short() {
 		t.Skip("stress test — skipped in short mode")
@@ -241,7 +241,8 @@ func TestST2_ConcurrencyStress(t *testing.T) {
 }
 
 // ST3: Burst Tool-Call Stress
-// 50 concurrent streams, each with 10KB+ tool args split into 50-byte chunks.
+// Plan target: 100 concurrent. Reduced to 50 for CI stability on resource-constrained runners.
+// Each stream processes 10KB+ tool args split into 50-byte chunks.
 func TestST3_BurstToolCallStress(t *testing.T) {
 	if testing.Short() {
 		t.Skip("stress test — skipped in short mode")

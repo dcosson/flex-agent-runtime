@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +14,12 @@ import (
 	"h2-agent-runtime/internal/ai/testutil/stubserver"
 	"pgregory.net/rapid"
 )
+
+// Deferred plan items (see docs/plans/03-provider-openai-test-harness.md):
+// TODO: S1 — Event Transition Validator FSM (illegal trace detection)
+// TODO: B2 — Allocation budget (<=3 allocs per content delta event)
+// TODO: B4 — End-to-end stream latency overhead (<5ms p95 per 1K events)
+// O1/O2 cross-implementation oracles deferred to separate bead (need external infrastructure).
 
 // --- Pointer helpers ---
 
@@ -625,7 +631,7 @@ func TestF5_ContextCancellationRaces(t *testing.T) {
 			}, ai.StreamOptions{})
 
 			go func() {
-				time.Sleep(time.Duration(rand.Intn(20)) * time.Millisecond)
+				time.Sleep(time.Duration(rand.IntN(20)) * time.Millisecond)
 				cancel()
 			}()
 
@@ -911,7 +917,7 @@ func TestSEC1_MaliciousToolJSON(t *testing.T) {
 		{"path_traversal", `{"path":"../../../etc/passwd"}`},
 		{"null_bytes", `{"data":"test\u0000test"}`},
 		{"deeply_nested", buildDeeplyNestedJSON(30)},
-		{"large_string", `{"key":"` + strings.Repeat("a", 1<<16) + `"}`},
+		{"large_string", `{"key":"` + strings.Repeat("a", 1<<13) + `"}`}, // 8KB — security invariant, not throughput
 		{"unicode_escape", `{"key":"\u003cscript\u003ealert(1)\u003c/script\u003e"}`},
 		{"empty_object", `{}`},
 	}
