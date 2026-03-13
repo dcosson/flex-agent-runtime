@@ -1,0 +1,31 @@
+{
+  "id": "aiag-jj7",
+  "title": "Anthropic Provider Implementation",
+  "description": "Epic for plan 02-provider-anthropic. Anthropic Messages API provider (internal/ai/provider/anthropic/) + shared test infrastructure + full test harness. Pattern leader for all providers.",
+  "status": "open",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-jj7.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-jj7.2",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-jj7.3",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-agent-runtime",
+    "batch=2",
+    "plan-doc=02-provider-anthropic"
+  ],
+  "created_at": "2026-03-13T04:15:05.926261-07:00",
+  "updated_at": "2026-03-13T04:15:05.926261-07:00"
+}

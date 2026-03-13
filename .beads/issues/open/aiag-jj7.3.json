@@ -1,0 +1,32 @@
+{
+  "id": "aiag-jj7.3",
+  "title": "Anthropic Provider: Test Harness",
+  "description": "Implement the full Anthropic provider test harness.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nPlan: docs/plans/02-provider-anthropic-test-harness.md (all sections)\n\nKey deliverables:\n- Property tests P1-P4 (stream ordering, tool JSON delta convergence, usage/cost, error classification)\n- Stub server tests S1 + fault injection F1-F5 (TCP reset, malformed SSE, throttling, backpressure, cancellation)\n- Oracle tests O1-O2 (cross-implementation vs TS, SDK consistency)\n- Deterministic simulations S1-S3 (event FSM, multi-tool, thinking+tool interleaving)\n- Benchmarks B1-B4 (SSE \u003e=50K/s, \u003c=3 allocs/delta, tool JSON \u003c100us, stream \u003c5ms p95)\n- Stress/soak ST1-ST3 (8hr soak, 500 concurrent, burst tool-call)\n- Security SEC1-SEC3 (injection, header leakage, oversized payload)\n- CI tier matrix wired\n\nDepends on: Shared Test Infrastructure (aiag-jj7.1), Anthropic Core (aiag-jj7.2)",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-jj7",
+  "dependencies": [
+    {
+      "id": "aiag-jj7",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-jj7.1",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-jj7.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-agent-runtime",
+    "batch=2",
+    "plan-doc=02-provider-anthropic"
+  ],
+  "created_at": "2026-03-13T04:16:36.118941-07:00",
+  "updated_at": "2026-03-13T04:16:36.118941-07:00"
+}
