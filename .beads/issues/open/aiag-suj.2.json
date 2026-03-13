@@ -44,8 +44,14 @@
       "author": "Danny Cosson",
       "text": "R1 review complete — Approved with revisions. 4 findings (2 P2, 2 P3). P2s: ControlMessage reused for text/thinking deltas (add Delta field), Start() no longer transitions to Streaming synchronously. See docs/reviews/aiag-suj.2-r1-review-reviewer-sea.md",
       "created_at": "2026-03-13T14:03:15.710181-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R1 re-review: all P2 findings addressed. Delta field added, ControlMessage reserved for control events, Start() transition is synchronous. Regression test verifies no ControlMessage leak on deltas. All tests pass including race detector. Approved.",
+      "created_at": "2026-03-13T14:05:23.986794-07:00"
     }
   ],
   "created_at": "2026-03-13T13:14:35.374834-07:00",
-  "updated_at": "2026-03-13T14:03:15.710449-07:00"
+  "updated_at": "2026-03-13T14:05:23.987758-07:00"
 }
