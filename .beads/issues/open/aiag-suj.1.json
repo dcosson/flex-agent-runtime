@@ -2,7 +2,7 @@
   "id": "aiag-suj.1",
   "title": "Agent Core: Types, State Machine, Event Bus, Control Queue",
   "description": "Implement foundational agent types and infrastructure from docs/plans/05-agent.md.\n\nSections: §2 (Architecture), §3 (Types), §3.1 (Session), §3.2 (AgentDriver), §3.3 (AgentTool), §3.4 (AgentEvent), §5 (State Machine + Event Bus + Control Queue), §6 (Concurrency Model)\n\nKey deliverables:\n- Agent, Session, AgentState, AgentMessage, AgentEvent types (types.go)\n- AgentDriver interface and registry/factory (driver.go)\n- AgentTool struct with Execute callback (types.go)\n- State machine with all transitions: Idle/Streaming/ToolExecution/WaitingFollowUp/Exited (agent.go)\n- Event bus with fan-out, subscriber isolation, panic recovery (event_bus.go)\n- Control queue for steer/follow-up/abort serialization (control_queue.go)\n- Typed errors: busy, stopped, invalid-state (errors.go)\n- SessionMetrics instrumentation\n- Unit tests for all of the above\n\nRequired reading: docs/plans/00-implementation-guide.md\nSee Implementation Guide §1.4 (AgentDriver), §1.5 (AgentTool), §2.1 (Lifecycle Ordering), §5 (Seam Reference Table)\n\nReferences:\n- Plan: docs/plans/05-agent.md §2-§6\n- Test harness: docs/plans/05-agent-test-harness.md\n- Depends on: Batch 1+2 core types (internal/ai)",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-suj",
@@ -30,6 +30,14 @@
     "plan-doc=05-agent"
   ],
   "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implementation complete on branch batch3/agent-core-types; tests passing. Requesting review from reviewer-sea.",
+      "created_at": "2026-03-13T13:50:48.730945-07:00"
+    }
+  ],
   "created_at": "2026-03-13T13:14:23.681874-07:00",
-  "updated_at": "2026-03-13T13:45:59.933563-07:00"
+  "updated_at": "2026-03-13T13:50:48.731154-07:00"
 }
