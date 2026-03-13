@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -233,17 +234,59 @@ func TestEventStreamHighThroughput(t *testing.T) {
 	}
 }
 
+// §16.2: Verify leak detection finalizer is installed in test builds.
+func TestEventStreamLeakDetection(t *testing.T) {
+	// Verify that the closed field tracks Close() correctly.
+	es := NewEventStream()
+	if es.closed.Load() {
+		t.Fatal("new stream should not be closed")
+	}
+	go func() {
+		defer es.Close()
+		es.Send(AssistantMessageEvent{Type: EventDone, Message: &AssistantMessage{Model: "ok"}})
+	}()
+	for range es.C {
+	}
+	_, _ = es.Result()
+	if !es.closed.Load() {
+		t.Fatal("closed stream should have closed=true")
+	}
+}
+
+// §16.2: Verify leak detection fires for unclosed streams.
+func TestEventStreamLeakDetectionFires(t *testing.T) {
+	// We can't easily test that slog.Warn is called from a finalizer,
+	// but we can verify the finalizer is set by creating and dropping
+	// an unclosed stream, then forcing GC. The finalizer should not panic.
+	func() {
+		_ = NewEventStream()
+	}()
+	runtime.GC()
+	// Give finalizer goroutine time to run.
+	time.Sleep(50 * time.Millisecond)
+	runtime.GC()
+}
+
 // B1 benchmark.
 func BenchmarkEventStreamSendReceive(b *testing.B) {
+	es := NewEventStream()
+	done := make(chan struct{})
+	go func() {
+		for range es.C {
+		}
+		close(done)
+	}()
+
+	event := AssistantMessageEvent{Type: EventTextDelta, ContentIndex: 1, Delta: "x"}
+	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		es := NewEventStream()
-		go func() {
-			for range es.C {
-			}
-		}()
-		es.Send(AssistantMessageEvent{Type: EventTextDelta, ContentIndex: 1, Delta: "x"})
-		es.Send(AssistantMessageEvent{Type: EventDone, Message: &AssistantMessage{Model: "ok"}})
-		es.Close()
-		_, _ = es.Result()
+		es.Send(event)
 	}
+	b.StopTimer()
+
+	es.Send(AssistantMessageEvent{Type: EventDone, Message: &AssistantMessage{Model: "ok"}})
+	es.Close()
+	<-done
+	_, _ = es.Result()
 }

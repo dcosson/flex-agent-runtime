@@ -83,29 +83,33 @@ const (
 )
 
 var (
-	NewEventStream             = internal.NewEventStream
-	RegisterProvider           = internal.RegisterProvider
-	GetProvider                = internal.GetProvider
-	GetProviders               = internal.GetProviders
-	UnregisterProviders        = internal.UnregisterProviders
-	ClearProviders             = internal.ClearProviders
-	RegisterModel              = internal.RegisterModel
-	GetModel                   = internal.GetModel
-	GetModels                  = internal.GetModels
-	GetModelProviders          = internal.GetModelProviders
-	ClearModels                = internal.ClearModels
-	CalculateCost              = internal.CalculateCost
-	ModelsEqual                = internal.ModelsEqual
-	SupportsXHigh              = internal.SupportsXHigh
-	Stream                     = internal.Stream
-	StreamSimple               = internal.StreamSimple
-	Complete                   = internal.Complete
-	CompleteSimple             = internal.CompleteSimple
-	BuildBaseOptions           = internal.BuildBaseOptions
-	ClampReasoning             = internal.ClampReasoning
-	AdjustMaxTokensForThinking = internal.AdjustMaxTokensForThinking
-	TransformMessages          = internal.TransformMessages
-	IsContextOverflow          = internal.IsContextOverflow
-	TimeToMillis               = internal.TimeToMillis
-	MillisToTime               = internal.MillisToTime
+	NewEventStream               = internal.NewEventStream
+	RegisterProvider             = internal.RegisterProvider
+	GetProvider                  = internal.GetProvider
+	GetProviders                 = internal.GetProviders
+	UnregisterProviders          = internal.UnregisterProviders
+	ClearProviders               = internal.ClearProviders
+	RegisterModel                = internal.RegisterModel
+	GetModel                     = internal.GetModel
+	GetModels                    = internal.GetModels
+	GetModelProviders            = internal.GetModelProviders
+	ClearModels                  = internal.ClearModels
+	CalculateCost                = internal.CalculateCost
+	ModelsEqual                  = internal.ModelsEqual
+	SupportsXHigh                = internal.SupportsXHigh
+	Stream                       = internal.Stream
+	StreamSimple                 = internal.StreamSimple
+	Complete                     = internal.Complete
+	CompleteSimple               = internal.CompleteSimple
+	BuildBaseOptions             = internal.BuildBaseOptions
+	ClampReasoning               = internal.ClampReasoning
+	AdjustMaxTokensForThinking   = internal.AdjustMaxTokensForThinking
+	TransformMessages            = internal.TransformMessages
+	IsContextOverflow            = internal.IsContextOverflow
+	TimeToMillis                 = internal.TimeToMillis
+	MillisToTime                 = internal.MillisToTime
+	UnmarshalArguments           = internal.UnmarshalArguments
+	UnmarshalArgumentsFromReader = internal.UnmarshalArgumentsFromReader
 )
+
+const LargeArgumentThreshold = internal.LargeArgumentThreshold

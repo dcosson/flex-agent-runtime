@@ -2,8 +2,12 @@ package ai
 
 import (
 	"errors"
+	"log/slog"
+	"runtime"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 )
 
@@ -24,16 +28,28 @@ type EventStream struct {
 	result     chan resultOrError
 	closeOnce  sync.Once
 	terminated atomic.Bool
+	closed     atomic.Bool
 }
 
 // NewEventStream creates a new EventStream with a buffered channel.
+// In test builds, a finalizer detects leaked (unclosed) streams.
 func NewEventStream() *EventStream {
 	ch := make(chan AssistantMessageEvent, defaultEventBufferSize)
-	return &EventStream{
+	es := &EventStream{
 		C:      ch,
 		ch:     ch,
 		result: make(chan resultOrError, 1),
 	}
+	if testing.Testing() {
+		stack := string(debug.Stack())
+		runtime.SetFinalizer(es, func(es *EventStream) {
+			if !es.closed.Load() {
+				slog.Warn("EventStream leaked without Close()",
+					"created_at", stack)
+			}
+		})
+	}
+	return es
 }
 
 // Send pushes an event into the stream and publishes terminal result on done/error.
@@ -59,6 +75,7 @@ func (s *EventStream) Send(event AssistantMessageEvent) {
 // Close closes the stream and injects a terminal error if none was sent.
 func (s *EventStream) Close() {
 	s.closeOnce.Do(func() {
+		s.closed.Store(true)
 		close(s.ch)
 		if s.terminated.CompareAndSwap(false, true) {
 			s.result <- resultOrError{
