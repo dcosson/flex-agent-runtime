@@ -34,10 +34,20 @@
       "author": "reviewer-sea",
       "text": "R1 review complete — approved with revisions. 3 findings (0 P0, 0 P1, 1 P2, 2 P3). P2: P6 tests shared CalculateCost instead of Google-specific mapUsage. See docs/reviews/aiag-gjz.2-r1-review-reviewer-sea.md @ 57cb526",
       "created_at": "2026-03-13T12:11:16.826051-07:00"
+    },
+    {
+      "id": 2,
+      "author": "reviewer-sea",
+      "text": "R1 re-review complete — P2 fix verified, approved. Closing.",
+      "created_at": "2026-03-13T12:14:11.10412-07:00"
     }
   ],
   "created_at": "2026-03-13T04:18:07.565506-07:00",
+<<<<<<< Updated upstream:.beads/issues/closed/aiag-gjz.2.json
   "updated_at": "2026-03-13T12:27:41.519909-07:00",
   "closed_at": "2026-03-13T12:27:41.519909-07:00",
   "close_reason": "Closed"
+=======
+  "updated_at": "2026-03-13T12:14:11.104826-07:00"
+>>>>>>> Stashed changes:.beads/issues/open/aiag-gjz.2.json
 }
