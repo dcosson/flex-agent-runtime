@@ -2,7 +2,7 @@
   "id": "aiag-gjz",
   "title": "Google Provider Implementation",
   "description": "Epic for plan 04-provider-google. Google Gemini REST API provider (internal/ai/provider/google/) + parts-based content model, thought signatures, safety settings + full test harness. Follows Anthropic patterns.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "epic",
   "dependents": [
@@ -23,5 +23,7 @@
     "plan-doc=04-provider-google"
   ],
   "created_at": "2026-03-13T04:15:11.991749-07:00",
-  "updated_at": "2026-03-13T04:15:11.991749-07:00"
+  "updated_at": "2026-03-13T12:27:41.551263-07:00",
+  "closed_at": "2026-03-13T12:27:41.524721-07:00",
+  "close_reason": "Auto-closed: all children completed"
 }
