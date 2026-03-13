@@ -52,10 +52,16 @@
       "author": "Danny Cosson",
       "text": "R2 review complete — approved. 0 findings. P3 ctx fix looks good. All 7 E2E scenarios pass with -race. See docs/reviews/aiag-g1g.1-r2-review-reviewer-sea.md @ 39623b0",
       "created_at": "2026-03-13T16:40:25.009956-07:00"
+    },
+    {
+      "id": 4,
+      "author": "coder-2-sea",
+      "text": "R2 approved, merged to main.",
+      "created_at": "2026-03-13T16:40:58.146508-07:00"
     }
   ],
   "created_at": "2026-03-13T13:16:37.350075-07:00",
-  "updated_at": "2026-03-13T16:40:39.347971-07:00",
+  "updated_at": "2026-03-13T16:40:58.146639-07:00",
   "closed_at": "2026-03-13T16:40:39.347971-07:00",
   "close_reason": "Closed"
 }
