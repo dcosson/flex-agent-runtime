@@ -1,7 +1,7 @@
 GO ?= go
 PKGS := $(shell $(GO) list ./...)
 
-.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-harness-openai test-bench test-bench-ai-core test-bench-openai test-stress-openai test-fuzz test-fuzz-t2 test-e2e clean
+.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-harness-openai test-bench test-bench-ai-core test-bench-openai test-stress-openai test-fuzz test-fuzz-t2 test-anthropic-harness-fast test-anthropic-harness-race test-anthropic-harness-bench test-e2e clean
 
 help: ## Show available make targets
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_.-]+:.*##/ {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -65,6 +65,15 @@ test-fuzz-t2: ## Run T2 thorough fuzz tier (30s per target)
 	$(GO) test ./internal/ai -run '^$$' -fuzz FuzzValidateToolArguments -fuzztime=30s
 	$(GO) test ./internal/ai -run '^$$' -fuzz FuzzCoerceTypes -fuzztime=30s
 	$(GO) test ./internal/ai -run '^$$' -fuzz FuzzIsContextOverflow -fuzztime=30s
+
+test-anthropic-harness-fast: ## Anthropic provider harness: property + stub/fault + deterministic/security lanes
+	$(GO) test ./internal/ai/provider/anthropic -run 'Test(P|S|F|D|SEC|O|ManualQA|HarnessCoverage)' -count=1
+
+test-anthropic-harness-race: ## Anthropic provider harness with race detector
+	$(GO) test -race ./internal/ai/provider/anthropic -run 'Test(P|S|F|D|SEC)' -skip 'TestST1_LongSoak|TestST3_BurstToolStress' -count=1
+
+test-anthropic-harness-bench: ## Anthropic provider harness benchmark lanes B1-B4
+	$(GO) test ./internal/ai/provider/anthropic -run '^$$' -bench 'BenchmarkB[1-4]_' -benchmem
 
 test-e2e: ## Placeholder for future e2e suites
 	@echo "No e2e test packages yet."
