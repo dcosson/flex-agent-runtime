@@ -2,7 +2,7 @@
   "id": "aiag-jj7.2",
   "title": "Anthropic Provider: Core Implementation",
   "description": "Implement the full Anthropic Messages API provider in internal/ai/provider/anthropic/. PATTERN LEADER for all providers.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nPlan: docs/plans/02-provider-anthropic.md (all sections)\n\nKey deliverables:\n- provider.go: Provider struct, New(), API() returning 'anthropic-messages'\n- request.go: Message conversion to Anthropic wire format, tool schema, system prompt, thinking mapping\n- stream.go: Stream/StreamSimple entrypoints, provider goroutine with defer es.Close()\n- sse_parser.go: SSE event dispatch, streamAccumulator, content_block_start/delta/stop\n- tool_json_parser.go: Streaming partial JSON via streaming-json-go, strict parse (no lastValid fallback)\n- usage.go: Anthropic usage mapping, cost via ai.CalculateCost, stop reason mapping (end_turn-\u003estop, max_tokens-\u003elength)\n- errors.go: HTTP error classification (401-\u003eErrAuth, 429-\u003eErrRateLimit, overflow-\u003eErrContextOverflow)\n- types_wire.go: Wire payload structs\n- Unit tests, component tests (SSE fixture replay), integration tests (network-gated)\n- All tests pass with -race, make check clean\n\nImplementation guide: §1.1 Provider contract, §1.3 No StopReasonMaxTokens, §4.6 no reverse imports\n\nDepends on: Batch 1 AI Core (aiag-qkh)",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-jj7",
@@ -33,6 +33,7 @@
     "batch=2",
     "plan-doc=02-provider-anthropic"
   ],
+  "assignee": "coder-1-sea",
   "created_at": "2026-03-13T04:16:04.550273-07:00",
-  "updated_at": "2026-03-13T04:16:04.550273-07:00"
+  "updated_at": "2026-03-13T04:19:16.664505-07:00"
 }
