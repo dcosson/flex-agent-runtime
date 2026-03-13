@@ -34,6 +34,14 @@
     "plan-doc=08-agent-tools-e2e"
   ],
   "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "coder-2-sea",
+      "text": "Implementation complete on batch3/e2e-framework (c14ba1f). 7 scenarios all pass with -race. Requesting review.",
+      "created_at": "2026-03-13T16:34:52.010653-07:00"
+    }
+  ],
   "created_at": "2026-03-13T13:16:37.350075-07:00",
-  "updated_at": "2026-03-13T16:22:52.114109-07:00"
+  "updated_at": "2026-03-13T16:34:52.01101-07:00"
 }
