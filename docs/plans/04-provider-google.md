@@ -1199,3 +1199,40 @@ Note: Unlike the Anthropic and OpenAI providers, the Google provider does **not*
 - **Not incorporated**: None
 - **Open questions**: All resolved
 - **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-13
+- **Branch**: main
+- **Commit**: 01e44b1
+- **Verified by**: reviewer-sea
+- **Test verification**: `go test -race ./internal/ai/provider/google/... -short -count=1` — PASS
+- **Acceptance tests**: N/A (acceptance criteria require agent loop from Batch 3)
+- **Deviations from plan**:
+  - [Cosmetic] `functionCall` wire type renamed to `functionCallWire`. JSON tags identical.
+  - [Cosmetic] SSE scanner uses `UnsafeEvent()` zero-copy variant.
+  - [Structural — resolved: implementation is better] Constructor uses `New(cfg Config)` instead of functional options. Consistent across all 3 providers.
+  - [Structural — resolved: implementation is better] No separate `tool_parser.go` — tool call extraction inlined in `processCandidateParts` since Gemini delivers complete tool calls (not delta-streamed).
+  - [Structural — resolved: implementation is better] `convertModelContent` omits `sameModel` parameter — cross-model signature stripping deferred to `TransformMessages` layer.
+  - [Structural — resolved: implementation is better] `mapUsage` does pure field mapping without model; cost calculated later in `emitDone`.
+  - [Structural — resolved: implementation is better] `processStream` is package-level function taking `io.Reader`, not method on Provider taking `*http.Response`.
+  - [Structural — resolved: implementation is better] `processStream` returns `error` instead of directly calling emit helpers. Caller handles error-to-event conversion.
+  - [Structural — resolved: plan error] Safety blocks use `StopReasonError`/`ErrUnknown` instead of `StopReasonContentFilter`/`ErrContentFilter` — these constants do not exist in core types.
+  - [Structural — resolved: plan error] `classifyHTTPError` takes `(status int, msg string)` returning `ProviderErrorCode`. `ErrBadRequest` does not exist in core types; 400/404 fall through to `ErrUnknown`.
+- **Structural deviations resolved**: 8 (implementation improvements and plan-doc errors referencing non-existent core types)
+- **Additions beyond plan**:
+  - `Register()` function for provider registration.
+  - `Config` struct for constructor parameters.
+  - `EventStart` emission on first SSE chunk.
+  - `safety.go` extracted as separate file for safety settings and rating formatting.
+  - `thought.go` extracted as separate file for thought signature handling.
+- **Outstanding gaps** (follow-up beads recommended):
+  - `generationConfig` missing `TopP`, `TopK`, `StopSequences`, `CandidateCount` fields — not in core `StreamOptions`, affects all providers.
+  - `functionCallingConfig.AllowedFunctionNames` not implemented.
+  - `CachedContent` field not on `generateContentRequest`.
+  - Gemini 3 `thinkingLevel` mode: wire type exists (`thinkingConfig.ThinkingLevel`) but `mapThinkingLevel` function and `StreamSimple` integration are not implemented. Will be needed when Gemini 3 launches.
+  - `classifyHTTPError` does not check Google API `Status` field (e.g., `PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`) — relies solely on HTTP status codes.
+- **Not implemented (aspirational)**: URP items (golden wire corpus, safety rating drift detector), Extreme Optimization items (sync.Pool buffer pooling), Alien Artifacts (event automata FSM, cost anomaly detection). These are enhancement-tier items.

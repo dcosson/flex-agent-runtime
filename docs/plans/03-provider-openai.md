@@ -938,3 +938,39 @@ Live OpenAI API smoke tests behind env var (`OPENAI_API_KEY`):
 - **Not incorporated**: None
 - **Open questions**: All resolved
 - **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-13
+- **Branch**: main
+- **Commit**: 01e44b1
+- **Verified by**: reviewer-sea
+- **Test verification**: `go test -race ./internal/ai/provider/openai/... -short -count=1` — PASS
+- **Acceptance tests**: N/A (acceptance criteria require agent loop from Batch 3)
+- **Deviations from plan**:
+  - [Cosmetic] `MaxCompletionTok` field named `MaxCompletionTokens` (more readable, same JSON tag).
+  - [Cosmetic] `toolCall` and `functionCall` wire types add `omitempty` to prevent empty strings in delta chunks.
+  - [Structural — resolved: implementation is better] Constructor uses `New(cfg Config)` instead of functional options. Consistent across all 3 providers.
+  - [Structural — resolved: implementation is better] Error types factored into `apiErrorResponse`/`apiErrorBody` in `types_wire.go` with separate `decodeErrorMessage`.
+  - [Structural — resolved: implementation is better] `classifyHTTPError` takes `(status int, msg string)` returning `ProviderErrorCode`. Body decoding separated.
+  - [Structural — resolved: implementation is better] `mapUsage` does pure field mapping without model; cost calculated later in `finishStream`.
+  - [Structural — resolved: implementation is better] `processStream` is package-level function, not method on Provider.
+  - [Structural — resolved: implementation is better] Tool JSON parsing uses dedicated `toolJSONParser` wrapper with `cloneMap` deep copy and large-argument optimization.
+  - [Structural — resolved: implementation is better] `convertToolResult` returns `[]chatMessage` slice to handle `RequiresAssistantAfterToolResult` injection cleanly.
+  - [Structural — resolved: acceptable] `useMaxCompletionTokens(model) bool` replaces `maxTokensFieldName(model) string`. Simpler API for a binary choice.
+  - [Structural — resolved: plan error] `content_filter` maps to `StopReasonStop` instead of `StopReasonContentFilter` — the constant does not exist in core types.
+  - [Structural — resolved: consistent] Context cancellation yields `StopReasonError` instead of `StopReasonAborted` — consistent across all 3 providers; `StopReasonAborted` is for agent-level abort.
+  - [Structural — resolved: plan error] 400/413 non-overflow errors map to `ErrUnknown` instead of `ErrBadRequest` — `ErrBadRequest` does not exist in core types.
+- **Structural deviations resolved**: 11 (implementation improvements and plan-doc errors referencing non-existent core types)
+- **Additions beyond plan**:
+  - `Register()` function for provider registration.
+  - `Config` struct for constructor parameters.
+  - `Metadata map[string]any` field on `chatRequest` for pass-through.
+  - `EventStart` emission on first SSE chunk.
+- **Outstanding gaps** (follow-up beads recommended):
+  - `TopP` parameter not wirable — `StreamOptions` does not include `TopP` (core type gap, affects all providers).
+  - `RequiresMistralToolIDs` compat flag defined in model catalog but not handled by OpenAI provider. Mistral-compatible endpoints won't get correctly formatted tool call IDs.
+- **Not implemented (aspirational)**: URP items (golden wire corpus, provider differential runner), Extreme Optimization items (sync.Pool, lazy snapshots), Alien Artifacts (cost anomaly detection). These are enhancement-tier items.

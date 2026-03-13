@@ -424,3 +424,34 @@ No reverse import is allowed from core packages into provider internals.
 - **Not incorporated**: None
 - **Open questions**: All resolved
 - **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-13
+- **Branch**: main
+- **Commit**: 01e44b1
+- **Verified by**: reviewer-sea
+- **Test verification**: `go test -race ./internal/ai/provider/anthropic/... -short -count=1` — PASS
+- **Acceptance tests**: N/A (acceptance criteria require agent loop from Batch 3)
+- **Deviations from plan**:
+  - [Cosmetic] SSE scanner uses `UnsafeEvent()` zero-copy variant instead of `Event()`.
+  - [Cosmetic] `StreamSimple` delegates through `streamWithThinking` helper rather than calling `Stream` directly.
+  - [Structural — resolved: implementation is better] Constructor uses `New(cfg Config)` with Config struct instead of `New(apiKey string, opts ...Option)` functional options. Consistent across all 3 providers.
+  - [Structural — resolved: implementation is better] `streamAccumulator` uses unified `blocks map[int]ai.ContentBlock` instead of separate `textParts`/`thinkingParts` maps. Cleaner design.
+  - [Structural — resolved: implementation is better] Tool JSON parsing wrapped in dedicated `toolJSONParser` struct with `cloneMap` deep-copy. Eliminates `lastValid` per review-incorporated strict-final-parse semantics.
+  - [Structural — resolved: implementation is better] `classifyHTTPError` takes `(status int, msg string)` returning `ProviderErrorCode` instead of `(statusCode int, body []byte)` returning `*ProviderError`. Body decoding separated into `decodeErrorMessage`.
+  - [Structural — resolved: implementation is better] `mapUsage` does pure field mapping without model/cost; cost calculated later in `finish()`.
+  - [Structural — resolved: implementation is better] `processStream` factored into `sseProcessor` with helper methods (`onBlockStart`, `onBlockDelta`, `onBlockStop`, `finish`).
+- **Structural deviations resolved**: 6 (all resolved as implementation improvements; plan doc should be updated to match)
+- **Additions beyond plan**:
+  - `Register()` function for provider registration with `ai.RegisterProvider`.
+  - `Config` struct for constructor parameters.
+  - `mergeUsage()` for incremental usage accumulation from `message_delta` events.
+  - `wireImageSource` for image content block support.
+  - `wireRequest.Metadata` field for Anthropic metadata pass-through.
+  - Large-argument optimization path using `ai.UnmarshalArgumentsFromReader` for payloads >64KB.
+  - `EventStart` emission on first SSE chunk.
+- **Not implemented (aspirational)**: URP items (golden wire corpus, differential runner, schema drift detector), Extreme Optimization items (sync.Pool, lazy snapshots, stack-backed buffers), Alien Artifacts (JSON confidence scoring, event automata FSM, cost anomaly detection). These are enhancement-tier items explicitly marked as aspirational in the plan.
