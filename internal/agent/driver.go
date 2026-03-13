@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+
+	"h2-agent-runtime/internal/ai"
 )
 
 // AgentDriver is the runtime-level driver contract shared by native and adapter drivers.
@@ -20,7 +22,8 @@ type DriverFactory func(cfg DriverConfig) (AgentDriver, error)
 
 // DriverConfig carries optional dependencies into driver factories.
 type DriverConfig struct {
-	Model        string
+	Model        ai.Model
+	Options      ai.SimpleStreamOptions
 	SystemPrompt string
 	Tools        []AgentTool
 	Metadata     map[string]any
