@@ -1233,6 +1233,5 @@ Note: Unlike the Anthropic and OpenAI providers, the Google provider does **not*
   - `generationConfig` missing `StopSequences`, `CandidateCount` fields.
   - `functionCallingConfig.AllowedFunctionNames` not implemented.
   - `CachedContent` field not on `generateContentRequest`.
-  - Gemini 3 `thinkingLevel` mode: wire type exists (`thinkingConfig.ThinkingLevel`) but `mapThinkingLevel` function and `StreamSimple` integration are not implemented. Will be needed when Gemini 3 launches.
   - `classifyHTTPError` does not check Google API `Status` field (e.g., `PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`) — relies solely on HTTP status codes.
 - **Not implemented (aspirational)**: URP items (golden wire corpus, safety rating drift detector), Extreme Optimization items (sync.Pool buffer pooling), Alien Artifacts (event automata FSM, cost anomaly detection). These are enhancement-tier items.
