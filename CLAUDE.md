@@ -16,6 +16,12 @@ Current implemented areas:
 5. `TransformMessages` adapts conversations across model/provider seams.
 6. `IsContextOverflow` + `ProviderError` classify error/overflow behavior consistently.
 
+## Before committing
+
+Always run `make check` before committing. This runs gofmt, go vet, and staticcheck. All must pass clean — no warnings, no unused code.
+
+Run `make test` to verify tests pass. Use `make test-race` for race detection.
+
 ## Make commands
 
 - `make help` — list commands
