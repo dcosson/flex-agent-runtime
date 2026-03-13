@@ -10,7 +10,7 @@ import (
 
 func classifyHTTPError(status int, msg string) ai.ProviderErrorCode {
 	switch {
-	case status == 403:
+	case status == 401 || status == 403:
 		return ai.ErrAuth
 	case status == 429:
 		return ai.ErrRateLimit

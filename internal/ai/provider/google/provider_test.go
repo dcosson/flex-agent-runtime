@@ -112,6 +112,9 @@ func TestUsageMappingNil(t *testing.T) {
 }
 
 func TestErrorClassification(t *testing.T) {
+	if got := classifyHTTPError(401, "unauthenticated"); got != ai.ErrAuth {
+		t.Fatalf("401: got %q", got)
+	}
 	if got := classifyHTTPError(403, "forbidden"); got != ai.ErrAuth {
 		t.Fatalf("403: got %q", got)
 	}
@@ -433,7 +436,19 @@ func TestStreamSafetyBlockFixture(t *testing.T) {
 	es := p.Stream(context.Background(), testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
-	_, err := es.Drain()
+
+	// Collect all events to verify safety invariant: no EventDone with text content
+	for ev := range es.C {
+		// No EventDone should carry text content from a safety-blocked response
+		if ev.Type == ai.EventDone && ev.Message != nil {
+			for _, block := range ev.Message.Content {
+				if tc, ok := block.(*ai.TextContent); ok && tc.Text != "" {
+					t.Fatalf("safety invariant violated: EventDone leaked text content: %q", tc.Text)
+				}
+			}
+		}
+	}
+	_, err := es.Result()
 	if err == nil {
 		t.Fatal("expected error for safety block")
 	}
@@ -466,9 +481,24 @@ func TestHTTPErrorClassification(t *testing.T) {
 	es := p.Stream(context.Background(), testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hello"}}}},
 	}, ai.StreamOptions{})
-	_, err := es.Drain()
+
+	// Collect events and verify the error event carries the right message
+	var errorMsg string
+	for ev := range es.C {
+		if ev.Type == ai.EventError && ev.Error != nil {
+			errorMsg = ev.Error.ErrorMessage
+		}
+	}
+	_, err := es.Result()
 	if err == nil {
 		t.Fatal("expected error")
+	}
+	if errorMsg != "permission denied" {
+		t.Fatalf("expected 'permission denied' error, got %q", errorMsg)
+	}
+	// Verify unit-level classification directly
+	if got := classifyHTTPError(403, "permission denied"); got != ai.ErrAuth {
+		t.Fatalf("expected ErrAuth from classifyHTTPError, got %q", got)
 	}
 }
 

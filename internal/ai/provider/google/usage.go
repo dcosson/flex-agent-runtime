@@ -6,6 +6,8 @@ func mapUsage(u *usageMetadata) ai.Usage {
 	if u == nil {
 		return ai.Usage{}
 	}
+	// Note: ThoughtsTokenCount is intentionally unmapped — ai.Usage has no
+	// reasoning/thoughts token field yet. When one is added, map it here.
 	return ai.Usage{
 		Input:       u.PromptTokenCount,
 		Output:      u.CandidatesTokenCount,
