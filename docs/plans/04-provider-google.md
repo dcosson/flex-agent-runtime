@@ -957,7 +957,7 @@ func defaultSafetySettings() []safetySetting {
 When `finishReason` is `SAFETY`:
 1. The response text may be empty or truncated.
 2. `safetyRatings` on the candidate indicate which category triggered.
-3. We emit a `ProviderError` with code `ErrContentFilter` and include the safety details.
+3. We emit a `ProviderError` with code `ErrUnknown` and include the safety details.
 
 ```go
 // safety.go
@@ -1008,9 +1008,9 @@ func classifyHTTPError(statusCode int, body []byte) *ai.ProviderError {
     case statusCode == 400 && ai.IsContextOverflow(msg):
         return ai.NewProviderError(ai.ErrContextOverflow, msg)
     case statusCode == 400:
-        return ai.NewProviderError(ai.ErrBadRequest, msg)
+        return ai.NewProviderError(ai.ErrUnknown, msg)
     case statusCode == 404:
-        return ai.NewProviderError(ai.ErrBadRequest, "model not found: "+msg)
+        return ai.NewProviderError(ai.ErrUnknown, "model not found: "+msg)
     case statusCode >= 500:
         return ai.NewProviderError(ai.ErrServerError, msg)
     default:
@@ -1026,8 +1026,8 @@ func classifyHTTPError(statusCode int, body []byte) *ai.ProviderError {
 | 403 | PERMISSION_DENIED | `ErrAuth` |
 | 429 | RESOURCE_EXHAUSTED | `ErrRateLimit` |
 | 400 (context overflow) | INVALID_ARGUMENT | `ErrContextOverflow` |
-| 400 (other) | INVALID_ARGUMENT / FAILED_PRECONDITION | `ErrBadRequest` |
-| 404 | NOT_FOUND | `ErrBadRequest` |
+| 400 (other) | INVALID_ARGUMENT / FAILED_PRECONDITION | `ErrUnknown` |
+| 404 | NOT_FOUND | `ErrUnknown` |
 | 500 | INTERNAL | `ErrServerError` |
 | 503 | UNAVAILABLE | `ErrServerError` |
 
@@ -1230,7 +1230,7 @@ Note: Unlike the Anthropic and OpenAI providers, the Google provider does **not*
   - `safety.go` extracted as separate file for safety settings and rating formatting.
   - `thought.go` extracted as separate file for thought signature handling.
 - **Outstanding gaps** (follow-up beads recommended):
-  - `generationConfig` missing `TopP`, `TopK`, `StopSequences`, `CandidateCount` fields — not in core `StreamOptions`, affects all providers.
+  - `generationConfig` missing `StopSequences`, `CandidateCount` fields.
   - `functionCallingConfig.AllowedFunctionNames` not implemented.
   - `CachedContent` field not on `generateContentRequest`.
   - Gemini 3 `thinkingLevel` mode: wire type exists (`thinkingConfig.ThinkingLevel`) but `mapThinkingLevel` function and `StreamSimple` integration are not implemented. Will be needed when Gemini 3 launches.

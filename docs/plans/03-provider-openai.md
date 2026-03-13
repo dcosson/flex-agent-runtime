@@ -762,7 +762,7 @@ func classifyHTTPError(statusCode int, body []byte) *ai.ProviderError {
         if ai.IsContextOverflow(msg) {
             return ai.NewProviderError(ai.ErrContextOverflow, msg)
         }
-        return ai.NewProviderError(ai.ErrBadRequest, msg)
+        return ai.NewProviderError(ai.ErrUnknown, msg)
     case statusCode >= 500:
         return ai.NewProviderError(ai.ErrServerError, msg)
     default:
@@ -971,6 +971,5 @@ Live OpenAI API smoke tests behind env var (`OPENAI_API_KEY`):
   - `Metadata map[string]any` field on `chatRequest` for pass-through.
   - `EventStart` emission on first SSE chunk.
 - **Outstanding gaps** (follow-up beads recommended):
-  - `TopP` parameter not wirable — `StreamOptions` does not include `TopP` (core type gap, affects all providers).
   - `RequiresMistralToolIDs` compat flag defined in model catalog but not handled by OpenAI provider. Mistral-compatible endpoints won't get correctly formatted tool call IDs.
 - **Not implemented (aspirational)**: URP items (golden wire corpus, provider differential runner), Extreme Optimization items (sync.Pool, lazy snapshots), Alien Artifacts (cost anomaly detection). These are enhancement-tier items.
