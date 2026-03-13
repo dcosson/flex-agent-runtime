@@ -2,7 +2,7 @@
   "id": "aiag-g1g.2",
   "title": "Code Interpreter E2E + Advanced Harness",
   "description": "Implement code interpreter E2E scenario and advanced harness suites from docs/plans/08-agent-tools-e2e.md and 08-agent-tools-e2e-test-harness.md.\n\nSections: §4.5 (Code Interpreter Workflow scenario), harness §1-§10\n\nKey deliverables:\n- Scenario 4.5: Code interpreter workflow — progressive discovery, RLM sub-calls, DataStore ops, usage stats, multi-step completion, budget enforcement\n- Property tests P1-P5: end-state determinism, event milestone coverage, follow-up FIFO, code interpreter trace consistency, terminal-tool short-circuit\n- Fault injection F1-F5: provider interruption, tool timeout, concurrent control injection, filesystem conflict, script limit exceedance\n- Comparison/oracle O1-O3: deterministic vs live-provider semantic oracle, LocalBackend vs SandboxBackend oracle, replay bundle oracle\n- Deterministic simulations S1-S3: scenario state-machine, control-boundary, fixture mutator\n- Benchmarks B1-B4: scenario \u003c10s, full suite \u003c10min, artifact overhead \u003c5%, parallel \u003e=3x on 4-core\n- Stress/soak ST1-ST3: 12h scenario churn, multi-agent parallel, long conversation stress\n- Security SEC1-SEC4: workspace containment, secret redaction, script sandbox enforcement, command safety\n- Acceptance tests pass (G4 gate)\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nReferences:\n- Plan: docs/plans/08-agent-tools-e2e.md §4.5\n- Test harness: docs/plans/08-agent-tools-e2e-test-harness.md §1-§10\n- Depends on: T8 (RLM + DataStore) + T10 (E2E Framework)",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-g1g",
@@ -28,6 +28,16 @@
     "plan-doc=08-agent-tools-e2e"
   ],
   "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — approved. 0 findings. All 30 E2E tests pass with -race. Nested-call routing assertions validate §4.5 requirements. See docs/reviews/aiag-g1g.2-r1-review-reviewer-sea.md @ 2be9d34",
+      "created_at": "2026-03-13T16:47:04.10153-07:00"
+    }
+  ],
   "created_at": "2026-03-13T13:16:51.993761-07:00",
-  "updated_at": "2026-03-13T16:33:37.083308-07:00"
+  "updated_at": "2026-03-13T16:47:26.183407-07:00",
+  "closed_at": "2026-03-13T16:47:26.183407-07:00",
+  "close_reason": "Closed"
 }
