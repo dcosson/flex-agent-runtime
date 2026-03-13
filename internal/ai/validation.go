@@ -56,7 +56,11 @@ func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
 	slog.Debug("schema cache miss", "hash", h)
 
 	c := jsonschema.NewCompiler()
-	if err := c.AddResource("tool.json", unmarshalToAny(raw)); err != nil {
+	doc, err := unmarshalToAny(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.AddResource("tool.json", doc); err != nil {
 		return nil, err
 	}
 	s, err := c.Compile("tool.json")
@@ -76,10 +80,12 @@ func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
 }
 
 // unmarshalToAny converts raw JSON to an any value suitable for jsonschema.
-func unmarshalToAny(raw json.RawMessage) any {
+func unmarshalToAny(raw json.RawMessage) (any, error) {
 	var v any
-	_ = json.Unmarshal(raw, &v)
-	return v
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, fmt.Errorf("invalid JSON in schema: %w", err)
+	}
+	return v, nil
 }
 
 // ValidateToolArguments validates tool call arguments against the tool's JSON Schema.
@@ -90,22 +96,17 @@ func ValidateToolArguments(tool Tool, args map[string]any) error {
 		return nil // no schema = no validation
 	}
 
-	coerced := CoerceTypes(tool.Parameters, args)
+	CoerceTypes(tool.Parameters, args)
 
 	schema, err := compileSchema(tool.Parameters)
 	if err != nil {
 		return fmt.Errorf("invalid tool schema for %q: %w", tool.Name, err)
 	}
 
-	// Convert coerced args to any for validation.
-	if err := schema.Validate(any(coerced)); err != nil {
+	if err := schema.Validate(any(args)); err != nil {
 		return formatValidationError(tool.Name, args, err)
 	}
 
-	// Copy coerced values back into args (mutation, matching TS behavior).
-	for k, v := range coerced {
-		args[k] = v
-	}
 	return nil
 }
 
