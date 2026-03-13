@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -85,7 +86,7 @@ func (d *NativeDriver) Stop(ctx context.Context) error {
 func (d *NativeDriver) run(ctx context.Context, session *Session, initialPrompt string) {
 	defer func() {
 		if r := recover(); r != nil {
-			err := fmt.Errorf("native driver panic: %v", r)
+			err := fmt.Errorf("native driver panic: %v\n%s", r, debug.Stack())
 			d.agent.RecordError()
 			d.emit(AgentEvent{Type: EventDriverError, Error: err, ErrorMessage: err.Error()})
 			_ = d.agent.Transition(StateIdle)

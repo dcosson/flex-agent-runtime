@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"h2-agent-runtime/internal/ai"
 	"pgregory.net/rapid"
@@ -87,6 +88,8 @@ func waitForState(t *testing.T, a *Agent, st AgentState, timeout time.Duration) 
 func TestP1_StateTransitionValidity(t *testing.T) {
 	ai.ClearProviders()
 	t.Cleanup(ai.ClearProviders)
+	// Shared provider across rapid iterations is intentional; this property only
+	// validates state-transition legality, not content differences by iteration.
 	prov := &scriptedProvider{api: "agent-p1", responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
@@ -220,11 +223,11 @@ func TestP3_SnapshotTriggerCardinality(t *testing.T) {
 		var mu sync.Mutex
 		turnCompleted := 0
 		idleTransitions := 0
-		order := make([]AgentEventType, 0)
+		order := make([]AgentEvent, 0)
 		agent.Subscribe(func(evt AgentEvent) {
 			mu.Lock()
 			defer mu.Unlock()
-			order = append(order, evt.Type)
+			order = append(order, evt)
 			if evt.Type == EventTurnCompleted {
 				turnCompleted++
 			}
@@ -254,11 +257,11 @@ func TestP3_SnapshotTriggerCardinality(t *testing.T) {
 		}
 		lastTurn := -1
 		lastIdle := -1
-		for i, typ := range order {
-			if typ == EventTurnCompleted {
+		for i, evt := range order {
+			if evt.Type == EventTurnCompleted {
 				lastTurn = i
 			}
-			if typ == EventStateChange {
+			if evt.Type == EventStateChange && evt.State == StateIdle {
 				lastIdle = i
 			}
 		}
@@ -648,6 +651,32 @@ func TestSEC2_ToolResultBoundarySafety(t *testing.T) {
 		t.Fatalf("prompt: %v", err)
 	}
 	waitForState(t, agent, StateIdle, 3*time.Second)
+
+	// Current runtime behavior is pass-through for tool result text payloads
+	// (no truncation/encoding sanitization layer yet). We still assert deterministic
+	// boundary handling by verifying oversized and invalid-UTF8 data survives
+	// round-trip without crashing the loop.
+	sess := agent.Session()
+	var toolText string
+	for _, entry := range sess.ConversationLog {
+		if tm, ok := entry.Message.(*ai.ToolResultMessage); ok && len(tm.Content) == 1 {
+			if txt, ok := tm.Content[0].(*ai.TextContent); ok {
+				toolText = txt.Text
+			}
+		}
+	}
+	if toolText == "" {
+		t.Fatalf("expected tool result text in conversation log")
+	}
+	if len(toolText) < 256*1024 {
+		t.Fatalf("expected large payload in tool result, got len=%d", len(toolText))
+	}
+	if !strings.Contains(toolText, string([]byte{0xff, 0xfe, 0xfd})) {
+		t.Fatalf("expected invalid UTF-8 bytes preserved in current pass-through behavior")
+	}
+	if utf8.ValidString(toolText) {
+		t.Fatalf("expected invalid UTF-8 payload for SEC2 boundary regression")
+	}
 }
 
 func TestSEC3_DriverNativeIDTrustBoundary(t *testing.T) {
