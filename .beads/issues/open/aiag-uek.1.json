@@ -2,7 +2,7 @@
   "id": "aiag-uek.1",
   "title": "Starlark Runtime + Core Builtins + Tier Classification",
   "description": "Implement Starlark runtime and core builtins from docs/plans/07-code-interpreter.md.\n\nSections: §1 (Overview), §2 (Architecture), §3 (Sandboxing), §4.1-§4.3 (Meta-tool surface, core builtins, Config), §4.7 (Tier Classification), §5.1 (Step Accounting), §5.5 (Timeout), §5.7 (Error Handling), §5.8 (Value Conversion), §6 (Package Structure)\n\nKey deliverables:\n- execute_script AgentTool factory (meta-tool entry point)\n- Starlark runtime with go.starlark.net: sandbox setup, load disabled, VM thread\n- Core builtins: discover(keyword), describe(tool_name), invoke(tool_name, params), log(message)\n- ExecutionState tracking (steps, running totals)\n- Step accounting with budget enforcement (budget_exceeded)\n- Wall-clock timeout enforcement\n- Tier classification via AST call-expression detection\n- Config struct with all execution limits\n- Value conversion: JSON ↔ Starlark ↔ Go round-trip\n- ExecuteRequest/Response types\n- Structured execution trace\n- Unit tests for all of the above\n\nRequired reading: docs/plans/00-implementation-guide.md\nSee Implementation Guide §5 (Seam: codeinterp ↔ tools catalog for discover/describe/invoke)\n\nReferences:\n- Plan: docs/plans/07-code-interpreter.md §1-§6\n- Test harness: docs/plans/07-code-interpreter-test-harness.md\n- Depends on: T2 (Agent Loop) + T4 (Tool Framework - for tool catalog access)",
-  "status": "in_progress",
+  "status": "open",
   "priority": 2,
   "type": "task",
   "parent": "aiag-uek",
@@ -34,14 +34,6 @@
     "plan-doc=07-code-interpreter"
   ],
   "assignee": "coder-1-sea",
-  "comments": [
-    {
-      "id": 1,
-      "author": "Danny Cosson",
-      "text": "Starting T7 implementation on branch batch3/starlark-runtime.",
-      "created_at": "2026-03-13T15:30:36.305901-07:00"
-    }
-  ],
   "created_at": "2026-03-13T13:15:49.83306-07:00",
-  "updated_at": "2026-03-13T15:30:36.30612-07:00"
+  "updated_at": "2026-03-13T15:30:16.240651-07:00"
 }
