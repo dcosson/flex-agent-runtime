@@ -271,12 +271,33 @@ func (s *Session) UnsubscribeTerminal(subscriberID string) {
 On subscribe, the new subscriber receives the current scrollback buffer so it can render history. This avoids the "blank screen on late attach" problem.
 
 ```go
-// ScrollbackSnapshot returns a copy of the current scrollback history
+const (
+    // MaxScrollbackSnapshotBytes caps the scrollback snapshot sent over RPC.
+    // At 4MB, this fits well within ConnectRPC's default 16MB message limit
+    // while providing substantial history (~40K lines of typical terminal output).
+    MaxScrollbackSnapshotBytes = 4 * 1024 * 1024
+)
+
+// ScrollbackSnapshot returns a copy of the most recent scrollback history
 // formatted as raw ANSI bytes suitable for replay into xterm.js.
+// The snapshot is capped at MaxScrollbackSnapshotBytes, taking the most
+// recent lines first (users care about recent output, not ancient history).
 func (vt *VirtualTerminal) ScrollbackSnapshot() []byte {
-    // Concatenate ScrollHistory entries with \r\n line endings
+    // Walk backwards to find how many lines fit in the budget.
+    total := 0
+    startIdx := len(vt.ScrollHistory)
+    for i := len(vt.ScrollHistory) - 1; i >= 0; i-- {
+        lineSize := len(vt.ScrollHistory[i]) + 2 // +2 for \r\n
+        if total+lineSize > MaxScrollbackSnapshotBytes {
+            break
+        }
+        total += lineSize
+        startIdx = i
+    }
+
     var buf bytes.Buffer
-    for _, line := range vt.ScrollHistory {
+    buf.Grow(total)
+    for _, line := range vt.ScrollHistory[startIdx:] {
         buf.WriteString(line)
         buf.WriteString("\r\n")
     }
@@ -293,7 +314,10 @@ func (vt *VirtualTerminal) ScrollbackSnapshot() []byte {
 This extends plan 13's RPC layer with a bidirectional streaming endpoint for raw terminal I/O.
 
 ```go
-// Added to the SandboxService or a separate TerminalService:
+// TerminalService is a separate RPC service (not part of SandboxService).
+// SandboxService handles tool dispatch and session CRUD — terminal streaming
+// is a distinct concern with different consumers (browser debug UI vs agent loop).
+// Keeping them separate allows independent deployment and access control.
 type TerminalService interface {
     // StreamTerminal opens a bidirectional stream for raw terminal I/O.
     // Server sends TerminalOutput messages (raw bytes from PTY).
@@ -390,14 +414,11 @@ func (s *terminalServer) StreamTerminal(ctx context.Context, stream TerminalStre
     errCh := make(chan error, 2)
 
     // Output pump: subscription → client
+    // Note: sub.chunks is never closed — termination is signaled via sub.done.
     go func() {
         for {
             select {
-            case chunk, ok := <-sub.chunks:
-                if !ok {
-                    errCh <- nil
-                    return
-                }
+            case chunk := <-sub.chunks:
                 if err := stream.Send(&TerminalServerMessage{
                     Payload: &TerminalOutput{Data: chunk},
                 }); err != nil {
@@ -433,6 +454,10 @@ func (s *terminalServer) StreamTerminal(ctx context.Context, stream TerminalStre
                     return
                 }
             case *TerminalResize:
+                // For remote terminal subscribers, childRows equals rows since
+                // the browser client owns the full terminal area (no status bar
+                // or split panes). The childRows vs rows distinction only matters
+                // for the h2 TUI which reserves rows for its own status line.
                 session.VT.Resize(int(p.Rows), int(p.Cols), int(p.Rows))
             }
         }
@@ -483,6 +508,12 @@ The server calls `VT.Resize()` which updates the PTY window size via `TIOCSWINSZ
 ### 6.3 Multi-Client Input Contention
 
 Multiple browser clients can attach to the same session simultaneously. All receive output, but input from multiple clients interleaves. This is the standard behavior for shared terminal sessions (like `tmux` or `screen`). No input arbitration is implemented in V1 — last writer wins.
+
+### 6.4 Multi-Client Resize Contention
+
+When multiple clients are attached with different window sizes, resize messages from each client would cause rapid SIGWINCH storms. To prevent this, the VT uses **last-resize-wins with debouncing**: resize requests are coalesced with a 100ms window, and only the final size is applied. This matches standard tmux behavior where the smallest attached client determines the size.
+
+For V1, the simpler approach: last resize wins, no minimum-size calculation. If this proves problematic in practice, the minimum-of-all-clients strategy (like `tmux`'s `aggressive-resize`) can be added as a follow-up.
 
 ---
 
@@ -591,7 +622,19 @@ Input rate limiting should be applied at the WebSocket/RPC layer to prevent a ma
 
 ---
 
-## 9. Testing
+## 9. Acceptance Criteria
+
+1. A browser client can open a WebSocket connection, receive the terminal attach message with dimensions and scrollback, and see live terminal output rendering in xterm.js.
+2. Keystrokes typed in xterm.js are forwarded to the agent CLI process and produce the expected effect (e.g., Ctrl+C interrupts, arrow keys navigate).
+3. Headless sessions launched by the runtime have `TERM=xterm-256color` and `COLORTERM=truecolor` set, and agent CLIs emit full-color ANSI output.
+4. Late-attaching clients receive scrollback history (up to 4MB) and can see prior output without gaps.
+5. A slow or disconnected subscriber does not block PTY output processing or other subscribers.
+6. Multiple clients can attach simultaneously; all receive output; input interleaves without deadlock.
+7. Terminal resize from browser propagates to the child process (verified by `tput cols`/`tput lines`).
+
+---
+
+## 10. Testing
 
 ### 9.1 Unit Tests
 
@@ -671,9 +714,9 @@ Input rate limiting should be applied at the WebSocket/RPC layer to prevent a ma
 
 ---
 
-## 10. Implementation Notes
+## 11. Implementation Notes
 
-### 10.1 Chunk Capture in PipeOutput
+### 11.1 Chunk Capture in PipeOutput
 
 The existing `PipeOutput` loop reads into a fixed 4KB buffer and calls the callback. To support streaming, we need the callback to have access to the raw bytes. Two approaches:
 
@@ -704,7 +747,15 @@ Change `PipeOutput(onData func())` to `PipeOutput(onData func([]byte))`. This is
 
 Recommend Option B for the port since we're restructuring anyway.
 
-### 10.2 Relationship to Existing Client System
+**Cross-plan coordination required:** Option B changes the `PipeOutput` signature defined in plan 09 §3.3. This must be coordinated with plan 09's implementation:
+- Update `VirtualTerminal.PipeOutput` signature in plan 09
+- Update `Session.pipeOutputCallback` to accept `[]byte`
+- Update all existing callback consumers (Client rendering)
+- This change should be made in plan 09's implementation, with this addendum's `fanOutTerminalOutput` consuming the new `[]byte` parameter
+
+If plan 09 is already implemented when this addendum is built, the signature change must be a separate commit that updates both the VT and all callers atomically.
+
+### 11.2 Relationship to Existing Client System
 
 Plan 09 already defines `Client` for multi-client attach/detach. The `TerminalSubscription` is conceptually similar but serves a different consumer:
 
@@ -713,13 +764,13 @@ Plan 09 already defines `Client` for multi-client attach/detach. The `TerminalSu
 
 Both are notified from the same `pipeOutputCallback`. They coexist: a session can have local Clients AND remote TerminalSubscriptions simultaneously.
 
-### 10.3 Synchronized Output Interaction
+### 11.3 Synchronized Output Interaction
 
 When the child enables CSI?2026 (synchronized output), the `pipeChunk` callback is suppressed until the matching disable sequence. This means `TerminalSubscription` also won't see intermediate frames during synchronized updates. This is correct behavior — xterm.js also supports CSI?2026 and would buffer these frames locally.
 
 ---
 
-## 11. Connected Components
+## 12. Connected Components
 
 | Component | Interface | Notes |
 |-----------|-----------|-------|
@@ -731,10 +782,24 @@ When the child enables CSI?2026 (synchronized output), the `pipeChunk` callback 
 
 ---
 
-## 12. Open Questions
+## 13. Open Questions
 
-1. **Scrollback size limit**: Should we cap `ScrollHistory` for streaming subscribers differently than for the main VT? Current h2 default is 50,000 lines. For a scrollback snapshot sent over RPC, this could be several MB.
+1. ~~**Scrollback size limit**~~: **Resolved.** Scrollback snapshot is capped at 4MB (MaxScrollbackSnapshotBytes), taking the most recent lines. The VT's internal ScrollHistory (50K lines) is unchanged; only the RPC snapshot is bounded.
 
 2. **Session recording**: Should we support recording terminal sessions to asciicast format (asciinema) for replay? This would be trivial given we already have the raw byte stream with timestamps.
 
 3. **Read-only mode**: Should we support a read-only attach mode (output only, no input forwarding)? Useful for monitoring without risk of accidental input.
+
+---
+
+## Review Disposition (R1)
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P2 | Dead code in output pump (chunks never closed but closure checked) | Incorporated | Removed `ok` check from channel receive; termination uses `sub.done` exclusively |
+| 2 | reviewer-sea | P2 | Missing acceptance criteria section | Incorporated | Added §9 with 7 user-facing acceptance criteria |
+| 3 | reviewer-sea | P2 | Unbounded scrollback snapshot could exceed RPC limits | Incorporated | Added `MaxScrollbackSnapshotBytes` (4MB) cap with most-recent-lines-first strategy |
+| 4 | reviewer-sea | P2 | PipeOutput signature change needs cross-plan coordination | Incorporated | Added explicit coordination note in §11.1 with atomic change requirement |
+| 5 | reviewer-sea | P3 | Resize handler passes rows for childRows without explanation | Incorporated | Added inline comment explaining childRows == rows for browser clients |
+| 6 | reviewer-sea | P3 | StreamTerminal service location ambiguous | Incorporated | Resolved as separate `TerminalService` with rationale in §5.1 |
+| 7 | reviewer-sea | P3 | Multi-client resize contention not addressed | Incorporated | Added §6.4 with last-resize-wins + debouncing strategy |
