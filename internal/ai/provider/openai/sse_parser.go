@@ -96,10 +96,16 @@ func processStream(ctx context.Context, body io.Reader, model ai.Model, es *ai.E
 	return finishStream(es, acc, model)
 }
 
+// processChoice handles a single choice from a streaming chunk.
+// Note: Unlike Anthropic, OpenAI's wire format has no explicit content_block_start/stop
+// framing, so text and thinking deltas are emitted without corresponding start/end
+// lifecycle events. Tool calls do get start/end events because OpenAI provides
+// index-based tool call lifecycle. Consumers tracking content block lifecycle across
+// providers should handle this asymmetry.
 func processChoice(es *ai.EventStream, acc *streamAccumulator, choice *chunkChoice) error {
 	d := &choice.Delta
 
-	// Text content delta
+	// Text content delta (no EventTextStart/End — see note above)
 	if d.Content != nil && *d.Content != "" {
 		acc.contentBuf.WriteString(*d.Content)
 		es.Send(ai.AssistantMessageEvent{
@@ -108,7 +114,7 @@ func processChoice(es *ai.EventStream, acc *streamAccumulator, choice *chunkChoi
 		})
 	}
 
-	// Reasoning content delta
+	// Reasoning content delta (no EventThinkingStart/End — see note above)
 	if d.Reasoning != nil && *d.Reasoning != "" {
 		acc.reasoningBuf.WriteString(*d.Reasoning)
 		es.Send(ai.AssistantMessageEvent{

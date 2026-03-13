@@ -78,12 +78,7 @@ func convertMessages(messages []ai.Message, model ai.Model, system string) []cha
 		case *ai.AssistantMessage:
 			out = append(out, convertAssistantMessage(m, model))
 		case *ai.ToolResultMessage:
-			converted := convertToolResult(m, model)
-			if requiresAssistantAfterToolResult(model) {
-				out = append(out, converted...)
-			} else {
-				out = append(out, converted...)
-			}
+			out = append(out, convertToolResult(m, model)...)
 		}
 	}
 	return out
