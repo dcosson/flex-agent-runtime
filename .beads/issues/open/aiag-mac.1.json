@@ -29,6 +29,7 @@
     "batch=2",
     "plan-doc=03-provider-openai"
   ],
+  "assignee": "coder-2-sea",
   "created_at": "2026-03-13T04:16:52.749124-07:00",
-  "updated_at": "2026-03-13T04:16:52.749124-07:00"
+  "updated_at": "2026-03-13T10:58:36.818833-07:00"
 }
