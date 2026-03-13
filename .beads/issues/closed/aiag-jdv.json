@@ -2,7 +2,7 @@
   "id": "aiag-jdv",
   "title": "Add TopP/TopK to core StreamOptions",
   "description": "StreamOptions is missing TopP and TopK fields. These are used by multiple providers (OpenAI, Google) but not currently exposed in the core options type. Add the fields and wire them through in each provider's request builder.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "created_by": "Danny Cosson",
@@ -21,5 +21,7 @@
     }
   ],
   "created_at": "2026-03-13T12:30:48.093795-07:00",
-  "updated_at": "2026-03-13T12:51:16.626117-07:00"
+  "updated_at": "2026-03-13T12:51:40.513046-07:00",
+  "closed_at": "2026-03-13T12:51:40.513046-07:00",
+  "close_reason": "Closed"
 }
