@@ -20,6 +20,7 @@ Primary package layout:
 ## Build/Test Workflow
 
 - `make check` before commits (fmt, vet, staticcheck)
+- ALWAYS `git push` immediately after every commit — no exceptions
 - `make test` for quick verification
 - `make test-race` for concurrency safety
 - `make test-harness` for targeted harness properties

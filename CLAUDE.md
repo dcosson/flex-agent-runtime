@@ -22,6 +22,8 @@ Always run `make check` before committing. This runs gofmt, go vet, and staticch
 
 Run `make test` to verify tests pass. Use `make test-race` for race detection.
 
+ALWAYS git push after committing. Every commit must be pushed immediately — no exceptions. Work on non-main branches should be pushed with `-u` on first push. The user and other agents cannot see your work until it is pushed.
+
 ## Make commands
 
 - `make help` — list commands
