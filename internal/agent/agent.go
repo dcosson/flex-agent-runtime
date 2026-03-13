@@ -42,6 +42,10 @@ type Agent struct {
 	control *ControlQueue
 }
 
+type agentBinder interface {
+	bindAgent(a *Agent)
+}
+
 func New(driver AgentDriver) *Agent {
 	a := &Agent{
 		driver:  driver,
@@ -54,6 +58,9 @@ func New(driver AgentDriver) *Agent {
 		driver.Subscribe(func(event AgentEvent) {
 			a.emit(event)
 		})
+		if b, ok := driver.(agentBinder); ok {
+			b.bindAgent(a)
+		}
 	}
 
 	return a
@@ -123,7 +130,6 @@ func (a *Agent) Transition(to AgentState) error {
 }
 
 func (a *Agent) Start(ctx context.Context, session *Session, prompt string) error {
-	_ = prompt
 	a.mu.Lock()
 	if a.state == StateExited {
 		a.mu.Unlock()
@@ -140,13 +146,6 @@ func (a *Agent) Start(ctx context.Context, session *Session, prompt string) erro
 	}
 	a.mu.Unlock()
 
-	if err := a.Transition(StateStreaming); err != nil {
-		a.mu.Lock()
-		a.running = false
-		a.mu.Unlock()
-		return err
-	}
-
 	a.emit(AgentEvent{Type: EventSessionStarted, At: time.Now()})
 	if a.driver != nil {
 		if err := a.driver.Start(ctx, a.Session(), prompt); err != nil {
@@ -157,6 +156,43 @@ func (a *Agent) Start(ctx context.Context, session *Session, prompt string) erro
 			_ = a.Transition(StateIdle)
 			return err
 		}
+	}
+	return nil
+}
+
+// Prompt starts an agent turn with a user prompt.
+func (a *Agent) Prompt(ctx context.Context, prompt string) error {
+	return a.Start(ctx, a.Session(), prompt)
+}
+
+// Continue resumes an existing session without appending a new user prompt.
+func (a *Agent) Continue(ctx context.Context) error {
+	a.mu.Lock()
+	if a.state == StateExited {
+		a.mu.Unlock()
+		return StoppedError{}
+	}
+	if a.running {
+		st := a.state
+		a.mu.Unlock()
+		return BusyError{State: st}
+	}
+	if a.session == nil {
+		a.mu.Unlock()
+		return InvalidStateError{From: a.state, To: a.state}
+	}
+	a.running = true
+	sess := a.session
+	a.mu.Unlock()
+
+	if a.driver == nil {
+		a.onDriverIdle()
+		return nil
+	}
+	if err := a.driver.Resume(ctx, sess.Clone()); err != nil {
+		a.RecordError()
+		a.onDriverIdle()
+		return err
 	}
 	return nil
 }
@@ -211,6 +247,12 @@ func (a *Agent) Abort(reason string) error {
 	}
 	a.emit(AgentEvent{Type: EventAborted, ControlMessage: reason, At: time.Now()})
 	return nil
+}
+
+func (a *Agent) onDriverIdle() {
+	a.mu.Lock()
+	a.running = false
+	a.mu.Unlock()
 }
 
 func (a *Agent) AppendConversation(msg AgentMessage) error {
