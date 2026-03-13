@@ -13,6 +13,7 @@ import (
 	"h2-agent-runtime/internal/agent"
 	"h2-agent-runtime/internal/ai"
 	"h2-agent-runtime/internal/tools"
+	"h2-agent-runtime/internal/tools/codeinterp"
 )
 
 // Scenario defines a complete E2E test scenario.
@@ -58,6 +59,7 @@ type ScenarioResult struct {
 
 	// ProviderCalls is the number of calls made to the provider.
 	ProviderCalls int
+	ProviderLog   []testutil.ScriptedProviderCall
 
 	// Error is set if the scenario failed to start or errored.
 	Error error
@@ -149,12 +151,14 @@ func Run(t *testing.T, scenario Scenario) *ScenarioResult {
 	})
 
 	// Build tools
+	agentModel := ai.Model{ID: "e2e-model", API: api, Provider: "e2e", MaxTokens: 4096}
 	agentTools := tools.NewLocalTools(root, tools.LocalToolsOptions{})
 	agentTools = append(agentTools, scenario.ExtraTools...)
+	agentTools = configureCodeInterpTool(agentModel, agentTools)
 
 	// Create agent
 	driver := agent.NewNativeDriver(agent.DriverConfig{
-		Model:        ai.Model{ID: "e2e-model", API: api, Provider: "e2e", MaxTokens: 4096},
+		Model:        agentModel,
 		Tools:        agentTools,
 		SystemPrompt: scenario.SystemPrompt,
 	})
@@ -226,6 +230,7 @@ func Run(t *testing.T, scenario Scenario) *ScenarioResult {
 		Session:       a.Session(),
 		WorkspaceRoot: root,
 		ProviderCalls: provider.Calls(),
+		ProviderLog:   append([]testutil.ScriptedProviderCall(nil), provider.CallLog...),
 	}
 
 	// Run assertions
@@ -239,6 +244,18 @@ func Run(t *testing.T, scenario Scenario) *ScenarioResult {
 	}
 
 	return result
+}
+
+func configureCodeInterpTool(model ai.Model, toolset []agent.AgentTool) []agent.AgentTool {
+	filtered := make([]agent.AgentTool, 0, len(toolset))
+	for _, t := range toolset {
+		if t.Name == "execute_script" {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	filtered = append(filtered, codeinterp.NewTool(model, filtered))
+	return filtered
 }
 
 // dumpDiagnostics emits detailed failure information.

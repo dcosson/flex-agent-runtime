@@ -16,6 +16,7 @@ type ScriptEntry struct {
 	Text       string
 	ToolCalls  []ToolCallSpec
 	StopReason ai.StopReason
+	Error      string
 }
 
 // ToolCallSpec defines a tool call within a scripted provider response.
@@ -44,8 +45,9 @@ type ScriptedProvider struct {
 
 // ScriptedProviderCall records what the provider received.
 type ScriptedProviderCall struct {
-	Messages []ai.Message
-	Tools    []ai.Tool
+	Messages     []ai.Message
+	Tools        []ai.Tool
+	SystemPrompt string
 }
 
 // NewScriptedProvider creates a fake provider with the given API name and script.
@@ -88,8 +90,9 @@ func (p *ScriptedProvider) streamNext(ctx context.Context, llmCtx ai.Context) *a
 		}
 		// Record the call
 		p.CallLog = append(p.CallLog, ScriptedProviderCall{
-			Messages: llmCtx.Messages,
-			Tools:    llmCtx.Tools,
+			Messages:     llmCtx.Messages,
+			Tools:        llmCtx.Tools,
+			SystemPrompt: llmCtx.SystemPrompt,
 		})
 		gate := p.Gates[idx]
 		p.mu.Unlock()
@@ -115,6 +118,17 @@ func (p *ScriptedProvider) streamNext(ctx context.Context, llmCtx ai.Context) *a
 		}
 
 		msg := buildMessage(entry)
+		if entry.Error != "" {
+			es.Send(ai.AssistantMessageEvent{
+				Type: ai.EventError,
+				Error: &ai.AssistantMessage{
+					StopReason:   ai.StopReasonError,
+					ErrorMessage: entry.Error,
+					Timestamp:    ai.TimeToMillis(time.Now()),
+				},
+			})
+			return
+		}
 
 		// Send a delta event for text content
 		if entry.Text != "" {

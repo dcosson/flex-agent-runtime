@@ -1,7 +1,7 @@
 GO ?= go
 PKGS := $(shell $(GO) list ./...)
 
-.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-harness-openai test-harness-google test-harness-codeinterp test-bench test-bench-ai-core test-bench-openai test-bench-google test-bench-codeinterp test-stress-openai test-stress-google test-stress-codeinterp test-fuzz test-fuzz-t2 test-anthropic-harness-fast test-anthropic-harness-race test-anthropic-harness-bench test-e2e clean
+.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-harness-openai test-harness-google test-harness-codeinterp test-harness-e2e-codeinterp test-bench test-bench-ai-core test-bench-openai test-bench-google test-bench-codeinterp test-stress-openai test-stress-google test-stress-codeinterp test-stress-e2e-codeinterp test-fuzz test-fuzz-t2 test-anthropic-harness-fast test-anthropic-harness-race test-anthropic-harness-bench test-e2e clean
 
 help: ## Show available make targets
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_.-]+:.*##/ {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -46,6 +46,9 @@ test-harness-google: ## Run Google provider harness tests (P*/F*/S*/GS*/SEC*/EC*
 test-harness-codeinterp: ## Run Code Interpreter harness suites (P/F/O/S/ST/SEC lanes)
 	$(GO) test -race ./internal/tools/codeinterp -run 'Test(P[1-8]_|F[1-8]_|O[1-5]_|S[1-6]_|ST[1-5]_|SEC[1-7]_)'
 
+test-harness-e2e-codeinterp: ## Run Code Interpreter E2E harness suites (P/F/O/S/B/ST/SEC lanes)
+	$(GO) test -race ./e2etests/scenarios -run 'Test(Scenario_CodeInterpreterWorkflow|P[1-5]_|F[1-5]_|O[1-3]_|S[1-3]_|B[1-4]_|ST[1-3]_|SEC[1-4]_)'
+
 test-bench: ## Run benchmark suite (B* targets)
 	$(GO) test ./... -bench . -benchmem
 
@@ -73,6 +76,9 @@ test-stress-google: ## Run Google provider stress/soak tests (SK1-SK3)
 
 test-stress-codeinterp: ## Run Code Interpreter stress/soak tests (ST1-ST5)
 	$(GO) test -race ./internal/tools/codeinterp -run 'TestST[1-5]_' -count=1
+
+test-stress-e2e-codeinterp: ## Run Code Interpreter E2E stress/soak tests (ST1-ST3)
+	$(GO) test -race ./e2etests/scenarios -run 'TestST[1-3]_' -count=1
 
 test-fuzz: ## Run short fuzz checks for parser/overflow fuzz targets
 	$(GO) test ./internal/ai/sse -run '^$$' -fuzz FuzzScanner -fuzztime=5s
