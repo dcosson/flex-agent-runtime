@@ -1,0 +1,38 @@
+{
+  "id": "aiag-qkh.1",
+  "title": "Core Types \u0026 EventStream (Foundation)",
+  "description": "Implement the foundational types and EventStream from docs/plans/01-ai-core.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: §3 (Core Types), §4 (Event Types \u0026 EventStream), time.go helpers\n\nKey deliverables:\n- Message interface (sealed) with UserMessage, AssistantMessage, ToolResultMessage\n- ContentBlock interface (sealed) with TextContent, ThinkingContent, ImageContent, ToolCall\n- Usage, UsageCost structs\n- StopReason constants (stop, length, toolUse, error, aborted)\n- Tool struct (Name, Description, Parameters as json.RawMessage)\n- Context struct (SystemPrompt, Messages, Tools)\n- StreamOptions, SimpleStreamOptions, ThinkingLevel, CacheRetention, ThinkingBudgets\n- EventType enum (start, text_start/delta/end, thinking_start/delta/end, toolcall_start/delta/end, done, error)\n- AssistantMessageEvent tagged union\n- EventStream struct with terminal-state guarantee (atomic.Bool + CompareAndSwap)\n- NewEventStream, Send, Close (idempotent via sync.Once), Result, Drain\n- ErrStreamClosedWithoutTerminalEvent sentinel error\n- TimeToMillis, MillisToTime helper functions\n- Unit tests for all types and EventStream (send/receive, Result(), Drain(), Close idempotency, concurrent access)\n- Test harness tests: P1 (EventStream ordering with rapid), P5 (terminal-state guarantee), D1 (simulated slow consumer), D2 (context cancellation timing), S1 (1M event throughput), B1 (EventStream benchmark)\n- All tests must pass with -race flag\n\nReferences:\n- Plan: docs/plans/01-ai-core.md §3, §4\n- Test harness: docs/plans/01-ai-core-test-harness.md §1 (P1, P5), §4 (S1), §5 (B1), §6 (D1, D2)\n- Depends on: nothing (this is the foundation)",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-qkh",
+  "dependencies": [
+    {
+      "id": "aiag-qkh",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-qkh.2",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-qkh.3",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-qkh.4",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-agent-runtime",
+    "batch=1",
+    "plan-doc=01-ai-core"
+  ],
+  "created_at": "2026-03-12T18:17:48.438127-07:00",
+  "updated_at": "2026-03-12T18:17:48.438127-07:00"
+}
