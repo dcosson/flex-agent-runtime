@@ -1,0 +1,38 @@
+{
+  "id": "aiag-g1g.1",
+  "title": "E2E Framework + Core Scenarios",
+  "description": "Implement E2E test framework and core scenarios from docs/plans/08-agent-tools-e2e.md.\n\nSections: §2 (Architecture), §3 (Test Suite Design), §4.1-§4.4 + §4.6-§4.8 (Core Scenarios), §6 (Acceptance Criteria)\n\nKey deliverables:\n- Test harness framework: harness/runner.go, observer.go, oracles.go, fixtures/\n- Deterministic fake provider traces for PR-level runs\n- Optional real provider mode (credential-gated)\n- Assertion layers: event-level, conversation-level, filesystem/process-level\n- Scenario 4.1: Multi-turn local file refactor\n- Scenario 4.2: Bash build-and-fix loop\n- Scenario 4.3: Steering mid-turn\n- Scenario 4.4: Follow-up queue chain\n- Scenario 4.6: Terminal tool completion\n- Scenario 4.7: Git read workflow\n- Scenario 4.8: Error recovery workflow\n- CI tier integration with Makefile targets\n\nRequired reading: docs/plans/00-implementation-guide.md\nSee Implementation Guide §5 (Seam: e2etests ↔ internal/agent + internal/tools)\n\nReferences:\n- Plan: docs/plans/08-agent-tools-e2e.md §2-§4, §6\n- Test harness: docs/plans/08-agent-tools-e2e-test-harness.md\n- Depends on: T2 (Agent Loop) + T5 (Search/Bash/Git Tools)",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-g1g",
+  "dependencies": [
+    {
+      "id": "aiag-g1g",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-suj.2",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-knj.2",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-g1g.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=3",
+    "plan-doc=08-agent-tools-e2e"
+  ],
+  "created_at": "2026-03-13T13:16:37.350075-07:00",
+  "updated_at": "2026-03-13T13:16:37.350075-07:00"
+}

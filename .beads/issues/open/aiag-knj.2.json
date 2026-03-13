@@ -1,0 +1,38 @@
+{
+  "id": "aiag-knj.2",
+  "title": "Search Tools, Bash, Git Ops, SandboxBackend",
+  "description": "Implement remaining built-in tools and SandboxBackend from docs/plans/06-built-in-tools.md.\n\nSections: §4.5 (bash), §4.6 (grep - pure Go), §4.7 (glob), §4.8 (git commands), §5.2 (SandboxBackend), §3.2 (NewSandboxTools factory)\n\nKey deliverables:\n- grep: pure-Go regex/literal search with glob filters, bounded output\n- glob: doublestar pattern matching, sorted, bounded output\n- bash: shell command execution with timeout, streaming ToolProgress updates, resource hints\n- git_status, git_diff, git_log, git_show (Tier 1 read-only)\n- git_add, git_commit (Tier 2 mutating)\n- SandboxBackend: RPC client adapter, streams progress via RPC, returns SnapshotID\n- NewSandboxTools factory returning []agent.AgentTool\n- Unit tests for all tools + component tests for SandboxBackend\n\nRequired reading: docs/plans/00-implementation-guide.md\nSee Implementation Guide §1.6 (ToolBackend), §4.6 (ToolBackend signature drift - SandboxBackend must accept onProgress), §5 (Seam: tools.SandboxBackend ↔ rpc.ExecuteToolStream)\n\nReferences:\n- Plan: docs/plans/06-built-in-tools.md §4.5-§5.2\n- Test harness: docs/plans/06-built-in-tools-test-harness.md\n- Depends on: T4 (Tool Framework + File Tools)",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-knj",
+  "dependencies": [
+    {
+      "id": "aiag-knj",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-knj.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-knj.3",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-g1g.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=3",
+    "plan-doc=06-built-in-tools"
+  ],
+  "created_at": "2026-03-13T13:15:16.447321-07:00",
+  "updated_at": "2026-03-13T13:15:16.447321-07:00"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "aiag-suj.3",
+  "title": "Agent Test Harness",
+  "description": "Implement test harness suites from docs/plans/05-agent-test-harness.md.\n\nSections: All sections (§1-§10)\n\nKey deliverables:\n- Property tests P1-P5: state transition validity, follow-up FIFO, snapshot trigger cardinality, session ID authority, abort idempotency\n- Fault injection F1-F5: provider panic recovery, tool hang/timeout, subscriber panic isolation, malformed adapter events, concurrent control storms\n- Comparison/oracle O1-O2: native vs adapter event parity, replay oracle\n- Deterministic simulations S1-S3: turn engine, control boundary steering, terminal tool\n- Benchmarks B1-B4: event fan-out \u003e=100k/s, prompt-to-delta \u003c2ms p95, control queue \u003c5ms p95, memory bounded\n- Stress/soak ST1-ST3: 24h multi-agent soak, race-heavy stress, burst follow-up\n- Security SEC1-SEC3: event payload sanitization, tool-result boundary, driver-native ID trust\n- CI tier matrix with Makefile targets\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nReferences:\n- Plan: docs/plans/05-agent.md\n- Test harness: docs/plans/05-agent-test-harness.md §1-§10\n- Depends on: T1 (Agent Core) + T2 (Agent Loop)",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-suj",
+  "dependencies": [
+    {
+      "id": "aiag-suj",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-suj.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=3",
+    "plan-doc=05-agent"
+  ],
+  "created_at": "2026-03-13T13:14:47.19042-07:00",
+  "updated_at": "2026-03-13T13:14:47.19042-07:00"
+}

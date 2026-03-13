@@ -1,0 +1,30 @@
+{
+  "id": "aiag-suj",
+  "title": "Agent Loop Implementation",
+  "description": "Epic for 05-agent + 05-agent-test-harness. Agent struct, NativeDriver loop, state machine, event bus, control queue, steering, follow-up, terminal tools. Full unit/component tests and test harness suites.",
+  "status": "open",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-suj.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-suj.2",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-suj.3",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=3"
+  ],
+  "created_at": "2026-03-13T13:14:10.776531-07:00",
+  "updated_at": "2026-03-13T13:14:10.776531-07:00"
+}

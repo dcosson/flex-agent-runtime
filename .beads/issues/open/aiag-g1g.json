@@ -1,0 +1,26 @@
+{
+  "id": "aiag-g1g",
+  "title": "Agent + Tools E2E Implementation",
+  "description": "Epic for 08-agent-tools-e2e + 08-agent-tools-e2e-test-harness. E2E test framework, 8 integration scenarios, property/fault/oracle/stress harness suites. Tests go in e2etests/.",
+  "status": "open",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-g1g.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-g1g.2",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=3"
+  ],
+  "created_at": "2026-03-13T13:16:23.189953-07:00",
+  "updated_at": "2026-03-13T13:16:23.189953-07:00"
+}
