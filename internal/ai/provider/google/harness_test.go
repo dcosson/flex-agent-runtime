@@ -300,13 +300,41 @@ func TestP5_RequestJSONCamelCase(t *testing.T) {
 	}
 }
 
-// P6: Usage Cost Consistency
+// P6: Usage Cost Consistency (exercises Google-specific mapUsage)
 func TestP6_UsageCostConsistency(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		prompt := rapid.IntRange(0, 100000).Draw(t, "prompt")
 		comp := rapid.IntRange(0, 50000).Draw(t, "comp")
+		total := rapid.IntRange(prompt+comp, prompt+comp+10000).Draw(t, "total")
 		cached := rapid.IntRange(0, prompt).Draw(t, "cached")
+		thoughts := rapid.IntRange(0, 50000).Draw(t, "thoughts")
 
+		meta := &usageMetadata{
+			PromptTokenCount:        prompt,
+			CandidatesTokenCount:    comp,
+			TotalTokenCount:         total,
+			CachedContentTokenCount: cached,
+			ThoughtsTokenCount:      thoughts,
+		}
+
+		// Exercise mapUsage to verify Google→common field mapping
+		usage := mapUsage(meta)
+
+		// Verify field mapping correctness
+		if usage.Input != prompt {
+			t.Fatalf("Input: got %d, want %d", usage.Input, prompt)
+		}
+		if usage.Output != comp {
+			t.Fatalf("Output: got %d, want %d", usage.Output, comp)
+		}
+		if usage.TotalTokens != total {
+			t.Fatalf("TotalTokens: got %d, want %d", usage.TotalTokens, total)
+		}
+		if usage.CacheRead != cached {
+			t.Fatalf("CacheRead: got %d, want %d", usage.CacheRead, cached)
+		}
+
+		// Now verify cost arithmetic via CalculateCost
 		inputCost := rapid.Float64Range(0, 100).Draw(t, "inputCost")
 		outputCost := rapid.Float64Range(0, 100).Draw(t, "outputCost")
 		cacheReadCost := rapid.Float64Range(0, 100).Draw(t, "cacheReadCost")
@@ -314,13 +342,6 @@ func TestP6_UsageCostConsistency(t *testing.T) {
 		model := ai.Model{
 			ID: "test", API: "google-genai", Provider: "google",
 			Cost: ai.ModelCost{Input: inputCost, Output: outputCost, CacheRead: cacheReadCost},
-		}
-
-		usage := ai.Usage{
-			Input:       prompt,
-			Output:      comp,
-			CacheRead:   cached,
-			TotalTokens: prompt + comp,
 		}
 
 		ai.CalculateCost(model, &usage)
