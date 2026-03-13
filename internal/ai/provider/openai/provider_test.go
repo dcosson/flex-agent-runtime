@@ -181,6 +181,20 @@ func TestBuildRequestReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestBuildRequestTopP(t *testing.T) {
+	llmCtx := ai.Context{
+		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
+	}
+	topP := 0.7
+	req, err := buildRequest(testModel(), llmCtx, ai.StreamOptions{TopP: &topP}, requestParams{})
+	if err != nil {
+		t.Fatalf("buildRequest err: %v", err)
+	}
+	if req.TopP == nil || *req.TopP != topP {
+		t.Fatalf("top_p mismatch: %+v", req.TopP)
+	}
+}
+
 func TestBuildRequestStore(t *testing.T) {
 	sup := true
 	model := testModelWithCompat(&ai.ModelCompat{SupportsStore: &sup})

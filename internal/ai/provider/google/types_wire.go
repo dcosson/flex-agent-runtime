@@ -65,6 +65,8 @@ type functionCallingConfig struct {
 
 type generationConfig struct {
 	Temperature     *float64        `json:"temperature,omitempty"`
+	TopP            *float64        `json:"topP,omitempty"`
+	TopK            *int            `json:"topK,omitempty"`
 	MaxOutputTokens *int            `json:"maxOutputTokens,omitempty"`
 	ThinkingConfig  *thinkingConfig `json:"thinkingConfig,omitempty"`
 }

@@ -70,6 +70,24 @@ func TestBuildRequestConvertsMessagesAndTools(t *testing.T) {
 	}
 }
 
+func TestBuildRequestTopPSampling(t *testing.T) {
+	ctx := ai.Context{
+		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
+	}
+	topP := 0.85
+	topK := 16
+	req, err := buildRequest(testModel(), ctx, ai.StreamOptions{TopP: &topP, TopK: &topK}, nil)
+	if err != nil {
+		t.Fatalf("buildRequest err: %v", err)
+	}
+	if req.TopP == nil || *req.TopP != topP {
+		t.Fatalf("top_p mismatch: %+v", req.TopP)
+	}
+	if req.TopK == nil || *req.TopK != topK {
+		t.Fatalf("top_k mismatch: %+v", req.TopK)
+	}
+}
+
 func TestStreamTextFixture(t *testing.T) {
 	fixture := "event: message_start\n" +
 		"data: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":10}}}\n\n" +

@@ -15,6 +15,7 @@ type chatRequest struct {
 	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
 	Store               *bool          `json:"store,omitempty"`
 	Temperature         *float64       `json:"temperature,omitempty"`
+	TopP                *float64       `json:"top_p,omitempty"`
 	Metadata            map[string]any `json:"metadata,omitempty"`
 }
 

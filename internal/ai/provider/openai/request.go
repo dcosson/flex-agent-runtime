@@ -44,6 +44,9 @@ func buildRequest(model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, para
 	if opts.Temperature != nil {
 		req.Temperature = opts.Temperature
 	}
+	if opts.TopP != nil {
+		req.TopP = opts.TopP
+	}
 
 	// Reasoning effort
 	if params.reasoningEffort != "" {

@@ -191,6 +191,24 @@ func TestBuildRequestThinkingBudget(t *testing.T) {
 	}
 }
 
+func TestBuildRequestTopPSampling(t *testing.T) {
+	llmCtx := ai.Context{
+		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
+	}
+	topP := 0.8
+	topK := 40
+	req := buildRequest(testModel(), llmCtx, ai.StreamOptions{TopP: &topP, TopK: &topK}, requestParams{})
+	if req.GenerationConfig == nil {
+		t.Fatal("generation config not set")
+	}
+	if req.GenerationConfig.TopP == nil || *req.GenerationConfig.TopP != topP {
+		t.Fatalf("topP mismatch: %+v", req.GenerationConfig.TopP)
+	}
+	if req.GenerationConfig.TopK == nil || *req.GenerationConfig.TopK != topK {
+		t.Fatalf("topK mismatch: %+v", req.GenerationConfig.TopK)
+	}
+}
+
 func TestConvertModelContentWithThinking(t *testing.T) {
 	msg := &ai.AssistantMessage{Content: []ai.ContentBlock{
 		&ai.ThinkingContent{Thinking: "reasoning trace"},

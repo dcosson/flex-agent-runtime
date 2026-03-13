@@ -21,6 +21,8 @@ const (
 // StreamOptions controls provider streaming behavior.
 type StreamOptions struct {
 	Temperature     *float64
+	TopP            *float64
+	TopK            *int
 	MaxTokens       *int
 	APIKey          string
 	SessionID       string

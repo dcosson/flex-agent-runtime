@@ -47,6 +47,12 @@ func buildGenerationConfig(opts ai.StreamOptions, params requestParams) *generat
 	if opts.Temperature != nil {
 		cfg.Temperature = opts.Temperature
 	}
+	if opts.TopP != nil {
+		cfg.TopP = opts.TopP
+	}
+	if opts.TopK != nil {
+		cfg.TopK = opts.TopK
+	}
 
 	// Thinking configuration
 	if params.thinkingBudget != nil && *params.thinkingBudget > 0 {

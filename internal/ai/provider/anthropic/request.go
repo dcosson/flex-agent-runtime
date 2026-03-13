@@ -36,6 +36,8 @@ func buildRequest(model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, thin
 	return wireRequest{
 		Model:     model.ID,
 		MaxTokens: maxTokens,
+		TopP:      opts.TopP,
+		TopK:      opts.TopK,
 		Messages:  messages,
 		System:    llmCtx.SystemPrompt,
 		Tools:     tools,
