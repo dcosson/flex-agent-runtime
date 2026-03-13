@@ -67,6 +67,7 @@ func executeGrep(ctx context.Context, rootDir string, req ToolRequest) (*ToolRes
 	type matchRecord struct {
 		file    string
 		line    int
+		col     int // 1-based column offset of match start
 		content string
 		context []string
 	}
@@ -130,14 +131,19 @@ func executeGrep(ctx context.Context, rootDir string, req ToolRequest) (*ToolRes
 				return filepath.SkipAll
 			}
 
-			var found bool
+			var col int // 0-based match offset, -1 if not found
 			if literal {
-				found = strings.Contains(line, literalStr)
+				col = strings.Index(line, literalStr)
 			} else {
-				found = re.MatchString(line)
+				loc := re.FindStringIndex(line)
+				if loc != nil {
+					col = loc[0]
+				} else {
+					col = -1
+				}
 			}
 
-			if found {
+			if col >= 0 {
 				content := line
 				if len(content) > maxGrepMatchLength {
 					content = content[:maxGrepMatchLength] + "..."
@@ -146,6 +152,7 @@ func executeGrep(ctx context.Context, rootDir string, req ToolRequest) (*ToolRes
 				rec := matchRecord{
 					file:    relPath,
 					line:    i + 1,
+					col:     col + 1, // 1-based
 					content: content,
 				}
 
@@ -193,7 +200,7 @@ func executeGrep(ctx context.Context, rootDir string, req ToolRequest) (*ToolRes
 	b.WriteString("\n\n")
 
 	for _, m := range matches {
-		fmt.Fprintf(&b, "%s:%d: %s\n", m.file, m.line, m.content)
+		fmt.Fprintf(&b, "%s:%d:%d: %s\n", m.file, m.line, m.col, m.content)
 		for _, cl := range m.context {
 			fmt.Fprintf(&b, "  %s\n", cl)
 		}

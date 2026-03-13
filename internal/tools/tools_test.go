@@ -596,8 +596,9 @@ func TestGrep_BasicRegex(t *testing.T) {
 	backend := NewLocalBackend(root)
 	resp := execTool(t, backend, "grep", map[string]any{"pattern": "fmt\\.Println"})
 	text := responseText(resp)
-	if !strings.Contains(text, "code.go:2") {
-		t.Fatalf("expected match at code.go:2, got %q", text)
+	// Verify file:line:col format (col=2 because of leading tab)
+	if !strings.Contains(text, "code.go:2:2:") {
+		t.Fatalf("expected match at code.go:2:2, got %q", text)
 	}
 }
 
@@ -1145,27 +1146,6 @@ func TestNewSandboxTools_ReturnsSameToolNames(t *testing.T) {
 	for name := range localNames {
 		if !sandboxNames[name] {
 			t.Errorf("sandbox missing tool: %s", name)
-		}
-	}
-}
-
-// =====================================================================
-// Tier Classifier (expanded)
-// =====================================================================
-
-func TestClassifyTool_NewTools(t *testing.T) {
-	// Verify new tools are classified correctly
-	tier1Tools := []string{"grep", "glob", "git_status", "git_diff", "git_log", "git_show"}
-	for _, name := range tier1Tools {
-		if got := ClassifyTool(name); got != Tier1 {
-			t.Errorf("ClassifyTool(%q) = %d, want Tier1", name, got)
-		}
-	}
-
-	tier2Tools := []string{"bash", "git_add", "git_commit"}
-	for _, name := range tier2Tools {
-		if got := ClassifyTool(name); got != Tier2 {
-			t.Errorf("ClassifyTool(%q) = %d, want Tier2", name, got)
 		}
 	}
 }

@@ -137,7 +137,6 @@ func gitCommitTool(rootDir string) toolImpl {
 	}
 }
 
-
 func runGitCommand(ctx context.Context, rootDir string, args []string) (*ToolResponse, error) {
 	cmdCtx, cancel := context.WithTimeout(ctx, defaultGitTimeout)
 	defer cancel()
