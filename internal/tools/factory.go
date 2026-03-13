@@ -30,14 +30,9 @@ func NewLocalTools(rootDir string, _ LocalToolsOptions) []agent.AgentTool {
 }
 
 // buildAgentTools wraps each tool implementation as an agent.AgentTool.
-func buildAgentTools(backend ToolBackend) []agent.AgentTool {
-	lb, ok := backend.(*LocalBackend)
-	if !ok {
-		return nil
-	}
-
-	tools := make([]agent.AgentTool, 0, len(lb.tools))
-	for _, impl := range lb.tools {
+func buildAgentTools(backend *LocalBackend) []agent.AgentTool {
+	tools := make([]agent.AgentTool, 0, len(backend.tools))
+	for _, impl := range backend.tools {
 		impl := impl // capture loop variable
 		tools = append(tools, agent.AgentTool{
 			Tool: ai.Tool{

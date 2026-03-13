@@ -28,6 +28,8 @@ func NewLocalBackend(rootDir string) *LocalBackend {
 	}
 }
 
+// TODO(knj.2): Propagate onProgress to toolImpl.execute for Tier 2 tools (e.g. bash).
+// Current Tier 1 tools are fast enough to skip progress callbacks.
 func (b *LocalBackend) ExecuteTool(ctx context.Context, req ToolRequest, _ func(ToolProgress)) (*ToolResponse, error) {
 	impl, ok := b.tools[req.ToolName]
 	if !ok {
