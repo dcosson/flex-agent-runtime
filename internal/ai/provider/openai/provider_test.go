@@ -200,7 +200,7 @@ func TestConvertToolResultWithName(t *testing.T) {
 	sup := true
 	model := testModelWithCompat(&ai.ModelCompat{RequiresToolResultName: &sup})
 	msg := &ai.ToolResultMessage{ToolCallID: "c1", ToolName: "read_file", Content: []ai.ContentBlock{&ai.TextContent{Text: "data"}}}
-	result := convertToolResult(msg, model)
+	result := convertToolResult(msg, model, nil)
 	if result[0].Name != "read_file" {
 		t.Fatalf("expected tool name in result, got %q", result[0].Name)
 	}
@@ -210,7 +210,7 @@ func TestConvertToolResultWithAssistantInjection(t *testing.T) {
 	sup := true
 	model := testModelWithCompat(&ai.ModelCompat{RequiresAssistantAfterToolResult: &sup})
 	msg := &ai.ToolResultMessage{ToolCallID: "c1", ToolName: "read_file", Content: []ai.ContentBlock{&ai.TextContent{Text: "data"}}}
-	result := convertToolResult(msg, model)
+	result := convertToolResult(msg, model, nil)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 messages (tool + assistant), got %d", len(result))
 	}

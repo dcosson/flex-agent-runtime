@@ -1,6 +1,11 @@
 package openai
 
-import "h2-agent-runtime/internal/ai"
+import (
+	"crypto/rand"
+	"encoding/hex"
+
+	"h2-agent-runtime/internal/ai"
+)
 
 // boolVal safely dereferences a *bool, returning false for nil.
 func boolVal(b *bool) bool {
@@ -62,4 +67,29 @@ func requiresAssistantAfterToolResult(model ai.Model) bool {
 // requiresThinkingAsText returns whether thinking blocks should be converted to text.
 func requiresThinkingAsText(model ai.Model) bool {
 	return model.Compat != nil && boolVal(model.Compat.RequiresThinkingAsText)
+}
+
+// requiresMistralToolIDs returns whether tool call IDs need Mistral-format normalization.
+func requiresMistralToolIDs(model ai.Model) bool {
+	return model.Compat != nil && boolVal(model.Compat.RequiresMistralToolIDs)
+}
+
+// normalizeToolCallID returns the ID unchanged for normal models, or generates a
+// 9-character alphanumeric ID for Mistral-compatible models. Mistral requires tool
+// call IDs to be exactly 9 alphanumeric characters.
+func normalizeToolCallID(id string, model ai.Model) string {
+	if !requiresMistralToolIDs(model) {
+		return id
+	}
+	return generateMistralToolID()
+}
+
+// generateMistralToolID produces a random 9-character alphanumeric string.
+func generateMistralToolID() string {
+	var b [5]byte // 5 bytes → 10 hex chars, we trim to 9
+	if _, err := rand.Read(b[:]); err != nil {
+		// Fallback: this should never happen with crypto/rand
+		return "a00000000"
+	}
+	return hex.EncodeToString(b[:])[:9]
 }

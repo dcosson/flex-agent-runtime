@@ -71,14 +71,18 @@ func convertMessages(messages []ai.Message, model ai.Model, system string) []cha
 		out = append(out, chatMessage{Role: systemRole(model), Content: system})
 	}
 
+	// Track tool call ID mappings for Mistral normalization so tool results
+	// reference the same normalized IDs as their corresponding tool calls.
+	toolIDMap := make(map[string]string)
+
 	for _, msg := range messages {
 		switch m := msg.(type) {
 		case *ai.UserMessage:
 			out = append(out, convertUserMessage(m))
 		case *ai.AssistantMessage:
-			out = append(out, convertAssistantMessage(m, model))
+			out = append(out, convertAssistantMessage(m, model, toolIDMap))
 		case *ai.ToolResultMessage:
-			out = append(out, convertToolResult(m, model)...)
+			out = append(out, convertToolResult(m, model, toolIDMap)...)
 		}
 	}
 	return out
@@ -105,7 +109,7 @@ func convertUserMessage(m *ai.UserMessage) chatMessage {
 	return chatMessage{Role: "user", Content: parts}
 }
 
-func convertAssistantMessage(m *ai.AssistantMessage, model ai.Model) chatMessage {
+func convertAssistantMessage(m *ai.AssistantMessage, model ai.Model, toolIDMap map[string]string) chatMessage {
 	var textContent string
 	var contentParts []contentPart
 	var toolCalls []toolCall
@@ -140,8 +144,12 @@ func convertAssistantMessage(m *ai.AssistantMessage, model ai.Model) chatMessage
 			// else: drop thinking blocks (default) or format per ThinkingFormat
 		case *ai.ToolCall:
 			argsJSON, _ := json.Marshal(c.Arguments)
+			tcID := normalizeToolCallID(c.ID, model)
+			if tcID != c.ID {
+				toolIDMap[c.ID] = tcID
+			}
 			toolCalls = append(toolCalls, toolCall{
-				ID:   c.ID,
+				ID:   tcID,
 				Type: "function",
 				Function: functionCall{
 					Name:      c.Name,
@@ -160,11 +168,15 @@ func convertAssistantMessage(m *ai.AssistantMessage, model ai.Model) chatMessage
 	return msg
 }
 
-func convertToolResult(m *ai.ToolResultMessage, model ai.Model) []chatMessage {
+func convertToolResult(m *ai.ToolResultMessage, model ai.Model, toolIDMap map[string]string) []chatMessage {
 	content := toolResultContent(m.Content)
+	tcID := m.ToolCallID
+	if mapped, ok := toolIDMap[tcID]; ok {
+		tcID = mapped
+	}
 	msg := chatMessage{
 		Role:       "tool",
-		ToolCallID: m.ToolCallID,
+		ToolCallID: tcID,
 		Content:    content,
 	}
 	if requiresToolResultName(model) {

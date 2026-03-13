@@ -1076,3 +1076,109 @@ func TestO3_CompatEndpointRequestFormat(t *testing.T) {
 		})
 	}
 }
+
+// O3b: Mistral Tool ID Normalization
+func TestO3b_MistralToolIDNormalization(t *testing.T) {
+	fixture := makeTextFixture("ok", "stop", 1, 1)
+
+	mistralModel := testModelWithCompat(&ai.ModelCompat{RequiresMistralToolIDs: boolPtr(true)})
+
+	t.Run("assistant_tool_calls_normalized", func(t *testing.T) {
+		srv := stubserver.New(stubserver.WithFixture(fixture))
+		defer srv.Close()
+
+		max := 100
+		p := New(Config{BaseURL: srv.URL, APIKey: "k"})
+		es := p.Stream(context.Background(), mistralModel, ai.Context{
+			Messages: []ai.Message{
+				&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}},
+				&ai.AssistantMessage{Content: []ai.ContentBlock{
+					&ai.ToolCall{ID: "call_abc123def456", Name: "read_file", Arguments: map[string]any{"path": "/tmp"}},
+				}},
+				&ai.ToolResultMessage{ToolCallID: "call_abc123def456", ToolName: "read_file", Content: []ai.ContentBlock{&ai.TextContent{Text: "ok"}}},
+				&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "thanks"}}},
+			},
+		}, ai.StreamOptions{MaxTokens: &max})
+		_, _ = es.Drain()
+
+		reqs := srv.Requests()
+		if len(reqs) != 1 {
+			t.Fatalf("expected 1 request, got %d", len(reqs))
+		}
+		var payload chatRequest
+		if err := json.Unmarshal(reqs[0].Body, &payload); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+
+		// Find the assistant message with tool calls
+		var assistantMsg *chatMessage
+		var toolMsg *chatMessage
+		for i := range payload.Messages {
+			if payload.Messages[i].Role == "assistant" && len(payload.Messages[i].ToolCalls) > 0 {
+				assistantMsg = &payload.Messages[i]
+			}
+			if payload.Messages[i].Role == "tool" {
+				toolMsg = &payload.Messages[i]
+			}
+		}
+		if assistantMsg == nil {
+			t.Fatal("no assistant message with tool calls found")
+		}
+		if toolMsg == nil {
+			t.Fatal("no tool message found")
+		}
+
+		// Verify tool call ID is exactly 9 characters
+		tcID := assistantMsg.ToolCalls[0].ID
+		if len(tcID) != 9 {
+			t.Fatalf("expected 9-char Mistral tool ID, got %d chars: %q", len(tcID), tcID)
+		}
+		// Verify all characters are hex (alphanumeric subset)
+		for _, c := range tcID {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				t.Fatalf("non-hex char in Mistral tool ID: %q", tcID)
+			}
+		}
+
+		// Verify tool result references the same normalized ID
+		if toolMsg.ToolCallID != tcID {
+			t.Fatalf("tool result ID %q doesn't match normalized tool call ID %q", toolMsg.ToolCallID, tcID)
+		}
+	})
+
+	t.Run("non_mistral_ids_unchanged", func(t *testing.T) {
+		srv := stubserver.New(stubserver.WithFixture(fixture))
+		defer srv.Close()
+
+		normalModel := testModel()
+		max := 100
+		p := New(Config{BaseURL: srv.URL, APIKey: "k"})
+		es := p.Stream(context.Background(), normalModel, ai.Context{
+			Messages: []ai.Message{
+				&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}},
+				&ai.AssistantMessage{Content: []ai.ContentBlock{
+					&ai.ToolCall{ID: "call_abc123def456", Name: "read_file", Arguments: map[string]any{"path": "/tmp"}},
+				}},
+				&ai.ToolResultMessage{ToolCallID: "call_abc123def456", ToolName: "read_file", Content: []ai.ContentBlock{&ai.TextContent{Text: "ok"}}},
+			},
+		}, ai.StreamOptions{MaxTokens: &max})
+		_, _ = es.Drain()
+
+		reqs := srv.Requests()
+		var payload chatRequest
+		if err := json.Unmarshal(reqs[0].Body, &payload); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+
+		// Find the assistant message — ID should be unchanged
+		for i := range payload.Messages {
+			if payload.Messages[i].Role == "assistant" && len(payload.Messages[i].ToolCalls) > 0 {
+				if payload.Messages[i].ToolCalls[0].ID != "call_abc123def456" {
+					t.Fatalf("non-Mistral model should keep original ID, got %q", payload.Messages[i].ToolCalls[0].ID)
+				}
+				return
+			}
+		}
+		t.Fatal("no assistant message found")
+	})
+}

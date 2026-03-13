@@ -22,7 +22,8 @@ func mapFinishReason(reason string) ai.StopReason {
 		return ai.StopReasonStop
 	case "MAX_TOKENS":
 		return ai.StopReasonLength
-	case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
+	case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII",
+		"IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION":
 		// Safety blocks are handled separately; map to error for the stop reason
 		return ai.StopReasonError
 	case "MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL":

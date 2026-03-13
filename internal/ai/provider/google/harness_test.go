@@ -235,6 +235,7 @@ func TestP3_FinishReasonMappingCompleteness(t *testing.T) {
 		"OTHER", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII",
 		"MALFORMED_FUNCTION_CALL", "UNEXPECTED_TOOL_CALL",
 		"FINISH_REASON_UNSPECIFIED",
+		"IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION",
 	}
 
 	for _, reason := range knownReasons {
@@ -672,7 +673,8 @@ func TestGS2_SafetyBlockDiscardsContent(t *testing.T) {
 
 // GS3: All Safety Block Finish Reasons
 func TestGS3_AllSafetyBlockReasons(t *testing.T) {
-	reasons := []string{"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"}
+	reasons := []string{"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII",
+		"IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION"}
 	for _, reason := range reasons {
 		t.Run(reason, func(t *testing.T) {
 			resp := generateContentResponse{

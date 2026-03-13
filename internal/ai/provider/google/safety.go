@@ -26,7 +26,8 @@ func defaultSafetySettings() []safetySetting {
 // isSafetyBlock returns true if the finish reason indicates a safety block.
 func isSafetyBlock(finishReason string) bool {
 	switch finishReason {
-	case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
+	case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII",
+		"IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION":
 		return true
 	default:
 		return false

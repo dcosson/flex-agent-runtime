@@ -52,17 +52,18 @@ func TestDefaultSafetySettings(t *testing.T) {
 }
 
 func TestIsSafetyBlock(t *testing.T) {
-	if !isSafetyBlock("SAFETY") {
-		t.Fatal("SAFETY should be blocked")
+	blocked := []string{"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII",
+		"IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION"}
+	for _, reason := range blocked {
+		if !isSafetyBlock(reason) {
+			t.Fatalf("%s should be blocked", reason)
+		}
 	}
-	if !isSafetyBlock("RECITATION") {
-		t.Fatal("RECITATION should be blocked")
-	}
-	if isSafetyBlock("STOP") {
-		t.Fatal("STOP should not be blocked")
-	}
-	if isSafetyBlock("MAX_TOKENS") {
-		t.Fatal("MAX_TOKENS should not be blocked")
+	notBlocked := []string{"STOP", "MAX_TOKENS", "MALFORMED_FUNCTION_CALL"}
+	for _, reason := range notBlocked {
+		if isSafetyBlock(reason) {
+			t.Fatalf("%s should not be blocked", reason)
+		}
 	}
 }
 
@@ -535,6 +536,52 @@ func TestStreamSimpleThinkingBudget(t *testing.T) {
 	}
 	if *payload.GenerationConfig.ThinkingConfig.ThinkingBudget != high {
 		t.Fatalf("thinking budget mismatch: %d", *payload.GenerationConfig.ThinkingConfig.ThinkingBudget)
+	}
+	if payload.GenerationConfig.ThinkingConfig.ThinkingLevel != "THINKING_LEVEL_HIGH" {
+		t.Fatalf("thinking level mismatch: %q", payload.GenerationConfig.ThinkingConfig.ThinkingLevel)
+	}
+}
+
+func TestStreamSimpleThinkingLevelMapping(t *testing.T) {
+	fixture := `data: {"candidates":[{"content":{"parts":[{"text":"ok"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2},"modelVersion":"gemini-2.5-flash"}` + "\n\n"
+
+	cases := []struct {
+		level    ai.ThinkingLevel
+		expected string
+	}{
+		{ai.ThinkingMinimal, "THINKING_LEVEL_LOW"},
+		{ai.ThinkingLow, "THINKING_LEVEL_LOW"},
+		{ai.ThinkingMedium, "THINKING_LEVEL_MEDIUM"},
+		{ai.ThinkingHigh, "THINKING_LEVEL_HIGH"},
+		{ai.ThinkingXHigh, "THINKING_LEVEL_HIGH"}, // xhigh clamped to high
+	}
+
+	for _, tc := range cases {
+		t.Run(string(tc.level), func(t *testing.T) {
+			srv := stubserver.New(stubserver.WithFixture(fixture))
+			defer srv.Close()
+
+			p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
+			es := p.StreamSimple(context.Background(), testModel(), ai.Context{
+				Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
+			}, ai.SimpleStreamOptions{Reasoning: tc.level})
+			_, _ = es.Drain()
+
+			reqs := srv.Requests()
+			if len(reqs) != 1 {
+				t.Fatalf("expected 1 request, got %d", len(reqs))
+			}
+			var payload generateContentRequest
+			if err := json.Unmarshal(reqs[0].Body, &payload); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if payload.GenerationConfig == nil || payload.GenerationConfig.ThinkingConfig == nil {
+				t.Fatal("thinking config not set")
+			}
+			if payload.GenerationConfig.ThinkingConfig.ThinkingLevel != tc.expected {
+				t.Fatalf("expected %q, got %q", tc.expected, payload.GenerationConfig.ThinkingConfig.ThinkingLevel)
+			}
+		})
 	}
 }
 

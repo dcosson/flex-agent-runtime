@@ -32,9 +32,28 @@ func (p *Provider) StreamSimple(ctx context.Context, model ai.Model, llmCtx ai.C
 			*base.MaxTokens, model.MaxTokens, opts.Reasoning, opts.ThinkingBudgets)
 		base.MaxTokens = &maxTokens
 		params.thinkingBudget = &thinkBudget
+		params.thinkingLevel = mapThinkingLevel(opts.Reasoning)
 	}
 
 	return p.streamInternal(ctx, model, llmCtx, base, params)
+}
+
+// mapThinkingLevel converts an ai.ThinkingLevel to a Gemini thinkingLevel string.
+// Gemini uses uppercase values: THINKING_LEVEL_NONE, THINKING_LEVEL_LOW, etc.
+// xhigh is clamped to high since Gemini doesn't support xhigh.
+func mapThinkingLevel(level ai.ThinkingLevel) string {
+	switch ai.ClampReasoning(level) {
+	case ai.ThinkingMinimal:
+		return "THINKING_LEVEL_LOW" // Gemini has no "minimal"; map to low
+	case ai.ThinkingLow:
+		return "THINKING_LEVEL_LOW"
+	case ai.ThinkingMedium:
+		return "THINKING_LEVEL_MEDIUM"
+	case ai.ThinkingHigh:
+		return "THINKING_LEVEL_HIGH"
+	default:
+		return ""
+	}
 }
 
 func (p *Provider) streamInternal(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, params requestParams) *ai.EventStream {

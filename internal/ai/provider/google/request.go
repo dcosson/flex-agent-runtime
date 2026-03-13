@@ -10,6 +10,7 @@ import (
 // fit naturally into StreamOptions.
 type requestParams struct {
 	thinkingBudget *int
+	thinkingLevel  string
 }
 
 func buildRequest(model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, params requestParams) *generateContentRequest {
@@ -53,6 +54,7 @@ func buildGenerationConfig(opts ai.StreamOptions, params requestParams) *generat
 		cfg.ThinkingConfig = &thinkingConfig{
 			IncludeThoughts: &include,
 			ThinkingBudget:  params.thinkingBudget,
+			ThinkingLevel:   params.thinkingLevel,
 		}
 	}
 
