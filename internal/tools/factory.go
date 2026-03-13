@@ -6,6 +6,7 @@ import (
 
 	"h2-agent-runtime/internal/agent"
 	"h2-agent-runtime/internal/ai"
+	"h2-agent-runtime/internal/tools/codeinterp"
 )
 
 // toolImpl is the internal tool implementation used by backends.
@@ -26,7 +27,9 @@ type LocalToolsOptions struct {
 // filesystem execution. All Tier 1 tools run in-process.
 func NewLocalTools(rootDir string, _ LocalToolsOptions) []agent.AgentTool {
 	backend := NewLocalBackend(rootDir)
-	return buildAgentTools(backend)
+	tools := buildAgentTools(backend)
+	tools = append(tools, codeinterp.NewTool(ai.Model{}, tools))
+	return tools
 }
 
 // buildAgentTools wraps each tool implementation as an agent.AgentTool.
