@@ -47,8 +47,8 @@ func (s *EventStream) Send(event AssistantMessageEvent) {
 		}
 	case EventError:
 		if event.Error != nil && s.terminated.CompareAndSwap(false, true) {
-			err := errors.New(event.Error.ErrorMessage)
-			if event.Error.ErrorMessage == "" {
+			err := providerErrorFromMessage(event.Error)
+			if err == nil {
 				err = errors.New("provider error")
 			}
 			s.result <- resultOrError{Message: *event.Error, Err: err}
