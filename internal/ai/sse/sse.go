@@ -71,6 +71,9 @@ func (s *Scanner) SetLimits(maxLineBytes, maxEventBytes int) {
 
 // readLine reads a single line using ReadSlice for zero-alloc reads.
 // Falls back to accumulating in lineBuf when lines span the bufio buffer.
+// Note: the full line is accumulated in memory before the maxLineBytes check
+// in Next(). The limit prevents processing, not allocation — pathologically
+// long lines will briefly consume memory before being rejected.
 func (s *Scanner) readLine() ([]byte, error) {
 	line, err := s.r.ReadSlice('\n')
 	if err != bufio.ErrBufferFull {

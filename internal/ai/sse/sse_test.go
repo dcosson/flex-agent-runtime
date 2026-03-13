@@ -178,11 +178,7 @@ func BenchmarkScanner100EventsUnsafe(b *testing.B) {
 
 // B2-realistic: SSE parsing with Anthropic-style content_block_delta JSON.
 func BenchmarkScanner100EventsRealistic(b *testing.B) {
-	var buf bytes.Buffer
-	for i := 0; i < 100; i++ {
-		fmt.Fprintf(&buf, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"word%d \"}}\n\n", i)
-	}
-	input := buf.Bytes()
+	input := buildRealisticSSEInput()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -194,4 +190,28 @@ func BenchmarkScanner100EventsRealistic(b *testing.B) {
 			b.Fatalf("scanner err: %v", err)
 		}
 	}
+}
+
+// B2-realistic-unsafe: Realistic SSE parsing with UnsafeEvent zero-copy path.
+func BenchmarkScanner100EventsRealisticUnsafe(b *testing.B) {
+	input := buildRealisticSSEInput()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s := NewScanner(bytes.NewReader(input))
+		for s.Next() {
+			_ = s.UnsafeEvent()
+		}
+		if err := s.Err(); err != nil {
+			b.Fatalf("scanner err: %v", err)
+		}
+	}
+}
+
+func buildRealisticSSEInput() []byte {
+	var buf bytes.Buffer
+	for i := 0; i < 100; i++ {
+		fmt.Fprintf(&buf, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"word%d \"}}\n\n", i)
+	}
+	return buf.Bytes()
 }
