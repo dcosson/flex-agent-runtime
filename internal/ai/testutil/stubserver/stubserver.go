@@ -30,8 +30,10 @@ type Fault struct {
 	// Mode selects the fault type.
 	Mode FaultMode
 
-	// AfterEvents specifies how many SSE events to send before injecting
-	// the fault (for mid-stream faults like TCPReset, Malformed).
+	// AfterEvents specifies the fault injection point in the event stream.
+	// For TCPReset: disconnects after this many events have been sent.
+	// For Malformed: replaces the event at this index with corrupt data.
+	// For Backpressure: not used (delay applies to all events).
 	AfterEvents int
 
 	// StatusCode for non-2xx faults (Throttle, EmptyBody).

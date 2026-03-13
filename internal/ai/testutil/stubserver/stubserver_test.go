@@ -162,7 +162,7 @@ func TestFixtureFunc(t *testing.T) {
 
 // F1: TCP reset mid-stream.
 func TestTCPReset(t *testing.T) {
-	for _, cutAfter := range []int{0, 1, 3, 5} {
+	for _, cutAfter := range []int{0, 1, 3, 5, 10} {
 		t.Run(fmt.Sprintf("cutAfter=%d", cutAfter), func(t *testing.T) {
 			s := NewTCPResetServer(anthropicFixture, cutAfter)
 			defer s.Close()
@@ -178,12 +178,15 @@ func TestTCPReset(t *testing.T) {
 			defer resp.Body.Close()
 
 			body, err := io.ReadAll(resp.Body)
-			// For mid-stream cuts, we expect either an error or partial data.
-			if cutAfter > 0 {
-				events := splitSSEEvents(string(body))
+			events := splitSSEEvents(string(body))
+			if cutAfter >= 7 {
+				// Threshold exceeds event count — all events delivered normally.
+				if len(events) != 7 {
+					t.Fatalf("cutAfter=%d (beyond events): expected 7 events, got %d", cutAfter, len(events))
+				}
+			} else if cutAfter > 0 {
+				// Mid-stream cut — expect partial data or read error.
 				if len(events) > cutAfter {
-					// May get exactly cutAfter due to buffering, or fewer
-					// if the connection was killed before flush.
 					t.Logf("cutAfter=%d, got %d events (err=%v)", cutAfter, len(events), err)
 				}
 			}
