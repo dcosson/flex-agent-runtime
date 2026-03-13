@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"maps"
 	"time"
 
@@ -131,6 +130,7 @@ type AgentEvent struct {
 	ToolName        string
 	ToolCallID      string
 	ToolResult      *AgentToolResult
+	ControlMessage  string
 	Error           error
 	ErrorMessage    string
 	At              time.Time
@@ -151,14 +151,4 @@ func (e AgentEvent) clone() AgentEvent {
 		cp.Metadata = maps.Clone(e.Metadata)
 	}
 	return cp
-}
-
-func (e AgentEvent) validate() error {
-	if e.Type == "" {
-		return fmt.Errorf("event type is required")
-	}
-	if e.SessionID == "" {
-		return fmt.Errorf("session id is required")
-	}
-	return nil
 }

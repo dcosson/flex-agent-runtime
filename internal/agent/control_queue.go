@@ -74,8 +74,12 @@ func (q *ControlQueue) Enqueue(cmd ControlCommand) error {
 	ch := q.ch
 	q.mu.RUnlock()
 
-	ch <- cmd
-	return nil
+	select {
+	case ch <- cmd:
+		return nil
+	default:
+		return ErrQueueFull
+	}
 }
 
 func (q *ControlQueue) Drain() []ControlCommand {

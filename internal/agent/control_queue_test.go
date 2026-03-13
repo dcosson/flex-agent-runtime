@@ -43,3 +43,14 @@ func TestControlQueueRejectsUnknownCommandType(t *testing.T) {
 		t.Fatalf("expected validation error")
 	}
 }
+
+func TestControlQueueReturnsErrQueueFullWithoutBlocking(t *testing.T) {
+	q := NewControlQueue(1)
+	if err := q.EnqueueSteer("first"); err != nil {
+		t.Fatalf("enqueue steer: %v", err)
+	}
+
+	if err := q.EnqueueFollowUp("second"); !errors.Is(err, ErrQueueFull) {
+		t.Fatalf("expected ErrQueueFull, got %v", err)
+	}
+}

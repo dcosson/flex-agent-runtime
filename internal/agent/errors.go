@@ -9,6 +9,7 @@ var (
 	ErrBusy         = errors.New("agent is busy")
 	ErrStopped      = errors.New("agent is stopped")
 	ErrInvalidState = errors.New("invalid agent state transition")
+	ErrQueueFull    = errors.New("agent control queue is full")
 )
 
 // BusyError is returned when a state-changing operation is requested while active work is in flight.

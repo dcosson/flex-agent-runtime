@@ -32,12 +32,10 @@ var validTransitions = map[AgentState]map[AgentState]struct{}{
 
 // Agent is the thread-safe state owner and event hub for one runtime session.
 type Agent struct {
-	mu          sync.Mutex
-	session     *Session
-	driver      AgentDriver
-	subscribers map[int]func(AgentEvent)
-	nextSubID   int
-	running     bool
+	mu      sync.Mutex
+	session *Session
+	driver  AgentDriver
+	running bool
 
 	state   AgentState
 	bus     *eventBus
@@ -46,11 +44,10 @@ type Agent struct {
 
 func New(driver AgentDriver) *Agent {
 	a := &Agent{
-		driver:      driver,
-		state:       StateIdle,
-		bus:         newEventBus(),
-		control:     NewControlQueue(64),
-		subscribers: make(map[int]func(AgentEvent)),
+		driver:  driver,
+		state:   StateIdle,
+		bus:     newEventBus(),
+		control: NewControlQueue(64),
 	}
 
 	if driver != nil {
@@ -95,20 +92,8 @@ func (a *Agent) Subscribe(fn func(AgentEvent)) (unsubscribe func()) {
 	if fn == nil {
 		return func() {}
 	}
-
-	a.mu.Lock()
-	id := a.nextSubID
-	a.nextSubID++
-	a.subscribers[id] = fn
-	a.mu.Unlock()
-
 	_, unsubBus := a.bus.subscribe(fn)
-	return func() {
-		a.mu.Lock()
-		delete(a.subscribers, id)
-		a.mu.Unlock()
-		unsubBus()
-	}
+	return unsubBus
 }
 
 // Transition applies an FSM transition and emits state_change on success.
@@ -208,7 +193,7 @@ func (a *Agent) Steer(message string) error {
 	if err := a.control.EnqueueSteer(message); err != nil {
 		return err
 	}
-	a.emit(AgentEvent{Type: EventFollowUpEnqueued, ErrorMessage: message, At: time.Now()})
+	a.emit(AgentEvent{Type: EventSteeringApplied, ControlMessage: message, At: time.Now()})
 	return nil
 }
 
@@ -216,7 +201,7 @@ func (a *Agent) FollowUp(message string) error {
 	if err := a.control.EnqueueFollowUp(message); err != nil {
 		return err
 	}
-	a.emit(AgentEvent{Type: EventFollowUpEnqueued, ErrorMessage: message, At: time.Now()})
+	a.emit(AgentEvent{Type: EventFollowUpEnqueued, ControlMessage: message, At: time.Now()})
 	return nil
 }
 
@@ -224,7 +209,7 @@ func (a *Agent) Abort(reason string) error {
 	if err := a.control.EnqueueAbort(reason); err != nil {
 		return err
 	}
-	a.emit(AgentEvent{Type: EventAborted, ErrorMessage: reason, At: time.Now()})
+	a.emit(AgentEvent{Type: EventAborted, ControlMessage: reason, At: time.Now()})
 	return nil
 }
 

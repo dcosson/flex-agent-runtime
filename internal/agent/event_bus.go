@@ -61,12 +61,6 @@ func (b *eventBus) close() {
 	b.subs = nil
 }
 
-func (b *eventBus) count() int {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return len(b.subs)
-}
-
 func safeCallSubscriber(fn func(AgentEvent), evt AgentEvent) {
 	defer func() {
 		if recover() != nil {

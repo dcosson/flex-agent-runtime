@@ -136,3 +136,33 @@ func TestAbortIdempotentQueueing(t *testing.T) {
 		t.Fatalf("unexpected command sequence: %+v", cmds)
 	}
 }
+
+func TestSteerAndFollowUpEmitCorrectEvents(t *testing.T) {
+	a := New(nil)
+	a.SetSession(&Session{ID: "s1"})
+	events := make(chan AgentEvent, 2)
+	a.Subscribe(func(evt AgentEvent) {
+		if evt.Type == EventSteeringApplied || evt.Type == EventFollowUpEnqueued {
+			events <- evt
+		}
+	})
+
+	if err := a.Steer("change course"); err != nil {
+		t.Fatalf("steer: %v", err)
+	}
+	if err := a.FollowUp("next step"); err != nil {
+		t.Fatalf("followup: %v", err)
+	}
+
+	e1 := <-events
+	e2 := <-events
+	if e1.Type != EventSteeringApplied || e1.ControlMessage != "change course" {
+		t.Fatalf("unexpected steer event: %+v", e1)
+	}
+	if e2.Type != EventFollowUpEnqueued || e2.ControlMessage != "next step" {
+		t.Fatalf("unexpected follow-up event: %+v", e2)
+	}
+	if e1.ErrorMessage != "" || e2.ErrorMessage != "" {
+		t.Fatalf("control events should not write ErrorMessage")
+	}
+}
