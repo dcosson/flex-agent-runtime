@@ -2,7 +2,6 @@ package anthropic
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -12,9 +11,8 @@ import (
 )
 
 type toolJSONParser struct {
-	lexer     *streamingjson.Lexer
-	raw       strings.Builder
-	lastValid map[string]any
+	lexer *streamingjson.Lexer
+	raw   strings.Builder
 }
 
 func newToolJSONParser() *toolJSONParser {
@@ -34,7 +32,6 @@ func (p *toolJSONParser) AppendDelta(chunk string) (map[string]any, bool, error)
 	if err != nil {
 		return nil, false, nil
 	}
-	p.lastValid = cloneMap(args)
 	return cloneMap(args), true, nil
 }
 
@@ -76,6 +73,8 @@ func cloneMap(m map[string]any) map[string]any {
 
 func cloneValue(v any) any {
 	switch x := v.(type) {
+	case nil, bool, string, float64, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return x
 	case map[string]any:
 		return cloneMap(x)
 	case []any:
@@ -85,14 +84,6 @@ func cloneValue(v any) any {
 		}
 		return out
 	default:
-		b, err := json.Marshal(x)
-		if err != nil {
-			return x
-		}
-		var y any
-		if err := json.Unmarshal(b, &y); err != nil {
-			return x
-		}
-		return y
+		return x
 	}
 }

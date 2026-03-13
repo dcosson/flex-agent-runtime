@@ -26,12 +26,6 @@ func classifyHTTPError(status int, msg string) ai.ProviderErrorCode {
 
 func providerError(status int, msg string) *ai.ProviderError {
 	code := classifyHTTPError(status, msg)
-	if status == 0 && code == ai.ErrUnknown {
-		probe := &ai.AssistantMessage{StopReason: ai.StopReasonError, ErrorMessage: msg}
-		if ai.IsContextOverflow(probe, 0) {
-			code = ai.ErrContextOverflow
-		}
-	}
 	return &ai.ProviderError{
 		Code:       code,
 		Message:    msg,
