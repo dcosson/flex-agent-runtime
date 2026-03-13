@@ -68,9 +68,6 @@ func transformAssistantMessage(msg *AssistantMessage, targetModel Model, normali
 			newContent = append(newContent, tc)
 		}
 	}
-	if len(newContent) == 0 {
-		return nil
-	}
 	return &AssistantMessage{
 		Content:    newContent,
 		API:        msg.API,
