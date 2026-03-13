@@ -11,12 +11,21 @@ type LocalBackend struct {
 	tools   map[string]toolImpl
 }
 
-// NewLocalBackend creates a backend that runs Tier 1 tools in-process.
+// NewLocalBackend creates a backend that runs all built-in tools in-process.
 func NewLocalBackend(rootDir string) *LocalBackend {
 	impls := []toolImpl{
 		readFileTool(rootDir),
 		writeFileTool(rootDir),
 		editFileTool(rootDir),
+		grepTool(rootDir),
+		globTool(rootDir),
+		bashTool(rootDir),
+		gitStatusTool(rootDir),
+		gitDiffTool(rootDir),
+		gitLogTool(rootDir),
+		gitShowTool(rootDir),
+		gitAddTool(rootDir),
+		gitCommitTool(rootDir),
 	}
 	toolMap := make(map[string]toolImpl, len(impls))
 	for _, t := range impls {
