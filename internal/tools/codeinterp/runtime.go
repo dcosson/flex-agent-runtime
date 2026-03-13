@@ -2,7 +2,9 @@ package codeinterp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +65,36 @@ func (s *executionState) step(n int) error {
 
 func (s *executionState) addTrace(step TraceStep) {
 	s.trace.add(step)
+}
+
+func (s *executionState) incDiscoverCalls() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stats.DiscoverCalls++
+}
+
+func (s *executionState) incDescribeCalls() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stats.DescribeCalls++
+}
+
+func (s *executionState) nextToolCallID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fmt.Sprintf("ci-%d", s.stats.ToolCalls+1)
+}
+
+func (s *executionState) incToolCalls() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stats.ToolCalls++
+}
+
+func (s *executionState) incStoreOps() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stats.StoreOps++
 }
 
 func (r *Runtime) Execute(ctx context.Context, req ExecuteRequest) (ExecuteResult, error) {
@@ -140,14 +172,18 @@ func (r *Runtime) Execute(ctx context.Context, req ExecuteRequest) (ExecuteResul
 }
 
 func (s *executionState) finish(result any, execErr error, tier Tier) ExecuteResult {
-	s.stats.DurationMs = time.Since(s.started).Milliseconds()
-	s.stats.LLMTokensUsed = s.llmTokensUsed
-	s.stats.LLMCostUSD = s.llmCost
+	stats := s.snapshotStats()
+	stats.DurationMs = time.Since(s.started).Milliseconds()
+	if execErr == nil {
+		if err := s.validateResultSize(result); err != nil {
+			execErr = err
+		}
+	}
 	res := ExecuteResult{
 		Result:    result,
-		Trace:     s.trace.steps,
-		Stats:     s.stats,
-		Truncated: s.trace.truncated,
+		Trace:     s.trace.snapshot(),
+		Stats:     stats,
+		Truncated: s.trace.isTruncated(),
 		Tier:      map[Tier]string{TierLightweight: "lightweight", TierFull: "full"}[tier],
 	}
 	if execErr != nil {
@@ -162,7 +198,11 @@ func (r *Runtime) newDataStore(req ExecuteRequest, cfg Config) (datastore.DataSt
 	case "", "memory":
 		return datastore.NewMemoryDataStore(cfg.MaxStoreBytes, cfg.MaxStoreKeySize, cfg.MaxStoreValueSize), nil
 	case "fs":
-		return datastore.NewFSDataStore(".", cfg.MaxStoreBytes, cfg.MaxStoreKeySize, cfg.MaxStoreValueSize)
+		root, err := os.MkdirTemp("", "codeinterp-store-*")
+		if err != nil {
+			return nil, err
+		}
+		return datastore.NewFSDataStore(root, cfg.MaxStoreBytes, cfg.MaxStoreKeySize, cfg.MaxStoreValueSize)
 	case "blob":
 		return datastore.NewBlobDataStore(), nil
 	case "sql":
@@ -190,6 +230,9 @@ func (s *executionState) builtins() starlark.StringDict {
 }
 
 func (s *executionState) resolveModel(modelOverride string) (ai.Model, error) {
+	if modelOverride == "" && s.cfg.DefaultLLMModel != "" {
+		modelOverride = s.cfg.DefaultLLMModel
+	}
 	if modelOverride == "" {
 		if s.runtime.defaultModel.API == "" {
 			return ai.Model{}, fmt.Errorf("no default model configured")
@@ -207,6 +250,8 @@ func (s *executionState) resolveModel(modelOverride string) (ai.Model, error) {
 }
 
 func (s *executionState) checkLLMBudget(incrCalls int, estTokens int, estCost float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.cfg.MaxLLMCalls > 0 && s.stats.LLMCalls+incrCalls > s.cfg.MaxLLMCalls {
 		return TokenBudgetExceededError{Msg: "llm call limit exceeded"}
 	}
@@ -219,12 +264,43 @@ func (s *executionState) checkLLMBudget(incrCalls int, estTokens int, estCost fl
 	return nil
 }
 
+func (s *executionState) recordLLMUsage(msg ai.AssistantMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stats.LLMCalls++
+	s.llmTokensUsed += msg.Usage.Input + msg.Usage.Output
+	s.llmCost += msg.Usage.Cost.Total
+}
+
+func (s *executionState) snapshotStats() Stats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stats := s.stats
+	stats.LLMTokensUsed = s.llmTokensUsed
+	stats.LLMCostUSD = s.llmCost
+	return stats
+}
+
 func usageMap(msg ai.AssistantMessage) map[string]any {
 	return map[string]any{
 		"input_tokens":  msg.Usage.Input,
 		"output_tokens": msg.Usage.Output,
 		"cost_usd":      msg.Usage.Cost.Total,
 	}
+}
+
+func (s *executionState) validateResultSize(result any) error {
+	if s.cfg.MaxResultBytes <= 0 {
+		return nil
+	}
+	b, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	if len(b) > s.cfg.MaxResultBytes {
+		return fmt.Errorf("result exceeds max_result_bytes (%d > %d)", len(b), s.cfg.MaxResultBytes)
+	}
+	return nil
 }
 
 func normalizeToolResult(res agent.AgentToolResult) map[string]any {

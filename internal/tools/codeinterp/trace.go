@@ -2,6 +2,7 @@ package codeinterp
 
 import (
 	"encoding/json"
+	"sync"
 )
 
 type traceCollector struct {
@@ -9,6 +10,7 @@ type traceCollector struct {
 	maxBytes  int
 	currBytes int
 	truncated bool
+	mu        sync.Mutex
 }
 
 func newTraceCollector(max int) *traceCollector {
@@ -16,6 +18,8 @@ func newTraceCollector(max int) *traceCollector {
 }
 
 func (t *traceCollector) add(step TraceStep) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if t.truncated {
 		return
 	}
@@ -26,4 +30,18 @@ func (t *traceCollector) add(step TraceStep) {
 		return
 	}
 	t.steps = append(t.steps, step)
+}
+
+func (t *traceCollector) snapshot() []TraceStep {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	cp := make([]TraceStep, len(t.steps))
+	copy(cp, t.steps)
+	return cp
+}
+
+func (t *traceCollector) isTruncated() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.truncated
 }

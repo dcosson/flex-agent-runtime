@@ -146,6 +146,19 @@ def main(args):
 	if got, ok := m["n"].(int64); !ok || got != 2 {
 		t.Fatalf("llm_batch count mismatch: %+v", m)
 	}
+	if res.Stats.Steps != 2 {
+		t.Fatalf("expected 2 steps (llm_call + llm_batch), got %d", res.Stats.Steps)
+	}
+}
+
+func TestRuntimeMaxResultBytesEnforced(t *testing.T) {
+	st := &executionState{
+		cfg:   Config{MaxResultBytes: 8},
+		trace: newTraceCollector(1024),
+	}
+	if err := st.validateResultSize(map[string]any{"payload": "this-is-too-big"}); err == nil {
+		t.Fatalf("expected max_result_bytes validation error")
+	}
 }
 
 func TestExecuteScriptToolFactory(t *testing.T) {

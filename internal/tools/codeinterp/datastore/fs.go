@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 type FSDataStore struct {
@@ -16,6 +17,8 @@ type FSDataStore struct {
 	maxBytes int64
 	maxKey   int
 	maxValue int64
+	used     int64
+	mu       sync.Mutex
 }
 
 func NewFSDataStore(root string, maxBytes int64, maxKey int, maxValue int64) (*FSDataStore, error) {
@@ -25,7 +28,11 @@ func NewFSDataStore(root string, maxBytes int64, maxKey int, maxValue int64) (*F
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
 	}
-	return &FSDataStore{root: root, maxBytes: maxBytes, maxKey: maxKey, maxValue: maxValue}, nil
+	used, err := dirSize(root)
+	if err != nil {
+		return nil, err
+	}
+	return &FSDataStore{root: root, maxBytes: maxBytes, maxKey: maxKey, maxValue: maxValue, used: used}, nil
 }
 
 func (f *FSDataStore) pathForKey(key string) (string, error) {
@@ -47,10 +54,26 @@ func (f *FSDataStore) Write(key string, data []byte) error {
 	if err != nil {
 		return err
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var prev int64
+	if st, err := os.Stat(p); err == nil {
+		prev = st.Size()
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	nextUsed := f.used - prev + int64(len(data))
+	if f.maxBytes > 0 && nextUsed > f.maxBytes {
+		return fmt.Errorf("fs datastore capacity exceeded")
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(p, data, 0o644)
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		return err
+	}
+	f.used = nextUsed
+	return nil
 }
 
 func (f *FSDataStore) Read(key string) ([]byte, error) {
@@ -116,8 +139,20 @@ func (f *FSDataStore) Delete(key string) error {
 	if err != nil {
 		return err
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var sz int64
+	if st, err := os.Stat(p); err == nil {
+		sz = st.Size()
+	}
 	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 		return err
+	}
+	if sz > 0 {
+		f.used -= sz
+		if f.used < 0 {
+			f.used = 0
+		}
 	}
 	return nil
 }
@@ -148,4 +183,22 @@ func (f *FSDataStore) Search(keyPrefix string, pattern string) ([]Match, error) 
 	return out, nil
 }
 
-func (f *FSDataStore) Close() error { return nil }
+func (f *FSDataStore) Close() error {
+	return os.RemoveAll(f.root)
+}
+
+func dirSize(root string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		st, err := d.Info()
+		if err != nil {
+			return err
+		}
+		total += st.Size()
+		return nil
+	})
+	return total, err
+}
