@@ -1,10 +1,17 @@
 GO ?= go
 PKGS := $(shell $(GO) list ./...)
+RACE ?= 0
 
-.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-harness-openai test-harness-google test-bench test-bench-ai-core test-bench-openai test-bench-google test-stress-openai test-stress-google test-fuzz test-fuzz-t2 test-anthropic-harness-fast test-anthropic-harness-race test-anthropic-harness-bench test-e2e clean
+GO_TEST_RACE :=
+ifeq ($(RACE),1)
+GO_TEST_RACE := -race
+endif
+
+.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 make-harness-core make-harness-openai make-harness-google make-harness-anthropic make-harness-all test-bench test-bench-ai-core test-bench-openai test-bench-google test-stress-openai test-stress-google test-fuzz test-fuzz-t2 test-anthropic-harness-bench test-e2e clean
 
 help: ## Show available make targets
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_.-]+:.*##/ {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@printf "\nArgs:\n  RACE=1  Enable go test -race for harness targets.\n\n"
 
 build: ## Build all project packages
 	$(GO) build ./...
@@ -31,17 +38,24 @@ test: ## Run quick test suite (unit + small integration per package)
 test-race: ## Run full test suite with race detector
 	$(GO) test -race ./...
 
-test-harness: ## Run harness-focused tests (P*/D*/S* patterns currently implemented)
+make-harness-core: ## Run AI-core harness-focused tests (P*/D*/S* patterns)
 	$(GO) test ./... -run 'Test(EventStreamOrdering|EventStreamAlwaysTerminates|EventStreamSlowConsumer|EventStreamCancelMidStream|EventStreamHighThroughput|TransformIdempotency|TransformMessageCountBound|TransformDeterministic|CostConsistencyRapid|RegistryConcurrentAccess|RegistryStressContention)'
 
 test-harness-t2: ## Run T2 thorough property test tier (10K rapid checks)
 	$(GO) test ./internal/ai -rapid.checks=10000 -run 'Test(EventStreamOrdering|TransformIdempotency|CostConsistencyRapid|P4_CoerceTypesPreservesValidTypes|EventStreamAlwaysTerminates|TransformMessageCountBound|ModelRegistryMutationIsolation|TransformDeterministic|RegistryConcurrentAccess)'
 
-test-harness-openai: ## Run OpenAI provider harness tests (P*/F*/S*/SEC*/O* patterns)
-	$(GO) test -race ./internal/ai/provider/openai/ -run 'Test(P[1-6]_|F[1-6]_|S[2-4]_|SEC[1-3]_|O3_)'
+make-harness-openai: ## Run OpenAI provider harness tests (supports RACE=1)
+	$(GO) test $(GO_TEST_RACE) ./internal/ai/provider/openai/ -run 'Test(P[1-6]_|F[1-6]_|S[2-4]_|SEC[1-3]_|O3_)'
 
-test-harness-google: ## Run Google provider harness tests (P*/F*/S*/GS*/SEC*/EC* patterns)
-	$(GO) test -race ./internal/ai/provider/google/ -run 'Test(P[1-6]_|F[1-5]_|S[1-2]_|GS[1-5]_|SEC[1-3]_|EC1_)'
+make-harness-google: ## Run Google provider harness tests (supports RACE=1)
+	$(GO) test $(GO_TEST_RACE) ./internal/ai/provider/google/ -run 'Test(P[1-6]_|F[1-5]_|S[1-2]_|GS[1-5]_|SEC[1-3]_|EC1_)'
+
+make-harness-anthropic: ## Run Anthropic provider harness tests (supports RACE=1)
+	$(GO) test $(GO_TEST_RACE) ./internal/ai/provider/anthropic -run 'Test(P|S|F|D|SEC|O|ManualQA|HarnessCoverage)' -skip 'TestST1_LongSoak|TestST3_BurstToolStress'
+
+make-harness-all: make-harness-core make-harness-openai make-harness-google make-harness-anthropic ## Run all harness suites
+
+test-harness: make-harness-all ## Alias: run all harness suites
 
 test-bench: ## Run benchmark suite (B* targets)
 	$(GO) test ./... -bench . -benchmem
@@ -75,12 +89,6 @@ test-fuzz-t2: ## Run T2 thorough fuzz tier (30s per target)
 	$(GO) test ./internal/ai -run '^$$' -fuzz FuzzValidateToolArguments -fuzztime=30s
 	$(GO) test ./internal/ai -run '^$$' -fuzz FuzzCoerceTypes -fuzztime=30s
 	$(GO) test ./internal/ai -run '^$$' -fuzz FuzzIsContextOverflow -fuzztime=30s
-
-test-anthropic-harness-fast: ## Anthropic provider harness: property + stub/fault + deterministic/security lanes
-	$(GO) test ./internal/ai/provider/anthropic -run 'Test(P|S|F|D|SEC|O|ManualQA|HarnessCoverage)' -count=1
-
-test-anthropic-harness-race: ## Anthropic provider harness with race detector
-	$(GO) test -race ./internal/ai/provider/anthropic -run 'Test(P|S|F|D|SEC)' -skip 'TestST1_LongSoak|TestST3_BurstToolStress' -count=1
 
 test-anthropic-harness-bench: ## Anthropic provider harness benchmark lanes B1-B4
 	$(GO) test ./internal/ai/provider/anthropic -run '^$$' -bench 'BenchmarkB[1-4]_' -benchmem
