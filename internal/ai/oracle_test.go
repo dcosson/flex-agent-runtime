@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 )
 
@@ -99,7 +98,6 @@ func goMsgToWire(msg Message) wireMessage {
 			Timestamp: m.Timestamp,
 		}
 	case *AssistantMessage:
-		isErr := false
 		wm := wireMessage{
 			Role:       "assistant",
 			Content:    goContentBlocksToWire(m.Content),
@@ -126,7 +124,6 @@ func goMsgToWire(msg Message) wireMessage {
 		if m.ErrorMessage != "" {
 			wm.ErrorMessage = m.ErrorMessage
 		}
-		_ = isErr
 		return wm
 	case *ToolResultMessage:
 		isErr := m.IsError
@@ -1231,20 +1228,29 @@ func writeCorpusFile(t *testing.T) string {
 }
 
 // loadTestCorpus loads the transform corpus from testdata/transform_corpus.json.
+// Regenerates the corpus if the file is missing or stale (older than this source file).
 func loadTestCorpus(t *testing.T) []transformTestCase {
 	t.Helper()
 
 	_, thisFile, _, _ := runtime.Caller(0)
 	corpusPath := filepath.Join(filepath.Dir(thisFile), "..", "..", "testdata", "transform_corpus.json")
 
+	needsRegen := false
+	corpusStat, err := os.Stat(corpusPath)
+	if err != nil {
+		needsRegen = true
+	} else if srcStat, err := os.Stat(thisFile); err == nil && srcStat.ModTime().After(corpusStat.ModTime()) {
+		t.Log("corpus file is stale (older than oracle_test.go), regenerating")
+		needsRegen = true
+	}
+
+	if needsRegen {
+		writeCorpusFile(t)
+	}
+
 	data, err := os.ReadFile(corpusPath)
 	if err != nil {
-		// Generate it if it doesn't exist.
-		writeCorpusFile(t)
-		data, err = os.ReadFile(corpusPath)
-		if err != nil {
-			t.Fatalf("read corpus: %v", err)
-		}
+		t.Fatalf("read corpus: %v", err)
 	}
 
 	var corpus []transformTestCase
@@ -1294,8 +1300,3 @@ func nodeAvailable() bool {
 	return err == nil
 }
 
-func init() {
-	// Suppress slog debug output during tests.
-	_ = strings.Contains
-	_ = os.Stderr
-}
