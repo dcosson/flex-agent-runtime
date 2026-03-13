@@ -104,17 +104,14 @@ func (s *Scanner) Next() bool {
 				return true
 			}
 			if errors.Is(err, io.EOF) {
-				return false
+				return dispatch()
 			}
 			continue
 		}
 
 		if strings.HasPrefix(line, ":") {
 			if errors.Is(err, io.EOF) {
-				if dispatch() {
-					return true
-				}
-				return false
+				return dispatch()
 			}
 			continue
 		}
@@ -124,9 +121,7 @@ func (s *Scanner) Next() bool {
 		if i := strings.IndexByte(line, ':'); i >= 0 {
 			field = line[:i]
 			value = line[i+1:]
-			if strings.HasPrefix(value, " ") {
-				value = value[1:]
-			}
+			value = strings.TrimPrefix(value, " ")
 		}
 
 		eventBytes += len(field) + len(value)
@@ -150,7 +145,7 @@ func (s *Scanner) Next() bool {
 			if dispatch() {
 				return true
 			}
-			return false
+			return dispatch()
 		}
 	}
 }

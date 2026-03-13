@@ -8,8 +8,6 @@ import (
 	"pgregory.net/rapid"
 )
 
-func boolPtr(v bool) *bool { return &v }
-
 func TestModelRegistryMutationIsolation(t *testing.T) {
 	ClearModels()
 	RegisterModel(Model{

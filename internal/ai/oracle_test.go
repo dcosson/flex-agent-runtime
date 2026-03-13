@@ -49,11 +49,11 @@ type wireContent struct {
 }
 
 type wireUsage struct {
-	Input       int          `json:"input"`
-	Output      int          `json:"output"`
-	CacheRead   int          `json:"cacheRead"`
-	CacheWrite  int          `json:"cacheWrite"`
-	TotalTokens int          `json:"totalTokens"`
+	Input       int           `json:"input"`
+	Output      int           `json:"output"`
+	CacheRead   int           `json:"cacheRead"`
+	CacheWrite  int           `json:"cacheWrite"`
+	TotalTokens int           `json:"totalTokens"`
 	Cost        wireUsageCost `json:"cost"`
 }
 
@@ -113,11 +113,11 @@ func goMsgToWire(msg Message) wireMessage {
 				CacheWrite:  m.Usage.CacheWrite,
 				TotalTokens: m.Usage.TotalTokens,
 				Cost: wireUsageCost{
-					Input:     m.Usage.Cost.Input,
-					Output:    m.Usage.Cost.Output,
-					CacheRead: m.Usage.Cost.CacheRead,
+					Input:      m.Usage.Cost.Input,
+					Output:     m.Usage.Cost.Output,
+					CacheRead:  m.Usage.Cost.CacheRead,
 					CacheWrite: m.Usage.Cost.CacheWrite,
-					Total:     m.Usage.Cost.Total,
+					Total:      m.Usage.Cost.Total,
 				},
 			},
 		}
@@ -256,21 +256,6 @@ func goMsgsToWire(msgs []Message) []wireMessage {
 		result[i] = goMsgToWire(m)
 	}
 	return result
-}
-
-func wireModelFromGo(m Model) wireModel {
-	return wireModel{
-		ID:            m.ID,
-		Name:          m.Name,
-		API:           m.API,
-		Provider:      m.Provider,
-		BaseURL:       m.BaseURL,
-		Reasoning:     m.Reasoning,
-		Input:         m.Input,
-		Cost:          wireModelCost{Input: m.Cost.Input, Output: m.Cost.Output, CacheRead: m.Cost.CacheRead, CacheWrite: m.Cost.CacheWrite},
-		ContextWindow: m.ContextWindow,
-		MaxTokens:     m.MaxTokens,
-	}
 }
 
 // =============================================================================
@@ -434,16 +419,16 @@ func buildTransformCorpus() []transformTestCase {
 		ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4",
 		API: "anthropic-messages", Provider: "anthropic",
 		BaseURL: "https://api.anthropic.com", Reasoning: false,
-		Input: []string{"text", "image"},
-		Cost:  wireModelCost{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75},
+		Input:         []string{"text", "image"},
+		Cost:          wireModelCost{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75},
 		ContextWindow: 200000, MaxTokens: 8192,
 	}
 	openaiModel := wireModel{
 		ID: "gpt-4o", Name: "GPT-4o",
 		API: "openai-completions", Provider: "openai",
 		BaseURL: "https://api.openai.com/v1", Reasoning: false,
-		Input: []string{"text", "image"},
-		Cost:  wireModelCost{Input: 2.5, Output: 10, CacheRead: 1.25, CacheWrite: 2.5},
+		Input:         []string{"text", "image"},
+		Cost:          wireModelCost{Input: 2.5, Output: 10, CacheRead: 1.25, CacheWrite: 2.5},
 		ContextWindow: 128000, MaxTokens: 16384,
 	}
 
@@ -628,7 +613,7 @@ func buildTransformCorpus() []transformTestCase {
 				{Role: "assistant", Content: []wireContent{{Type: "text", Text: "partial response"}},
 					API: "anthropic-messages", Provider: "anthropic", Model: "claude-sonnet-4-20250514",
 					StopReason: "error", ErrorMessage: "context overflow",
-					Usage: &wireUsage{Input: 100, Output: 5, TotalTokens: 105},
+					Usage:     &wireUsage{Input: 100, Output: 5, TotalTokens: 105},
 					Timestamp: ts + 1000,
 				},
 				{Role: "assistant", Content: []wireContent{{Type: "text", Text: fmt.Sprintf("retry response %d", i)}},
@@ -650,8 +635,8 @@ func buildTransformCorpus() []transformTestCase {
 				{Role: "assistant", Content: []wireContent{{Type: "text", Text: "starting..."}},
 					API: "anthropic-messages", Provider: "anthropic", Model: "claude-sonnet-4-20250514",
 					StopReason: "aborted",
-					Usage: &wireUsage{Input: 10, Output: 5, TotalTokens: 15},
-					Timestamp: ts + 1000,
+					Usage:      &wireUsage{Input: 10, Output: 5, TotalTokens: 15},
+					Timestamp:  ts + 1000,
 				},
 			},
 			TargetModel: anthropicModel,
@@ -982,9 +967,9 @@ func buildOverflowCorpus() []overflowTestCase {
 
 	// NOT overflow cases.
 	notOverflow := []struct {
-		name    string
-		msg     wireMessage
-		ctxWin  int
+		name   string
+		msg    wireMessage
+		ctxWin int
 	}{
 		{"normal_stop", wireMessage{
 			Role: "assistant", Content: []wireContent{{Type: "text", Text: "hi"}},
@@ -1293,10 +1278,3 @@ func TestWriteCorpusFile(t *testing.T) {
 // =============================================================================
 // Helpers
 // =============================================================================
-
-// nodeAvailable checks if Node.js is available.
-func nodeAvailable() bool {
-	_, err := exec.LookPath("node")
-	return err == nil
-}
-

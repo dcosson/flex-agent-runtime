@@ -247,7 +247,7 @@ func TestSchemaCache(t *testing.T) {
 	if err := ValidateToolArguments(tool, args); err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	hits, misses := SchemaCacheStats()
+	_, misses := SchemaCacheStats()
 	if misses != 1 {
 		t.Errorf("expected 1 miss, got %d", misses)
 	}
@@ -256,7 +256,7 @@ func TestSchemaCache(t *testing.T) {
 	if err := ValidateToolArguments(tool, args); err != nil {
 		t.Fatalf("second call: %v", err)
 	}
-	hits, _ = SchemaCacheStats()
+	hits, _ := SchemaCacheStats()
 	if hits != 1 {
 		t.Errorf("expected 1 hit, got %d", hits)
 	}
