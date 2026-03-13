@@ -1,0 +1,49 @@
+{
+  "id": "aiag-knj.1",
+  "title": "Tool Framework + File Tools (read/write/edit) + Tier Classifier",
+  "description": "Implement tool framework and file tools from docs/plans/06-built-in-tools.md.\n\nSections: §3.1 (ToolBackend, ToolRequest, ToolResponse, ToolProgress), §3.2 (Factories), §3.3 (Tool Catalog - file tools), §4.1-§4.4 (read_file, write_file, edit_file), §5.1 (LocalBackend), §5.3 (Tier Classifier)\n\nKey deliverables:\n- ToolBackend interface with ExecuteTool(ctx, req, onProgress) signature\n- ToolRequest, ToolResponse, ToolProgress types\n- LocalBackend: direct in-process execution for Tier 1 tools\n- Tier classifier function (shared across tools/backends)\n- NewLocalTools factory returning []agent.AgentTool\n- read_file: offset/limit, max-size guards\n- write_file: atomic write with optional dir creation\n- edit_file: exact string replacement, structured mismatch diagnostics\n- Unit tests for all of the above\n\nRequired reading: docs/plans/00-implementation-guide.md\nSee Implementation Guide §1.5 (AgentTool), §1.6 (ToolBackend), §4.6 (ToolBackend signature drift pitfall), §5 (Seam: agent.AgentTool ↔ tools factories)\n\nReferences:\n- Plan: docs/plans/06-built-in-tools.md §3-§5\n- Test harness: docs/plans/06-built-in-tools-test-harness.md\n- Depends on: T1 (Agent Core - needs AgentTool type)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-knj",
+  "dependencies": [
+    {
+      "id": "aiag-knj",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-suj.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-knj.2",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-uek.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=3",
+    "plan-doc=06-built-in-tools"
+  ],
+  "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "R2 review complete — Approved. All R1 findings addressed. 31 tests pass with race detection, make check clean. Review doc at 61b4113.",
+      "created_at": "2026-03-13T15:23:50.346328-07:00"
+    }
+  ],
+  "created_at": "2026-03-13T13:15:04.706455-07:00",
+  "updated_at": "2026-03-13T15:24:03.064249-07:00",
+  "closed_at": "2026-03-13T15:24:03.064249-07:00",
+  "close_reason": "Closed"
+}

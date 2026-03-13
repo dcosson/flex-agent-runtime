@@ -65,7 +65,6 @@ func executeReadFile(_ context.Context, rootDir string, req ToolRequest) (*ToolR
 	lines := strings.Split(string(data), "\n")
 	totalLines := len(lines)
 
-	// Adjust offset (1-based in output, 0-based in params means "from start")
 	if offset < 0 {
 		offset = 0
 	}

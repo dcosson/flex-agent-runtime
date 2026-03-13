@@ -9,6 +9,7 @@ import (
 
 // resolveSafePath canonicalizes path and ensures it stays within rootDir.
 // Follows symlinks during resolution to prevent symlink-based escapes.
+// Handles non-existent paths by resolving the nearest existing ancestor.
 func resolveSafePath(rootDir, path string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("empty path")
@@ -22,13 +23,10 @@ func resolveSafePath(rootDir, path string) (string, error) {
 		abs = filepath.Clean(filepath.Join(rootDir, path))
 	}
 
-	// Resolve symlinks to get the real path. If the file (or parent dirs)
-	// don't exist yet, walk up to the nearest existing ancestor and resolve
-	// from there. This ensures path traversal is detected even when
-	// intermediate directories don't exist.
+	// Resolve the real path, walking up to find an existing ancestor
 	resolved, err := resolveWithAncestors(abs)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("path resolution failed: %w", err)
 	}
 
 	// Resolve root dir symlinks too for consistent comparison
@@ -45,18 +43,17 @@ func resolveSafePath(rootDir, path string) (string, error) {
 	return resolved, nil
 }
 
-// resolveWithAncestors resolves an absolute path by walking up the directory
-// tree to find the nearest existing ancestor, resolving its symlinks, then
-// reconstructing the full path. This handles cases where intermediate
-// directories don't exist (e.g. new files, path traversal to non-existent dirs).
+// resolveWithAncestors resolves symlinks for a path that may not fully exist.
+// It walks up the path tree until it finds an existing ancestor, resolves
+// symlinks there, then appends the remaining path components.
 func resolveWithAncestors(abs string) (string, error) {
-	// Fast path: target exists
+	// Try direct resolution first
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err == nil {
 		return resolved, nil
 	}
 	if !os.IsNotExist(err) {
-		return "", fmt.Errorf("path resolution failed: %w", err)
+		return "", err
 	}
 
 	// Walk up to find nearest existing ancestor
@@ -64,24 +61,28 @@ func resolveWithAncestors(abs string) (string, error) {
 	var tail []string
 	for {
 		parent := filepath.Dir(current)
-		tail = append(tail, filepath.Base(current))
+		tail = append([]string{filepath.Base(current)}, tail...)
 		if parent == current {
 			// Reached filesystem root without finding existing dir
-			return "", fmt.Errorf("no accessible ancestor for path %q", abs)
+			break
 		}
-		resolved, err = filepath.EvalSymlinks(parent)
+		current = parent
+
+		resolved, err := filepath.EvalSymlinks(current)
 		if err == nil {
-			// Found existing ancestor — reconstruct path
-			for i := len(tail) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, tail[i])
+			// Found existing ancestor — reconstruct full path
+			for _, part := range tail {
+				resolved = filepath.Join(resolved, part)
 			}
 			return resolved, nil
 		}
 		if !os.IsNotExist(err) {
-			return "", fmt.Errorf("path resolution failed: %w", err)
+			return "", err
 		}
-		current = parent
 	}
+
+	// If we got here, no ancestor exists — just return the cleaned path
+	return abs, nil
 }
 
 // isUnderRoot checks if path is equal to or a descendant of root.

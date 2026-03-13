@@ -78,12 +78,10 @@ func executeEditFile(_ context.Context, rootDir string, req ToolRequest) (*ToolR
 func mismatchResponse(path, oldStr, content string) *ToolResponse {
 	msg := fmt.Sprintf("old_string not found in %s", path)
 
-	// Try to provide context about what's in the file near the expected location
 	lines := strings.Split(content, "\n")
 	if len(lines) <= 20 {
 		msg += fmt.Sprintf("\n\nFile has %d lines. Full content:\n%s", len(lines), content)
 	} else {
-		// Search for partial matches of the first line of old_string
 		firstLine := strings.Split(oldStr, "\n")[0]
 		if firstLine != "" {
 			for i, line := range lines {

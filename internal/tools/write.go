@@ -61,7 +61,6 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	}
 	tmpName := tmp.Name()
 
-	// Clean up temp file on any error
 	success := false
 	defer func() {
 		if !success {
