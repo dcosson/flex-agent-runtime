@@ -34,6 +34,14 @@
     "plan-doc=01-ai-core"
   ],
   "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "R1 review: Approved (3 P3). See docs/reviews/aiag-qkh.2-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-12T18:58:50.429946-07:00"
+    }
+  ],
   "created_at": "2026-03-12T18:18:06.344509-07:00",
-  "updated_at": "2026-03-12T18:50:44.641804-07:00"
+  "updated_at": "2026-03-12T18:58:50.430641-07:00"
 }
