@@ -1,0 +1,19 @@
+goos: darwin
+goarch: arm64
+pkg: h2-agent-runtime/internal/ai
+cpu: Apple M1 Pro
+BenchmarkEventStreamSendReceive-10    	28507568	        41.58 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCalculateCost-10             	232554946	         5.169 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGetModel-10                  	21952808	        54.61 ns/op	       0 B/op	       0 allocs/op
+BenchmarkTransformMessages-10         	  121170	     10477 ns/op	   21328 B/op	     251 allocs/op
+BenchmarkValidateToolArguments-10     	  166000	      7247 ns/op	    6270 B/op	      92 allocs/op
+BenchmarkSchemaCompilationCold-10     	   33199	     35287 ns/op	   28641 B/op	     415 allocs/op
+PASS
+ok  	h2-agent-runtime/internal/ai	8.620s
+goos: darwin
+goarch: arm64
+pkg: h2-agent-runtime/internal/ai/sse
+cpu: Apple M1 Pro
+BenchmarkScanner100Events-10    	   73232	     16018 ns/op	    9824 B/op	     403 allocs/op
+PASS
+ok  	h2-agent-runtime/internal/ai/sse	1.516s

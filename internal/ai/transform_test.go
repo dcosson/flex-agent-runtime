@@ -116,6 +116,35 @@ func TestTransformSkipsErrorAndAbortedAssistant(t *testing.T) {
 	}
 }
 
+func TestTransformKeepsEmptyAssistantCrossModel(t *testing.T) {
+	target := Model{ID: "other", Provider: "other", API: "other-api"}
+	msgs := []Message{
+		&AssistantMessage{
+			Content: []ContentBlock{
+				&ThinkingContent{Redacted: true},
+				&ThinkingContent{Thinking: ""},
+			},
+			Provider:   "src",
+			API:        "src-api",
+			Model:      "src-model",
+			StopReason: StopReasonStop,
+			Timestamp:  111,
+		},
+	}
+
+	out := TransformMessages(msgs, target, nil)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(out))
+	}
+	am, ok := out[0].(*AssistantMessage)
+	if !ok {
+		t.Fatalf("expected assistant message, got %T", out[0])
+	}
+	if len(am.Content) != 0 {
+		t.Fatalf("expected empty content to be preserved, got %d blocks", len(am.Content))
+	}
+}
+
 // B3 benchmark.
 func BenchmarkTransformMessages(b *testing.B) {
 	msgs := make([]Message, 0, 50)
