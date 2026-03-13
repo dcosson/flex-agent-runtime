@@ -2,7 +2,7 @@
   "id": "aiag-qkh",
   "title": "AI Core Implementation",
   "description": "Epic for Batch 1 implementation: internal/ai core types, EventStream, registries, model catalog, SSE parser, JSON schema validation, message transformation, overflow detection, public API re-exports, and comprehensive test harness (property tests, fuzz, stress, benchmarks, comparison oracles, security tests). Covers plan docs 01-ai-core.md and 01-ai-core-test-harness.md.",
-  "status": "closed",
+  "status": "open",
   "priority": 2,
   "type": "epic",
   "dependents": [
@@ -25,6 +25,14 @@
     {
       "id": "aiag-qkh.5",
       "type": "parent-child"
+    },
+    {
+      "id": "aiag-qkh.6",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-qkh.7",
+      "type": "parent-child"
     }
   ],
   "created_by": "Danny Cosson",
@@ -34,7 +42,5 @@
     "batch=1"
   ],
   "created_at": "2026-03-12T18:17:31.664509-07:00",
-  "updated_at": "2026-03-12T20:33:02.572793-07:00",
-  "closed_at": "2026-03-12T20:32:53.241124-07:00",
-  "close_reason": "Auto-closed: all children completed"
+  "updated_at": "2026-03-12T21:52:47.666364-07:00"
 }

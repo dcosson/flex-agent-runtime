@@ -1,0 +1,25 @@
+{
+  "id": "aiag-qkh.7",
+  "title": "Batch 1 Gaps: URP + Extreme Optimization Items",
+  "description": "Implement URP and Extreme Optimization items from plan 01-ai-core that were not built in the initial implementation.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nURP (§16):\n- §16.2 EventStream Leak Detection: In test builds, track unclosed EventStreams via runtime.SetFinalizer. Log warning with creation stack trace if GC'd without Close().\n\nExtreme Optimization (§17):\n- §17.1 SSE Zero-Copy Parsing: Reuse single []byte buffer for line reading, only allocate strings on event completion. Benchmark with unsafe.String for zero-copy views. Verify B2 SSE benchmark improves.\n- §17.3 Large JSON Streaming: For ToolCall.Arguments exceeding 64KB, use json.NewDecoder with streaming instead of json.Unmarshal. Add benchmark for large argument payloads.\n\nReferences:\n- Plan: docs/plans/01-ai-core.md §16 (URP), §17 (Extreme Optimization)\n- Test harness: docs/plans/01-ai-core-test-harness.md §5 (B2 SSE benchmark)",
+  "status": "in_progress",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-qkh",
+  "dependencies": [
+    {
+      "id": "aiag-qkh",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-agent-runtime",
+    "batch=1",
+    "plan-doc=01-ai-core"
+  ],
+  "assignee": "coder-2-sea",
+  "created_at": "2026-03-12T21:52:42.063884-07:00",
+  "updated_at": "2026-03-12T21:52:47.690276-07:00"
+}
