@@ -213,3 +213,32 @@ Gated infra tests require sandbox environment and secrets.
 7. Security tests SEC1-SEC4 pass.
 8. Manual QA checklist completed for release-candidate commit.
 9. CI tier matrix implemented and green.
+
+---
+
+## Completion Signoff
+
+- **Status**: Partial
+- **Date**: 2026-03-13
+- **Branch**: main
+- **Commit**: d1df5b5
+- **Verified by**: reviewer-sea
+- **Completed items**:
+  - P1, P2, P4, P5 property tests — implemented and passing
+  - F1-F5 fault injection tests — all implemented and passing
+  - O1 golden output corpus, O3 edit oracle — implemented and passing
+  - S1 tier routing, S3 snapshot metadata — implemented and passing
+  - B1-B4 benchmarks — implemented (read, edit, grep literal/regex, glob)
+  - ST3 git command stress — implemented and passing
+  - SEC1, SEC2, SEC4 security tests — implemented and passing
+- **Deviations**:
+  - [Missing] P3 backend parity property — deferred (noted in code comment); requires sandbox environment
+  - [Missing] O2 differential grep oracle — deferred; requires external `rg` binary for comparison
+  - [Missing] S2 callback event ordering — deferred (noted in code comment)
+  - [Missing] B5 bash update overhead benchmark — deferred (noted in code comment)
+  - [Missing] SEC3 secret redaction — deferred (noted in code comment)
+  - [Missing] ST1 12-hour mixed-tool soak — CI infrastructure not yet established
+  - [Missing] ST2 high-fanout grep stress — CI infrastructure not yet established
+- **Outstanding gaps**:
+  - P3, S2, SEC3, O2, B5: implement when sandbox environment and external tooling available; tracked as deferred in harness_test.go comments
+  - ST1, ST2: deferred until CI supports scheduled long-running tests

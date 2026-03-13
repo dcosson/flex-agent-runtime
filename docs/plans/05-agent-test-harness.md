@@ -224,3 +224,29 @@ Credentialed/live tests are secret-gated and skipped for forks.
 7. Security tests SEC1-SEC3 pass.
 8. Manual QA checklist completed for release-candidate commit.
 9. CI tier matrix wired and green.
+
+---
+
+## Completion Signoff
+
+- **Status**: Partial
+- **Date**: 2026-03-13
+- **Branch**: main
+- **Commit**: d1df5b5
+- **Verified by**: reviewer-sea
+- **Completed items**:
+  - P1-P5 property tests — all implemented and passing with `-race`
+  - F1-F5 fault injection tests — all implemented (F3 subscriber panic isolation in event_bus_test.go)
+  - O2 replay oracle — implemented as TestO2_ReplayOracleStateMetrics
+  - S1-S3 simulation tests — S2 control-boundary and S3 terminal tool implemented; S1 turn engine covered by component tests
+  - ST2 race-heavy stress — tests run with `-race` flag
+  - ST3 burst follow-up stress — implemented as TestST3_BurstFollowUpStress
+  - SEC1-SEC3 security tests — all implemented and passing
+- **Deviations**:
+  - [Missing] B1-B4 benchmark functions not implemented — plan specifies event fan-out throughput (>=100k/sec), prompt-to-first-delta overhead (<2ms p95), control queue latency (<5ms p95), and memory growth bounds, but no Benchmark* functions exist in agent package
+  - [Missing] O1 Native vs Adapter Event Parity — requires termmux-backed driver adapters (plan 09 scope, not Batch 3)
+  - [Missing] ST1 24-hour multi-agent soak — CI infrastructure for long-running soak tests not yet established
+- **Outstanding gaps**:
+  - B1-B4 benchmarks: create benchmark functions in internal/agent/harness_bench_test.go for event throughput, prompt overhead, control queue latency, and memory growth
+  - O1 oracle: deferred until plan 09 termmux port delivers driver adapters
+  - ST1 soak: deferred until CI infrastructure supports scheduled long-running tests

@@ -523,22 +523,20 @@ Sub-calls use the existing `ai.Provider` interface. The conversation context for
 ```text
 internal/tools/codeinterp/
 ├── codeinterp.go        # AgentTool factory for execute_script
-├── runtime.go           # VM init, execution orchestration, limits
-├── builtins.go          # discover/describe/invoke/log implementations
-├── rlm.go               # llm_call/llm_batch implementations
-├── datastore.go         # store_read/write/read_range/search/list/delete builtin wrappers
-├── sandbox.go           # load restrictions and capability wiring
+├── runtime.go           # VM init, execution orchestration, limits, sandbox restrictions
+├── builtins.go          # all 12 builtins: discover/describe/invoke/log/llm_call/llm_batch/store_*
 ├── convert.go           # Starlark<->Go conversion helpers
-├── trace.go             # trace event types + serialization
+├── trace.go             # trace event types + serialization + secret redaction
 ├── tier.go              # tier classification + config selection
+├── types.go             # ExecuteRequest, ExecuteResult, TraceStep, Stats
 ├── errors.go            # typed errors (timeout, budget_exceeded, token_budget_exceeded, conversion)
 ├── options.go           # Config defaults and validation
 └── datastore/           # DataStore interface and implementations
     ├── iface.go         # DataStore interface + Match type
     ├── memory.go        # MemoryDataStore (in-memory, bounded)
     ├── fs.go            # FSDataStore (filesystem-backed)
-    ├── blob.go          # BlobDataStore (S3/GCS)
-    ├── sql.go           # SQLDataStore (edb analytics)
+    ├── blob.go          # BlobDataStore (S3/GCS stub)
+    ├── sql.go           # SQLDataStore (edb analytics stub)
     └── validate.go      # key validation, path traversal prevention
 ```
 
@@ -727,3 +725,24 @@ internal/tools/codeinterp/
 - **Not incorporated**: None
 - **Open questions**: All resolved
 - **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-13
+- **Branch**: main
+- **Commit**: d1df5b5
+- **Verified by**: reviewer-sea
+- **Test verification**: `go test -race ./internal/tools/codeinterp/... -count=1` — PASS (codeinterp 1.683s, datastore 1.366s)
+- **Acceptance tests**: PASS (12 scenarios)
+- **Deviations from plan**:
+  - [Cosmetic] `llm_batch` uses semaphore-based `runBatch` generic helper instead of `errgroup` — same concurrency semantics
+  - [Cosmetic] `BlobDataStore` and `SQLDataStore` are stubs returning `ErrNotSupported` — plan acknowledges these as V1 stubs
+- **Structural deviations resolved**: 1 resolved — §6 package structure updated to reflect actual file organization (all 12 builtins in `builtins.go`, sandbox restrictions in `runtime.go`, types in `types.go`, trace redaction in `trace.go`)
+- **Additions beyond plan**:
+  - `types.go` — dedicated file for ExecuteRequest, ExecuteResult, TraceStep, Stats types
+  - Trace secret redaction via regex-based `sensitivePatterns` in `trace.go` (3 patterns: SECRET_TOKEN, API_KEY, PASSWORD)
+  - `validateResultSize()` enforcement in `finish()` method
+  - `datastore/validate.go` — dedicated key validation with null byte, absolute path, and traversal checks

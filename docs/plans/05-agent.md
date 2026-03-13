@@ -434,3 +434,23 @@ The `RuntimeController` (defined in architecture doc) is the control plane that 
 - **Not incorporated**: None
 - **Open questions**: All resolved
 - **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-13
+- **Branch**: main
+- **Commit**: d1df5b5
+- **Verified by**: reviewer-sea
+- **Test verification**: `go test -race ./internal/agent/... -count=1` — PASS (4.315s)
+- **Acceptance tests**: PASS (7 scenarios; #5 Driver parity deferred — depends on plan 09 termmux adapters)
+- **Deviations from plan**:
+  - [Cosmetic] Agent struct uses internal `bus *eventBus` field instead of `subscribers map[int]func(AgentEvent)` + `nextSubID int` — identical external API
+  - [Cosmetic] `driver_claudecode.go` and `driver_codex.go` not implemented — explicitly plan 09 scope, not Batch 3
+- **Structural deviations resolved**: None found
+- **Additions beyond plan**:
+  - `AgentToolResult.clone()` and `AgentEvent.clone()` internal deep-copy helpers for event bus safety
+  - `Agent.SetSession()` for external session injection
+  - `Agent.MarkTurnStarted/MarkTurnCompleted/RecordToolStarted/RecordToolFinished/RecordError` metric helpers

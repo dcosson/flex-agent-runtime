@@ -98,20 +98,16 @@ sequenceDiagram
 ```text
 e2etests/
 ├── harness/
-│   ├── runner.go              # scenario execution and lifecycle
-│   ├── env.go                 # temp workspace + provider setup
-│   ├── observer.go            # event collection and sequencing asserts
-│   └── assertions.go          # common end-state assertions
-├── fixtures/
-│   ├── repos/                 # seeded mini-repositories
-│   ├── prompts/               # canonical task prompts
-│   └── expected/              # expected file/event outcomes
+│   ├── runner.go              # scenario execution, lifecycle, event collection, assertions, diagnostics
+│   └── exec.go                # testability wrapper for exec.Command
 ├── scenarios/
-│   ├── local_file_flow_test.go
-│   ├── local_bash_flow_test.go
-│   ├── steering_followup_test.go
-│   ├── codeinterp_workflow_test.go
-│   └── terminal_tool_test.go
+│   ├── local_file_flow_test.go       # §4.1
+│   ├── local_bash_flow_test.go       # §4.2
+│   ├── steering_followup_test.go     # §4.3, §4.4
+│   ├── codeinterp_workflow_test.go   # §4.5 + P/F/O/S/B/ST/SEC harness tests
+│   ├── terminal_tool_test.go         # §4.6
+│   ├── git_workflow_test.go          # §4.7
+│   └── error_recovery_test.go        # §4.8
 └── testutil/
     ├── provider_fake.go       # deterministic provider scripts
     └── fsdiff.go              # workspace diff helpers
@@ -330,3 +326,23 @@ On scenario failure, automatically emit:
 - **Not incorporated**: None
 - **Open questions**: All resolved
 - **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-13
+- **Branch**: main
+- **Commit**: d1df5b5
+- **Verified by**: reviewer-sea
+- **Test verification**: `go test -race ./e2etests/... -count=1` — PASS (scenarios 11.631s)
+- **Acceptance tests**: PASS (8 scenarios; #8 live-provider smoke is credential-gated, not run)
+- **Deviations from plan**:
+  - [Cosmetic] No separate `fixtures/` directory — fixtures are created inline in test Setup functions (simpler, no stale fixtures)
+- **Structural deviations resolved**: 1 resolved — §3.1 file layout updated to reflect actual structure (`runner.go` consolidates env/observer/assertions; `exec.go` added for testability; scenario files include §4.7 and §4.8)
+- **Additions beyond plan**:
+  - `harness/exec.go` — testability wrapper for `exec.Command`
+  - `configureCodeInterpTool()` — wires code interpreter tool with E2E model, deduplicates from tool catalog
+  - `dumpDiagnostics()` — comprehensive failure artifact generation (event timeline, workspace state, provider call log)
+  - `WriteFile`, `InitGitRepo`, `GitCommitAll`, `runCmd` helpers in runner.go
