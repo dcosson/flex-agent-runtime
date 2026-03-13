@@ -146,6 +146,13 @@ func (a *Agent) Start(ctx context.Context, session *Session, prompt string) erro
 	}
 	a.mu.Unlock()
 
+	if err := a.Transition(StateStreaming); err != nil {
+		a.mu.Lock()
+		a.running = false
+		a.mu.Unlock()
+		return err
+	}
+
 	a.emit(AgentEvent{Type: EventSessionStarted, At: time.Now()})
 	if a.driver != nil {
 		if err := a.driver.Start(ctx, a.Session(), prompt); err != nil {

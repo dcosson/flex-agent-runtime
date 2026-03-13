@@ -84,6 +84,12 @@ func (d *NativeDriver) Stop(ctx context.Context) error {
 
 func (d *NativeDriver) run(ctx context.Context, session *Session, initialPrompt string) {
 	defer func() {
+		if r := recover(); r != nil {
+			err := fmt.Errorf("native driver panic: %v", r)
+			d.agent.RecordError()
+			d.emit(AgentEvent{Type: EventDriverError, Error: err, ErrorMessage: err.Error()})
+			_ = d.agent.Transition(StateIdle)
+		}
 		d.mu.Lock()
 		d.running = false
 		d.mu.Unlock()
