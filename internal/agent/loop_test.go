@@ -82,10 +82,20 @@ func TestNativeDriverToolLoopAndSnapshotBoundary(t *testing.T) {
 
 	var mu sync.Mutex
 	sequence := make([]AgentEventType, 0)
+	sawDelta := false
+	sawControlLeak := false
 	done := make(chan struct{})
 	agent.Subscribe(func(evt AgentEvent) {
 		mu.Lock()
 		sequence = append(sequence, evt.Type)
+		if evt.Type == EventAgentMessageDelta {
+			if evt.Delta != "" {
+				sawDelta = true
+			}
+			if evt.ControlMessage != "" {
+				sawControlLeak = true
+			}
+		}
 		mu.Unlock()
 		if evt.Type == EventStateChange && evt.State == StateIdle {
 			select {
@@ -131,6 +141,12 @@ func TestNativeDriverToolLoopAndSnapshotBoundary(t *testing.T) {
 	}
 	if turnIdx > idleIdx {
 		t.Fatalf("expected turn_completed before idle: %v", sequence)
+	}
+	if !sawDelta {
+		t.Fatalf("expected at least one agent delta event with Delta set")
+	}
+	if sawControlLeak {
+		t.Fatalf("agent delta events must not populate ControlMessage")
 	}
 }
 

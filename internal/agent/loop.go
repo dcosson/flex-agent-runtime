@@ -90,11 +90,6 @@ func (d *NativeDriver) run(ctx context.Context, session *Session, initialPrompt 
 		d.agent.onDriverIdle()
 	}()
 
-	if err := d.agent.Transition(StateStreaming); err != nil {
-		d.emit(AgentEvent{Type: EventDriverError, Error: err, ErrorMessage: err.Error()})
-		return
-	}
-
 	nextPrompt := initialPrompt
 	for {
 		if ctx.Err() != nil {
@@ -195,9 +190,9 @@ func (d *NativeDriver) callProvider(ctx context.Context) (*ai.AssistantMessage, 
 	for ev := range es.C {
 		switch ev.Type {
 		case ai.EventTextDelta:
-			d.emit(AgentEvent{Type: EventAgentMessageDelta, Turn: d.turn, ControlMessage: ev.Delta})
+			d.emit(AgentEvent{Type: EventAgentMessageDelta, Turn: d.turn, Delta: ev.Delta})
 		case ai.EventThinkingDelta:
-			d.emit(AgentEvent{Type: EventThinkingDelta, Turn: d.turn, ControlMessage: ev.Delta})
+			d.emit(AgentEvent{Type: EventThinkingDelta, Turn: d.turn, Delta: ev.Delta})
 		}
 	}
 

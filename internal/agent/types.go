@@ -130,6 +130,7 @@ type AgentEvent struct {
 	ToolName        string
 	ToolCallID      string
 	ToolResult      *AgentToolResult
+	Delta           string
 	ControlMessage  string
 	Error           error
 	ErrorMessage    string
