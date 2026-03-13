@@ -1,7 +1,7 @@
 GO ?= go
 PKGS := $(shell $(GO) list ./...)
 
-.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-harness-openai test-harness-google test-bench test-bench-ai-core test-bench-openai test-bench-google test-stress-openai test-stress-google test-fuzz test-fuzz-t2 test-anthropic-harness-fast test-anthropic-harness-race test-anthropic-harness-bench test-e2e clean
+.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-harness-openai test-harness-google test-harness-codeinterp test-bench test-bench-ai-core test-bench-openai test-bench-google test-bench-codeinterp test-stress-openai test-stress-google test-stress-codeinterp test-fuzz test-fuzz-t2 test-anthropic-harness-fast test-anthropic-harness-race test-anthropic-harness-bench test-e2e clean
 
 help: ## Show available make targets
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_.-]+:.*##/ {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -43,6 +43,9 @@ test-harness-openai: ## Run OpenAI provider harness tests (P*/F*/S*/SEC*/O* patt
 test-harness-google: ## Run Google provider harness tests (P*/F*/S*/GS*/SEC*/EC* patterns)
 	$(GO) test -race ./internal/ai/provider/google/ -run 'Test(P[1-6]_|F[1-5]_|S[1-2]_|GS[1-5]_|SEC[1-3]_|EC1_)'
 
+test-harness-codeinterp: ## Run Code Interpreter harness suites (P/F/O/S/ST/SEC lanes)
+	$(GO) test -race ./internal/tools/codeinterp -run 'Test(P[1-8]_|F[1-8]_|O[1-5]_|S[1-6]_|ST[1-5]_|SEC[1-7]_)'
+
 test-bench: ## Run benchmark suite (B* targets)
 	$(GO) test ./... -bench . -benchmem
 
@@ -61,8 +64,15 @@ test-bench-google: ## Run Google provider benchmarks (B1-B4)
 	@mkdir -p docs/benchmarks
 	$(GO) test ./internal/ai/provider/google/ -run '^$$' -bench 'BenchmarkB[1-4]_' -benchmem | tee docs/benchmarks/04-google-provider-baseline.txt
 
+test-bench-codeinterp: ## Run Code Interpreter benchmarks (B1-B6)
+	@mkdir -p docs/benchmarks
+	$(GO) test ./internal/tools/codeinterp -run '^$$' -bench 'BenchmarkB[1-6]_' -benchmem | tee docs/benchmarks/07-codeinterp-baseline.txt
+
 test-stress-google: ## Run Google provider stress/soak tests (SK1-SK3)
 	$(GO) test -race ./internal/ai/provider/google/ -run 'TestSK[1-3]_' -count=1
+
+test-stress-codeinterp: ## Run Code Interpreter stress/soak tests (ST1-ST5)
+	$(GO) test -race ./internal/tools/codeinterp -run 'TestST[1-5]_' -count=1
 
 test-fuzz: ## Run short fuzz checks for parser/overflow fuzz targets
 	$(GO) test ./internal/ai/sse -run '^$$' -fuzz FuzzScanner -fuzztime=5s
