@@ -793,6 +793,62 @@ def main(args):
 	}
 }
 
+func TestST4_DataStoreCapacityStress(t *testing.T) {
+	mem := datastore.NewMemoryDataStore(1024, 128, 256)
+	i := 0
+	for ; i < 200; i++ {
+		key := fmt.Sprintf("k-%03d", i)
+		if err := mem.Write(key, []byte(strings.Repeat("x", 32))); err != nil {
+			if !strings.Contains(err.Error(), "capacity exceeded") {
+				t.Fatalf("unexpected capacity error: %v", err)
+			}
+			break
+		}
+	}
+	if i == 200 {
+		t.Fatalf("expected datastore capacity exhaustion")
+	}
+}
+
+func TestST5_RLMBurstStress(t *testing.T) {
+	model := registerHarnessModel(t, &harnessProvider{inTokens: 1, outTokens: 1, costUSD: 0.001})
+	rt := NewRuntime(model, testCatalog())
+	var wg sync.WaitGroup
+	errs := make(chan error, 64)
+	for i := 0; i < 40; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := rt.Execute(context.Background(), ExecuteRequest{
+				Tier: "full",
+				Code: `
+def main(args):
+  out = llm_batch([
+    {"prompt":"a", "max_tokens":3},
+    {"prompt":"b", "max_tokens":3},
+    {"prompt":"c", "max_tokens":3},
+    {"prompt":"d", "max_tokens":3},
+    {"prompt":"e", "max_tokens":3},
+  ])
+  return len(out)
+`,
+			})
+			if err != nil {
+				errs <- err
+				return
+			}
+			if runtimeError(res) != "" {
+				errs <- fmt.Errorf("runtime error: %s", runtimeError(res))
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("burst stress failure: %v", err)
+	}
+}
+
 func TestSEC1_SandboxBreakoutAttempts(t *testing.T) {
 	rt := NewRuntime(ai.Model{}, testCatalog())
 	res, err := rt.Execute(context.Background(), ExecuteRequest{
@@ -848,6 +904,7 @@ func TestSEC4_SensitiveDataHandling(t *testing.T) {
 		Code: `
 def main(args):
   log("SECRET_TOKEN=abc123")
+  log("password=hunter2")
   return 1
 `,
 	})
@@ -856,6 +913,13 @@ def main(args):
 	}
 	if len(res.Trace) == 0 {
 		t.Fatalf("expected trace")
+	}
+	traceDump := fmt.Sprintf("%+v", res.Trace)
+	if strings.Contains(traceDump, "abc123") || strings.Contains(traceDump, "hunter2") {
+		t.Fatalf("expected secrets redacted, got trace: %s", traceDump)
+	}
+	if !strings.Contains(traceDump, "[REDACTED]") {
+		t.Fatalf("expected explicit redaction marker in trace, got: %s", traceDump)
 	}
 }
 
