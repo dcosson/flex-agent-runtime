@@ -5,6 +5,18 @@
 
 ---
 
+## Harness Structure
+
+1. Stub server tests (correctness replay + fault injection) in one server-backed test binary.
+2. Property/fuzz tests (pure functions, no server).
+3. Comparison oracles (cross-implementation, no server).
+4. Live smoke tests (real API, weekly, gated).
+
+The stub server is a shared utility (e.g., `internal/ai/testutil/stubserver/`) with provider-specific fixture sets.
+Recorded fixture interactions are captured from real APIs (initially via pi-mono clients), sanitized, and served over HTTP for end-to-end client validation.
+
+---
+
 ## 1. Property-Based Tests
 
 ### P1. Stream Event Ordering and Terminal Uniqueness
@@ -191,7 +203,16 @@ func TestMultiToolIndexIsolation(t *testing.T) {
 
 ---
 
-## 2. Fault Injection and Chaos Tests
+## 2. Stub Server Tests (Correctness Replay + Fault Injection)
+
+All server-backed provider tests use one stub server with two modes:
+- Correctness mode: deterministic fixture replay over HTTP.
+- Fault mode: transport/protocol failures (TCP reset, malformed payloads, rate limiting, backpressure, partial streams, connection drops).
+
+### S1. Correctness Replay Mode
+
+- Serve OpenAI/compat SSE fixture transcripts over HTTP from the stub server.
+- Assert emitted event sequence/final result against expected outputs while exercising full client stack (headers/auth/timeouts).
 
 ### F1. Mid-Stream TCP Reset
 
@@ -332,47 +353,12 @@ func TestEmptyErrorBody(t *testing.T) {
 
 ---
 
-## 3. Comparison/Oracle Tests
+## 3. Comparison/Oracle Tests (No Server)
 
-### O1. Recorded Trace Replay Oracle
+### O1. Cross-Implementation Oracle (pi-ai TS)
 
-- Capture real OpenAI SSE transcripts (sanitized).
-- Replay through parser and compare output against golden `AssistantMessageEvent` sequences.
-- Maintain separate fixtures for GPT-4o, o3 (reasoning), and at least one compat endpoint.
-
-```go
-func TestRecordedTraceReplay(t *testing.T) {
-    fixtures := []string{
-        "testdata/gpt4o_text_stream.jsonl",
-        "testdata/gpt4o_tool_call.jsonl",
-        "testdata/gpt4o_multi_tool.jsonl",
-        "testdata/o3_reasoning.jsonl",
-        "testdata/groq_text_stream.jsonl",
-        "testdata/mistral_tool_call.jsonl",
-    }
-
-    for _, fixture := range fixtures {
-        t.Run(filepath.Base(fixture), func(t *testing.T) {
-            sseData := loadFixture(t, fixture)
-            goldenEvents := loadGoldenEvents(t, fixture+".golden")
-
-            server := newRawSSEServer(sseData)
-            defer server.Close()
-
-            p := openai.New("test-key", openai.WithBaseURL(server.URL))
-            model := loadFixtureModel(t, fixture)
-            es := p.Stream(context.Background(), model, ai.Context{}, ai.StreamOptions{})
-
-            var events []ai.AssistantMessageEvent
-            for e := range es.C {
-                events = append(events, e)
-            }
-
-            assertEventsMatch(t, goldenEvents, events)
-        })
-    }
-}
-```
+- Run the same canonical prompt corpus through this Go provider and pi-ai TypeScript OpenAI provider.
+- Compare semantic invariants (event type sequence shape, stop-reason category, tool-call structure, usage envelope), not exact text.
 
 ### O2. Cross-Provider Semantic Consistency (nightly)
 
@@ -848,9 +834,9 @@ For each configured compat endpoint (Groq, Mistral):
 
 | Tier | Runs | Contents |
 |------|------|----------|
-| **PR-fast** | Every PR | Core unit tests, deterministic SSE fixtures, error mapping, compat flag tests |
+| **PR-fast** | Every PR | Core unit tests, stub-server correctness replay lane, error mapping, compat flag tests |
 | **PR-standard** | Every PR | Property tests (bounded iterations), race tests for provider package, message conversion tests |
-| **Nightly** | Nightly | Long property runs (10K iterations), chaos/fault injection, benchmark trend capture, recorded trace replay |
+| **Nightly** | Nightly | Long property runs (10K iterations), stub-server fault mode (chaos), benchmark trend capture |
 | **Weekly** | Weekly | 8-hour soak, high-concurrency stress, live API integration suite (OPENAI_API_KEY required) |
 
 Credentialed live tests are gated by env vars and skipped in fork PRs.
@@ -865,7 +851,7 @@ Implementation for OpenAI provider is complete only when all are true:
 
 1. **Property tests P1-P6** pass consistently across repeated runs (10K+ iterations).
 2. **Fault injection tests F1-F6** pass with no goroutine leaks.
-3. **Oracle tests O1-O3** pass with golden fixtures for GPT-4o, o3, and at least two compat endpoints.
+3. **Oracle tests O1-O3** pass for cross-implementation and cross-provider semantic invariants.
 4. **Deterministic simulations S1-S4** pass; illegal traces fail with expected categories.
 5. **Benchmark targets B1-B6** are met or documented with approved regression rationale.
 6. **Stress/soak tests ST1-ST3** pass on scheduled CI.

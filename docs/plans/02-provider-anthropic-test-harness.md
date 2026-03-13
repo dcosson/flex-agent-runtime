@@ -5,6 +5,17 @@
 
 ---
 
+## Harness Structure
+
+1. Stub server tests (correctness replay + fault injection) in one server-backed test binary.
+2. Property/fuzz tests (pure functions, no server).
+3. Comparison oracles (cross-implementation, no server).
+4. Live smoke tests (real API, weekly, gated).
+
+Recorded interactions used by the stub server are captured from real APIs (initially via pi-mono clients), sanitized, and replayed over HTTP.
+
+---
+
 ## 1. Property-Based Tests
 
 ### P1. Stream Event Ordering and Terminal Uniqueness
@@ -53,7 +64,15 @@ Invariant:
 
 ---
 
-## 2. Fault Injection and Chaos Tests
+## 2. Stub Server Tests (Correctness Replay + Fault Injection)
+
+Use a shared provider stub server utility (e.g., `internal/ai/testutil/stubserver/`) with Anthropic fixture sets.
+The Go client connects end-to-end over HTTP so tests exercise full client behavior (headers, auth wiring, timeout handling, retry policy boundaries).
+
+### S1. Correctness Replay Mode
+
+- Stub server serves recorded Anthropic SSE fixtures in normal mode.
+- Assertions compare emitted `AssistantMessageEvent` sequences and final `AssistantMessage` results to golden expectations.
 
 ### F1. Mid-stream TCP reset
 
@@ -81,12 +100,12 @@ Invariant:
 
 ---
 
-## 3. Comparison/Oracle Tests
+## 3. Comparison/Oracle Tests (No Server)
 
-### O1. Recorded Trace Replay Oracle
+### O1. Cross-Implementation Semantic Oracle (pi-ai TS)
 
-- Capture real Anthropic SSE transcripts (sanitized).
-- Replay through parser and compare output against golden `AssistantMessageEvent` sequences.
+- For canonical prompts, compare semantic outputs (stop reason category, tool-call structure, usage shape) between Go provider and pi-ai TypeScript implementation.
+- Purpose: detect implementation drift without relying on server replay path.
 
 ### O2. SDK Output Consistency Oracle (optional nightly)
 
@@ -189,9 +208,9 @@ Target:
 
 | Tier | Runs | Contents |
 |------|------|----------|
-| PR-fast | every PR | core unit tests, deterministic SSE fixtures, error mapping |
+| PR-fast | every PR | core unit tests, stub-server correctness replay lane, error mapping |
 | PR-standard | every PR | property tests (bounded iterations), race tests for provider package |
-| Nightly | nightly | long property runs, chaos/fault injection, benchmark trend capture |
+| Nightly | nightly | long property runs, stub-server fault mode (chaos), benchmark trend capture |
 | Weekly | weekly | 8-hour soak, high-concurrency stress, live API integration suite |
 
 Credentialed live tests are gated by secrets and skipped in fork PRs.
@@ -203,7 +222,7 @@ Credentialed live tests are gated by secrets and skipped in fork PRs.
 Implementation for Anthropic provider is complete only when all are true:
 
 1. Property tests P1-P4 pass consistently across repeated runs.
-2. Fault injection tests F1-F5 pass with no goroutine leaks.
+2. Stub server lane (correctness replay + fault injection F1-F5) passes with no goroutine leaks.
 3. Deterministic simulations S1-S3 pass and illegal traces fail with expected categories.
 4. Benchmark targets B1-B4 are met or documented with approved regression rationale.
 5. Stress/soak tests ST1-ST3 pass on scheduled CI.

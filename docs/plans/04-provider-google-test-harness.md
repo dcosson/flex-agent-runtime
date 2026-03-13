@@ -5,6 +5,18 @@
 
 ---
 
+## Harness Structure
+
+1. Stub server tests (correctness replay + fault injection) in one server-backed test binary.
+2. Property/fuzz tests (pure functions, no server).
+3. Comparison oracles (cross-implementation, no server).
+4. Live smoke tests (real API, weekly, gated).
+
+The stub server is a shared utility (e.g., `internal/ai/testutil/stubserver/`) with Google fixture sets.
+Recorded fixture interactions are captured from real APIs (initially via pi-mono clients), sanitized, and served over HTTP.
+
+---
+
 ## 1. Property-Based Tests
 
 ### P1. Message Conversion Round-Trip Stability
@@ -151,7 +163,15 @@ func TestUsageCostConsistency(t *testing.T) {
 
 ---
 
-## 2. Fault Injection / Chaos Engineering
+## 2. Stub Server Tests (Correctness Replay + Fault Injection)
+
+Use one shared stub server in two modes:
+- Correctness mode: replay recorded SSE fixtures over HTTP to validate full client stack behavior (headers/auth/timeouts + stream handling).
+- Fault mode: inject transport/protocol failures (TCP reset, malformed payloads, rate limiting, backpressure, partial streams, connection drops).
+
+### S1. Correctness Replay Mode
+
+- Serve text/thinking/tool/safety fixture streams from the stub server and assert expected event/result outputs.
 
 ### F1. Truncated SSE Stream
 
@@ -284,7 +304,7 @@ func TestPromptLevelBlock(t *testing.T) {
 
 ---
 
-## 3. Comparison / Oracle Tests
+## 3. Comparison / Oracle Tests (No Server)
 
 ### O1. Gemini Go SDK Comparison
 
@@ -695,7 +715,7 @@ func TestThoughtSignatureOpaque(t *testing.T) {
 | Tier | Tests | Trigger | Environment |
 |------|-------|---------|-------------|
 | **Tier 1: Fast** | Unit tests (conversion, mapping, errors, safety, JSON casing) | Every commit | Any OS |
-| **Tier 2: Component** | SSE fixture replay, fault injection, property tests | Every commit | Any OS |
+| **Tier 2: Component** | Stub-server replay + fault injection, property tests | Every commit | Any OS |
 | **Tier 3: Integration** | Live Gemini API smoke tests | PR merge to main | Any OS + `GOOGLE_API_KEY` |
 | **Tier 4: Oracle** | SDK comparison, cross-provider event comparison | Weekly | Any OS + go-genai SDK |
 | **Tier 5: Soak** | Sequential replays, mixed fixture soak | Weekly | Any OS |
@@ -717,7 +737,7 @@ Implementation is considered complete when ALL of the following pass:
 ### Must Pass
 
 - [ ] All Tier 1 unit tests pass on Linux, macOS, and Windows
-- [ ] All Tier 2 component tests (fixture replays, fault injection) pass
+- [ ] All Tier 2 component tests (stub-server replay + fault injection) pass
 - [ ] All property-based tests pass with 1000+ iterations
 - [ ] All 6 acceptance criteria from the plan doc are demonstrated
 - [ ] SSE parsing benchmark > 50,000 chunks/sec
