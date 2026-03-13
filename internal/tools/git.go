@@ -3,7 +3,6 @@ package tools
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -16,16 +15,6 @@ const (
 	defaultGitTimeout = 30 * time.Second
 	maxGitOutput      = 256 * 1024 // 256 KB
 )
-
-// V1 supported git commands
-var v1GitCommands = map[string]bool{
-	"git_status": true,
-	"git_diff":   true,
-	"git_log":    true,
-	"git_show":   true,
-	"git_add":    true,
-	"git_commit": true,
-}
 
 func gitStatusTool(rootDir string) toolImpl {
 	return toolImpl{
@@ -146,24 +135,6 @@ func gitCommitTool(rootDir string) toolImpl {
 			return runGitCommand(ctx, rootDir, args)
 		},
 	}
-}
-
-// unsupportedGitCommand returns a structured error for V2+ commands.
-func unsupportedGitCommand(name string) *ToolResponse {
-	errData := map[string]string{
-		"error":   "unsupported_git_command",
-		"command": name,
-		"message": "This git command is not available in V1. Supported: status, diff, log, show, add, commit.",
-	}
-	data, _ := json.Marshal(errData)
-	return &ToolResponse{
-		Content: []ai.ContentBlock{&ai.TextContent{Text: string(data)}},
-	}
-}
-
-// IsV1GitCommand checks if a tool name is a supported V1 git command.
-func IsV1GitCommand(name string) bool {
-	return v1GitCommands[name]
 }
 
 func runGitCommand(ctx context.Context, rootDir string, args []string) (*ToolResponse, error) {
