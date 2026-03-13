@@ -2,7 +2,7 @@
   "id": "aiag-g1g.1",
   "title": "E2E Framework + Core Scenarios",
   "description": "Implement E2E test framework and core scenarios from docs/plans/08-agent-tools-e2e.md.\n\nSections: §2 (Architecture), §3 (Test Suite Design), §4.1-§4.4 + §4.6-§4.8 (Core Scenarios), §6 (Acceptance Criteria)\n\nKey deliverables:\n- Test harness framework: harness/runner.go, observer.go, oracles.go, fixtures/\n- Deterministic fake provider traces for PR-level runs\n- Optional real provider mode (credential-gated)\n- Assertion layers: event-level, conversation-level, filesystem/process-level\n- Scenario 4.1: Multi-turn local file refactor\n- Scenario 4.2: Bash build-and-fix loop\n- Scenario 4.3: Steering mid-turn\n- Scenario 4.4: Follow-up queue chain\n- Scenario 4.6: Terminal tool completion\n- Scenario 4.7: Git read workflow\n- Scenario 4.8: Error recovery workflow\n- CI tier integration with Makefile targets\n\nRequired reading: docs/plans/00-implementation-guide.md\nSee Implementation Guide §5 (Seam: e2etests ↔ internal/agent + internal/tools)\n\nReferences:\n- Plan: docs/plans/08-agent-tools-e2e.md §2-§4, §6\n- Test harness: docs/plans/08-agent-tools-e2e-test-harness.md\n- Depends on: T2 (Agent Loop) + T5 (Search/Bash/Git Tools)",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-g1g",
@@ -34,6 +34,28 @@
     "plan-doc=08-agent-tools-e2e"
   ],
   "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "coder-2-sea",
+      "text": "Implementation complete on batch3/e2e-framework (c14ba1f). 7 scenarios all pass with -race. Requesting review.",
+      "created_at": "2026-03-13T16:34:52.010653-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — approved with revisions. 2 findings (1 P1, 1 P3). P1: missing code interpreter E2E scenario (§4.5) — plan specifies codeinterp_workflow_test.go with nested RLM sub-call routing, acceptance criteria #5/#6 depend on it. P3: ScriptedProvider drops ctx, won't propagate cancellation. See docs/reviews/aiag-g1g.1-r1-review-reviewer-sea.md @ bc6a429",
+      "created_at": "2026-03-13T16:38:02.664206-07:00"
+    },
+    {
+      "id": 3,
+      "author": "Danny Cosson",
+      "text": "R2 review complete — approved. 0 findings. P3 ctx fix looks good. All 7 E2E scenarios pass with -race. See docs/reviews/aiag-g1g.1-r2-review-reviewer-sea.md @ 39623b0",
+      "created_at": "2026-03-13T16:40:25.009956-07:00"
+    }
+  ],
   "created_at": "2026-03-13T13:16:37.350075-07:00",
-  "updated_at": "2026-03-13T16:22:52.114109-07:00"
+  "updated_at": "2026-03-13T16:40:39.347971-07:00",
+  "closed_at": "2026-03-13T16:40:39.347971-07:00",
+  "close_reason": "Closed"
 }

@@ -95,8 +95,8 @@ test-anthropic-harness-race: ## Anthropic provider harness with race detector
 test-anthropic-harness-bench: ## Anthropic provider harness benchmark lanes B1-B4
 	$(GO) test ./internal/ai/provider/anthropic -run '^$$' -bench 'BenchmarkB[1-4]_' -benchmem
 
-test-e2e: ## Placeholder for future e2e suites
-	@echo "No e2e test packages yet."
+test-e2e: ## Run E2E agent + tools scenarios
+	$(GO) test -race ./e2etests/... -count=1 -timeout 120s
 
 clean: ## Remove temporary test artifacts
 	rm -f coverage.out coverage.html
