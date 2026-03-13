@@ -16,6 +16,14 @@ import (
 	"pgregory.net/rapid"
 )
 
+// Deferred test categories (tracked for follow-up):
+// - P3: Backend parity property (local vs sandbox output equivalence)
+// - S2: Callback event ordering simulation
+// - SEC3: Secret redaction tests
+// - O2: Differential grep oracle (vs rg)
+// - ST1/ST2: Long-running soak tests (12h mixed-tool, high-fanout grep)
+// - B5: Bash overhead benchmark
+
 // =====================================================================
 // P1. Path Safety Property Tests
 // =====================================================================
@@ -194,16 +202,13 @@ func TestP5_TierClassifierStability(t *testing.T) {
 }
 
 // =====================================================================
-// F1. Mid-write crash simulation
+// F1. Atomic write correctness and failure path
 // =====================================================================
 
-func TestF1_AtomicWriteNoPartialOnPanic(t *testing.T) {
+func TestF1_AtomicWriteNoTempLeak(t *testing.T) {
 	root := t.TempDir()
-	original := "original content that must survive"
-	writeTestFile(t, root, "safe.txt", original)
+	writeTestFile(t, root, "safe.txt", "original")
 
-	// Verify the atomic write leaves original intact if we interrupt
-	// by writing to the file normally first, then verifying atomic write works
 	backend := NewLocalBackend(root)
 	execTool(t, backend, "write_file", map[string]any{
 		"path":    "safe.txt",
@@ -218,12 +223,48 @@ func TestF1_AtomicWriteNoPartialOnPanic(t *testing.T) {
 		t.Fatalf("atomic write produced unexpected result: %q", string(data))
 	}
 
-	// No temp files should remain
+	// No temp files should remain after successful write
 	entries, _ := os.ReadDir(root)
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), ".tmp") {
 			t.Fatalf("temp file leaked: %s", e.Name())
 		}
+	}
+}
+
+func TestF1_WriteToReadOnlyDirPreservesOriginal(t *testing.T) {
+	root := t.TempDir()
+	subdir := filepath.Join(root, "readonly")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := "must survive failed write"
+	writeTestFile(t, root, "readonly/target.txt", original)
+
+	// Make directory read-only so temp file creation fails
+	if err := os.Chmod(subdir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(subdir, 0o755) })
+
+	backend := NewLocalBackend(root)
+	resp := execTool(t, backend, "write_file", map[string]any{
+		"path":    "readonly/target.txt",
+		"content": "should not be written",
+	})
+	text := responseText(resp)
+	if !strings.Contains(text, "permission denied") && !strings.Contains(text, "read-only") {
+		// Some error message about write failure is expected
+		t.Logf("write to read-only dir response: %q", text)
+	}
+
+	// Original content must be preserved
+	data, err := os.ReadFile(filepath.Join(subdir, "target.txt"))
+	if err != nil {
+		t.Fatalf("original file lost: %v", err)
+	}
+	if string(data) != original {
+		t.Fatalf("original content corrupted: got %q, want %q", string(data), original)
 	}
 }
 
