@@ -2,7 +2,7 @@
   "id": "aiag-qkh.4",
   "title": "Message Transformation, Overflow Detection \u0026 Public API",
   "description": "Implement cross-provider message transformation, context overflow detection, and public API re-exports from docs/plans/01-ai-core.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: §10 (Cross-Provider Message Transformation), §11 (Context Overflow Detection), §14 (Public API Surface)\n\nKey deliverables:\n- TransformMessages: two-pass algorithm matching TS reference exactly\n  - Pass 1: transform content (thinking block conversion, tool call ID normalization, error/aborted message skipping, signature stripping for cross-model)\n  - Pass 2: insertSyntheticToolResults for orphaned tool calls (deterministic sorted iteration via sort.Strings on map keys)\n- ToolCallIDNormalizer function type\n- transformAssistantMessage: same-model passthrough vs cross-model conversion (thinking→text, strip signatures, normalize IDs)\n- transformToolResult: ID remapping via idMap\n- insertSyntheticToolResults: sorted map iteration for deterministic output, synthetic error results with \"No result provided\"\n- ProviderError struct (Code, Message, StatusCode, Provider, RetryAfter)\n- ProviderErrorCode constants (context_overflow, rate_limit, auth, server_error, unknown)\n- IsContextOverflow: regex-based error message matching (14+ provider patterns) + silent overflow detection (usage.input \u003e contextWindow)\n- classifyErrorMessage, providerErrorFromMessage\n- Public API surface: ai/ top-level package with type aliases and function vars re-exporting from internal/ai\n- Unit tests: golden tests for TransformMessages (9 fixture files in testdata/transform/), table-driven for overflow patterns\n- Test harness tests: P2 (TransformMessages idempotency with rapid), P6 (message count bound property), P8 (deterministic output, 100 iterations with orphaned tool calls), B3 (TransformMessages benchmark, target \u003c1ms for 50-message conversation), F4 (overflow pattern fuzz)\n- EventStream leak detection in test builds (URP §16.2): runtime.SetFinalizer warning for unclosed streams\n- All tests must pass with -race flag\n\nReferences:\n- Plan: docs/plans/01-ai-core.md §10, §11, §14\n- Test harness: docs/plans/01-ai-core-test-harness.md §1 (P2, P6, P8), §3 (F4), §5 (B3)\n- Depends on: Core Types \u0026 EventStream (aiag-qkh.1), Provider Infrastructure (aiag-qkh.2) — uses Model type, Provider interface",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-qkh",
@@ -33,6 +33,7 @@
     "batch=1",
     "plan-doc=01-ai-core"
   ],
+  "assignee": "coder-1-sea",
   "created_at": "2026-03-12T18:18:39.915351-07:00",
-  "updated_at": "2026-03-12T18:18:39.915351-07:00"
+  "updated_at": "2026-03-12T18:55:46.92688-07:00"
 }
