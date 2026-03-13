@@ -40,8 +40,14 @@
       "author": "Danny Cosson",
       "text": "Starting T8 completion: adding missing store_* builtin coverage and datastore implementation matrix tests.",
       "created_at": "2026-03-13T16:12:40.81946-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "T8 implementation complete: added missing store_* builtin coverage and datastore matrix tests; also fixed sandbox/local tool parity to include execute_script. All tests pass including -race for codeinterp.",
+      "created_at": "2026-03-13T16:13:52.813079-07:00"
     }
   ],
   "created_at": "2026-03-13T13:16:01.566218-07:00",
-  "updated_at": "2026-03-13T16:12:40.819642-07:00"
+  "updated_at": "2026-03-13T16:13:52.813649-07:00"
 }

@@ -100,6 +100,46 @@ def main(args):
 	}
 }
 
+func TestRuntimeStoreBuiltinsMatrix(t *testing.T) {
+	rt := NewRuntime(ai.Model{}, testCatalog())
+	req := ExecuteRequest{Code: `
+def main(args):
+  store_write("docs/a.txt", "hello\nworld\nalpha")
+  store_write("docs/b.txt", "beta\nworld")
+  rg = store_read_range("docs/a.txt", 0, 5)
+  matches = store_search("docs/", "world")
+  keys = store_list("docs/")
+  store_delete("docs/b.txt")
+  keys_after = store_list("docs/")
+  return {
+    "range": rg,
+    "matches": len(matches),
+    "keys": len(keys),
+    "keys_after": len(keys_after),
+  }
+`}
+	res, err := rt.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	m, ok := res.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected result type: %T", res.Result)
+	}
+	if m["range"] != "hello" {
+		t.Fatalf("unexpected range result: %+v", m)
+	}
+	if got, _ := m["matches"].(int64); got != 2 {
+		t.Fatalf("unexpected matches count: %+v", m)
+	}
+	if got, _ := m["keys"].(int64); got != 2 {
+		t.Fatalf("unexpected keys count: %+v", m)
+	}
+	if got, _ := m["keys_after"].(int64); got != 1 {
+		t.Fatalf("unexpected keys_after count: %+v", m)
+	}
+}
+
 func TestRuntimeStepBudgetExceeded(t *testing.T) {
 	rt := NewRuntime(ai.Model{}, testCatalog())
 	req := ExecuteRequest{Code: `
