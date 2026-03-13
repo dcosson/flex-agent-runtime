@@ -6,6 +6,7 @@ import (
 
 	"h2-agent-runtime/internal/agent"
 	"h2-agent-runtime/internal/ai"
+	"h2-agent-runtime/internal/tools/codeinterp"
 )
 
 // SandboxToolClient is the RPC interface that SandboxBackend delegates to.
@@ -42,7 +43,9 @@ func (b *SandboxBackend) ExecuteTool(ctx context.Context, req ToolRequest, onPro
 // execution. Tool schemas and names are identical to NewLocalTools.
 func NewSandboxTools(client SandboxToolClient, sessionID string) []agent.AgentTool {
 	backend := NewSandboxBackend(client, sessionID)
-	return buildSandboxAgentTools(backend)
+	tools := buildSandboxAgentTools(backend)
+	tools = append(tools, codeinterp.NewTool(ai.Model{}, tools))
+	return tools
 }
 
 // buildSandboxAgentTools creates AgentTools that delegate to the SandboxBackend.
