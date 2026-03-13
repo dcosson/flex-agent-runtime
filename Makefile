@@ -1,7 +1,7 @@
 GO ?= go
 PKGS := $(shell $(GO) list ./...)
 
-.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-bench test-bench-ai-core test-fuzz test-fuzz-t2 test-e2e clean
+.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-harness-openai test-bench test-bench-ai-core test-bench-openai test-stress-openai test-fuzz test-fuzz-t2 test-e2e clean
 
 help: ## Show available make targets
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_.-]+:.*##/ {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -37,12 +37,22 @@ test-harness: ## Run harness-focused tests (P*/D*/S* patterns currently implemen
 test-harness-t2: ## Run T2 thorough property test tier (10K rapid checks)
 	$(GO) test ./internal/ai -rapid.checks=10000 -run 'Test(EventStreamOrdering|TransformIdempotency|CostConsistencyRapid|P4_CoerceTypesPreservesValidTypes|EventStreamAlwaysTerminates|TransformMessageCountBound|ModelRegistryMutationIsolation|TransformDeterministic|RegistryConcurrentAccess)'
 
+test-harness-openai: ## Run OpenAI provider harness tests (P*/F*/S*/SEC*/O* patterns)
+	$(GO) test -race ./internal/ai/provider/openai/ -run 'Test(P[1-6]_|F[1-6]_|S[2-4]_|SEC[1-3]_|O3_)'
+
 test-bench: ## Run benchmark suite (B* targets)
 	$(GO) test ./... -bench . -benchmem
 
 test-bench-ai-core: ## Run B1-B7 ai-core benchmark set and write baseline snapshot
 	@mkdir -p docs/benchmarks
 	$(GO) test ./internal/ai/... -run '^$$' -bench 'Benchmark(EventStreamSendReceive|Scanner100Events|TransformMessages|ValidateToolArguments|SchemaCompilationCold|CalculateCost|GetModel)$$' -benchmem | tee docs/benchmarks/01-ai-core-baseline.txt
+
+test-bench-openai: ## Run OpenAI provider benchmarks (B1, B3, B5, B6)
+	@mkdir -p docs/benchmarks
+	$(GO) test ./internal/ai/provider/openai/ -run '^$$' -bench 'BenchmarkB[1356]_' -benchmem | tee docs/benchmarks/03-openai-provider-baseline.txt
+
+test-stress-openai: ## Run OpenAI provider stress/soak tests (ST1-ST3)
+	$(GO) test -race ./internal/ai/provider/openai/ -run 'TestST[1-3]_' -count=1
 
 test-fuzz: ## Run short fuzz checks for parser/overflow fuzz targets
 	$(GO) test ./internal/ai/sse -run '^$$' -fuzz FuzzScanner -fuzztime=5s
