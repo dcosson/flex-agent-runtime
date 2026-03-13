@@ -2,7 +2,7 @@
   "id": "aiag-suj.2",
   "title": "Agent Loop: NativeDriver, Turn Execution, Steering, Follow-up",
   "description": "Implement agent loop and NativeDriver from docs/plans/05-agent.md.\n\nSections: §5.1 (Turn Execution Algorithm), §5.2 (Steering Semantics), §5.3 (Follow-up Semantics), §5.4 (Terminal Tool), §5.5 (Snapshot Trigger Seam), §7.1 (RuntimeController Integration Contract)\n\nKey deliverables:\n- NativeDriver implementing AgentDriver (loop.go)\n- Turn execution: snapshot conversation → transform → stream → tool execution → follow-up drain\n- Provider event relay to canonical AgentEvents\n- Steering injection at external call boundaries\n- Follow-up queue with FIFO ordering\n- Terminal tool short-circuit (no extra LLM continuation)\n- Snapshot trigger seam: turn_completed + state_change(idle) events\n- Public API: Prompt, Continue, Steer, FollowUp, Abort, Subscribe, Session (agent.go)\n- Component tests with mock provider and fake tools\n- Integration test with real provider (credential-gated)\n\nRequired reading: docs/plans/00-implementation-guide.md\nSee Implementation Guide §1.4 (AgentDriver), §2.1 (Lifecycle Ordering), §3.1 (Snapshot Trigger), §4 (Common Pitfalls), §5 (Seam: ai.Provider ↔ agent NativeDriver)\n\nReferences:\n- Plan: docs/plans/05-agent.md §5, §7.1\n- Test harness: docs/plans/05-agent-test-harness.md\n- Depends on: T1 (Agent Core Types)",
-  "status": "closed",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-suj",
@@ -42,18 +42,10 @@
     {
       "id": 1,
       "author": "Danny Cosson",
-      "text": "R1 review complete — Approved with revisions. 4 findings (2 P2, 2 P3). P2s: ControlMessage reused for text/thinking deltas (add Delta field), Start() no longer transitions to Streaming synchronously. See docs/reviews/aiag-suj.2-r1-review-reviewer-sea.md",
-      "created_at": "2026-03-13T14:03:15.710181-07:00"
-    },
-    {
-      "id": 2,
-      "author": "Danny Cosson",
-      "text": "R1 re-review: all P2 findings addressed. Delta field added, ControlMessage reserved for control events, Start() transition is synchronous. Regression test verifies no ControlMessage leak on deltas. All tests pass including race detector. Approved.",
-      "created_at": "2026-03-13T14:05:23.986794-07:00"
+      "text": "Starting implementation on branch batch3/agent-loop after T1 merge to main (1461e90).",
+      "created_at": "2026-03-13T13:56:52.749235-07:00"
     }
   ],
   "created_at": "2026-03-13T13:14:35.374834-07:00",
-  "updated_at": "2026-03-13T14:05:55.728595-07:00",
-  "closed_at": "2026-03-13T14:05:55.728594-07:00",
-  "close_reason": "Closed"
+  "updated_at": "2026-03-13T13:56:52.749471-07:00"
 }
