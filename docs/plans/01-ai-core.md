@@ -1850,21 +1850,15 @@ No new findings.
 
 ## Completion Signoff
 
-- **Status**: Partial
-- **Date**: 2026-03-12
+- **Status**: Complete
+- **Date**: 2026-03-13
 - **Branch**: main
+- **Commit**: 49191b0
 - **Verified by**: coder-1-sea
-- **Completed items**:
-  - Core types, event types, provider/model registries, model catalog loading, stream entry points, options utilities, validation/coercion, overflow detection, SSE scanner, and public re-export surface are implemented in `internal/ai` and `ai/reexport.go`.
-  - Verification commands passed: `go test -race ./internal/ai/... -count=1`, `go vet ./internal/ai/...`, `go run honnef.co/go/tools/cmd/staticcheck@latest ./internal/ai/...`.
-  - Exit criteria checks 1-6 and 8-12 are satisfied by current implementation/tests and command results.
-- **Deviations**:
-  - [Contractual] `transformAssistantMessage` does not drop assistant messages that become empty after cross-model transformation (plan §10.2 specifies `if len(newContent) == 0 { return nil }`).
-  - [Missing] URP §16.2 EventStream leak detection via finalizer/creation stack tracking is not implemented.
-  - [Missing] Extreme Optimization §17.1 SSE zero-copy parsing (`unsafe.String` strategy) is not implemented.
-  - [Missing] Extreme Optimization §17.3 large-argument streaming JSON parse path (`json.NewDecoder` threshold path) is not implemented.
-  - [Cosmetic] File layout differs from plan §13 (types/content/tool/context are consolidated in `types.go`), with equivalent exported contracts.
-- **Outstanding gaps**:
-  - Gap 1: Implement plan §10.2 empty-assistant drop behavior in `TransformMessages`; suggested follow-up bead: `aiag-qkh.followup-transform-empty-assistant`.
-  - Gap 2: Implement or formally descope URP §16.2 EventStream leak detection; suggested follow-up bead: `aiag-qkh.followup-eventstream-leak-detection`.
-  - Gap 3: Implement or formally descope EO §17.1 and §17.3 optimization items; suggested follow-up bead: `aiag-qkh.followup-sse-json-optimizations`.
+- **Test verification**: `make check && go test -race ./internal/ai/... -count=1 && make test-harness-t2 && make test-fuzz-t2 && make test-bench-ai-core && go test ./internal/ai -run 'TestO[123]_.*|TestCorpusSize' -count=1` — PASS
+- **Acceptance tests**: N/A (no explicit end-user acceptance scenarios in this plan)
+- **Deviations from plan**:
+  - [Cosmetic] `internal/ai` file layout is consolidated in places versus the suggested split in §13, with equivalent exported contracts and behavior.
+- **Structural deviations resolved**: None found
+- **Additions beyond plan**:
+  - Added `internal/ai/arguments.go` with streaming JSON argument decode helpers (`json.NewDecoder`) for large tool argument payloads.
