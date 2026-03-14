@@ -2,7 +2,7 @@
   "id": "aiag-orl",
   "title": "Mode 3 E2E Implementation",
   "description": "Mode 3 E2E: remote tool dispatch via RPC. 6 scenarios + MemorySandboxService + test harness. Plan: docs/plans/14-mode3-e2e.md + test harness.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "epic",
   "dependents": [
@@ -22,5 +22,7 @@
     "batch=5"
   ],
   "created_at": "2026-03-14T14:15:13.466614-07:00",
-  "updated_at": "2026-03-14T14:15:13.466614-07:00"
+  "updated_at": "2026-03-14T14:58:39.380006-07:00",
+  "closed_at": "2026-03-14T14:58:39.380006-07:00",
+  "close_reason": "Auto-closed: all children completed"
 }
