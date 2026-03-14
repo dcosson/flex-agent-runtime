@@ -2,7 +2,7 @@
   "id": "aiag-bfu.1",
   "title": "Embedding: OpenAI adapter (pattern leader)",
   "description": "Implement OpenAI embedding provider adapter from docs/plans/01-ai-core.add01.md §8.1.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nKey deliverables:\n- OpenAI embedding adapter struct (separate from chat provider — seam review fix)\n- API ID: \"openai-embeddings\"\n- POST {baseUrl}/embeddings endpoint\n- Request mapping: req.Texts → input, req.Dimensions → dimensions, req.Encoding → encoding_format, TaskType ignored\n- Response mapping: data[i].embedding → Embedding.Values, data[i].index → Embedding.Index, usage.total_tokens → Usage.Tokens\n- HTTP client with auth header, error handling (429/400/500), timeout\n- OpenAI-compatible endpoint support (Voyage, vLLM, Ollama) via BaseURL override\n- RegisterEmbeddingProvider integration\n- Unit tests with mock HTTP server\n\nThis is the pattern leader — Google and Cohere adapters follow this pattern.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-bfu",
@@ -26,5 +26,7 @@
   ],
   "assignee": "coder-1-sea",
   "created_at": "2026-03-14T13:43:23.719597-07:00",
-  "updated_at": "2026-03-14T13:43:38.009828-07:00"
+  "updated_at": "2026-03-14T13:48:35.803772-07:00",
+  "closed_at": "2026-03-14T13:48:35.803772-07:00",
+  "close_reason": "Closed"
 }
