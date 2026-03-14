@@ -2,7 +2,7 @@
   "id": "aiag-91v",
   "title": "Mode 2 E2E Implementation",
   "description": "Mode 2 E2E: 3rd party driver in sandbox. 6 scenarios + DeterministicDriverSimulator + test harness. Plan: docs/plans/15-mode2-e2e.md + test harness.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "epic",
   "dependents": [
@@ -22,5 +22,7 @@
     "batch=5"
   ],
   "created_at": "2026-03-14T14:15:14.861474-07:00",
-  "updated_at": "2026-03-14T14:15:14.861474-07:00"
+  "updated_at": "2026-03-14T15:20:46.8951-07:00",
+  "closed_at": "2026-03-14T15:20:46.8951-07:00",
+  "close_reason": "Auto-closed: all children completed"
 }
