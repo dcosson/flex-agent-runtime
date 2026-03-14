@@ -92,6 +92,20 @@ func (m *CLIManager) SetMountpoint(ctx context.Context, dataset, mountpoint stri
 	return err
 }
 
+func (m *CLIManager) SetProperty(ctx context.Context, dataset, property, value string) error {
+	if err := ValidateName(dataset); err != nil {
+		return err
+	}
+	if err := ValidatePropertyName(property); err != nil {
+		return err
+	}
+	if strings.ContainsAny(value, "\n\r") {
+		return fmt.Errorf("%w: property value contains newline", ErrInvalidName)
+	}
+	_, err := m.exec(ctx, "SetProperty", "set", property+"="+value, dataset)
+	return err
+}
+
 func (m *CLIManager) GetDatasetInfo(ctx context.Context, name string) (*DatasetInfo, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
