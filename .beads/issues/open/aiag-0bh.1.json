@@ -25,6 +25,7 @@
     "batch=4",
     "plan-doc=09-h2-termmux-port"
   ],
+  "assignee": "reviewer-sea",
   "created_at": "2026-03-13T17:59:55.656325-07:00",
-  "updated_at": "2026-03-13T17:59:55.656325-07:00"
+  "updated_at": "2026-03-13T18:01:50.753338-07:00"
 }

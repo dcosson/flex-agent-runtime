@@ -25,6 +25,7 @@
     "batch=4",
     "plan-doc=10-sandbox-gvisor"
   ],
+  "assignee": "coder-2-sea",
   "created_at": "2026-03-13T17:59:15.037583-07:00",
-  "updated_at": "2026-03-13T17:59:15.037583-07:00"
+  "updated_at": "2026-03-13T18:01:50.74289-07:00"
 }
