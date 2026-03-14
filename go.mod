@@ -10,6 +10,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	go.starlark.net v0.0.0-20260210143700-b62fd896b91b
+	gopkg.in/yaml.v3 v3.0.1
 	pgregory.net/rapid v1.1.0
 )
 

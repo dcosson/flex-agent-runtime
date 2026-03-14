@@ -1,0 +1,6 @@
+{
+  "rpc_latency_p95_ms": 25.0,
+  "container_boot_p95_ms": 40.0,
+  "errors": 0.0,
+  "runs": 10.0
+}

@@ -1,0 +1,40 @@
+environments:
+  pr-fast:
+    - name: ci-fast-1
+      address: 10.10.0.11
+      cores: 4
+      ram_gb: 16
+      zfs_pool_gb: 50
+  pr-standard:
+    - name: ci-std-1
+      address: 10.10.1.21
+      cores: 8
+      ram_gb: 32
+      zfs_pool_gb: 100
+  nightly:
+    - name: nightly-1
+      address: 10.20.0.31
+      cores: 16
+      ram_gb: 64
+      zfs_pool_gb: 200
+    - name: nightly-2
+      address: 10.20.0.32
+      cores: 16
+      ram_gb: 64
+      zfs_pool_gb: 200
+  weekly:
+    - name: weekly-1
+      address: 10.30.0.41
+      cores: 16
+      ram_gb: 64
+      zfs_pool_gb: 200
+    - name: weekly-2
+      address: 10.30.0.42
+      cores: 16
+      ram_gb: 64
+      zfs_pool_gb: 200
+    - name: weekly-3
+      address: 10.30.0.43
+      cores: 16
+      ram_gb: 64
+      zfs_pool_gb: 200

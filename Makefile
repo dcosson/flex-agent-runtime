@@ -1,7 +1,7 @@
 GO ?= go
 PKGS := $(shell $(GO) list ./...)
 
-.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-harness-openai test-harness-google test-harness-codeinterp test-harness-e2e-codeinterp test-harness-mode3-fast test-harness-mode3-standard test-harness-mode3-nightly test-bench test-bench-ai-core test-bench-openai test-bench-google test-bench-codeinterp test-stress-openai test-stress-google test-stress-codeinterp test-stress-e2e-codeinterp test-fuzz test-fuzz-t2 test-anthropic-harness-fast test-anthropic-harness-race test-anthropic-harness-bench test-e2e clean
+.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-harness-openai test-harness-google test-harness-codeinterp test-harness-e2e-codeinterp test-harness-mode3-fast test-harness-mode3-standard test-harness-mode3-nightly test-harness-runtime-fast test-harness-runtime-standard test-harness-runtime-nightly test-harness-runtime-weekly test-bench test-bench-ai-core test-bench-openai test-bench-google test-bench-codeinterp test-stress-openai test-stress-google test-stress-codeinterp test-stress-e2e-codeinterp test-fuzz test-fuzz-t2 test-anthropic-harness-fast test-anthropic-harness-race test-anthropic-harness-bench test-e2e clean
 
 help: ## Show available make targets
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_.-]+:.*##/ {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -58,6 +58,20 @@ test-harness-mode3-standard: ## Mode 3 harness PR-standard lane (~45s): full det
 test-harness-mode3-nightly: ## Mode 3 harness nightly lane (~2h): chaos + stress + benches
 	MODE3_HARNESS_TIER=nightly $(GO) test -race ./e2etests/mode3/harness -run 'Test(F[1-8]_|ST[1-3]_|SEC[1-4]_)' -count=1
 	MODE3_HARNESS_TIER=nightly $(GO) test ./e2etests/mode3/harness -run '^$$' -bench 'BenchmarkB[1-4]_' -benchmem
+
+test-harness-runtime-fast: ## Runtime harness PR-fast lane (~5m): load scaling + baseline/artifact smoke
+	$(GO) test -race ./e2etests/runtime/tests -run 'TestLoadScaling_PSmallAndPMedium|TestLoadScaling_BaselineComparisonAndGating|TestHostConfig_LoadsFleetConfig'
+
+test-harness-runtime-standard: ## Runtime harness PR-standard lane (~30m): deterministic runtime families
+	$(GO) test -race ./e2etests/runtime/tests -run 'TestLoadScaling_|TestSoakStability_|TestSnapshotGrowth_|TestContainerBootBenchmark_|TestRPCLatencyProfiling_|TestHostConfig_'
+
+test-harness-runtime-nightly: ## Runtime harness Nightly lane (~4h): include runtime benchmarks and soak checks
+	$(GO) test -race ./e2etests/runtime/tests -run 'TestLoadScaling_|TestSoakStability_|TestSnapshotGrowth_|TestContainerBootBenchmark_|TestRPCLatencyProfiling_|TestHostConfig_' -count=1
+	$(GO) test ./e2etests/runtime/tests -run '^$$' -bench 'BenchmarkContainerBoot_' -benchmem
+
+test-harness-runtime-weekly: ## Runtime harness Weekly lane (~36h): long soak profile gate (env-controlled) + full benchmarks
+	RUNTIME_HARNESS_TIER=weekly MODE3_ENABLE_SOAK=1 $(GO) test -race ./e2etests/runtime/tests -run 'TestSoakStability_|TestSnapshotGrowth_|TestRPCLatencyProfiling_|TestHostConfig_' -count=1
+	$(GO) test ./e2etests/runtime/tests -run '^$$' -bench 'BenchmarkContainerBoot_' -benchmem
 
 test-bench: ## Run benchmark suite (B* targets)
 	$(GO) test ./... -bench . -benchmem
