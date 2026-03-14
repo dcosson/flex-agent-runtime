@@ -1,0 +1,15 @@
+{
+  "id": "aiag-kcs",
+  "title": "Mode 2 pause/resume API gap",
+  "description": "TermmuxDriverAdapter does not yet expose Pause/Resume methods. This blocks Mode 2 E2E test F4 (pause/resume race under output burst) and the TestPauseResumeLifecycleAPI test. Both are currently skipped. The adapter needs Pause() and Resume() methods wired through to the underlying termmux session lifecycle.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=ai-agent-go"
+  ],
+  "created_at": "2026-03-14T16:05:05.49313-07:00",
+  "updated_at": "2026-03-14T16:05:05.49313-07:00"
+}
