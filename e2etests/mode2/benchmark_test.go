@@ -117,13 +117,8 @@ func BenchmarkB2_PTYThroughput(b *testing.B) {
 
 		_ = sim.Run()
 
-		// Drain to prevent blocking
-		go func() {
-			for range evtCh {
-			}
-		}()
-
 		unsub()
+		close(evtCh) // allow drain goroutine to exit
 		mon.Close()
 	}
 }

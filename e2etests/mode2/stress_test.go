@@ -3,6 +3,7 @@ package mode2
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,13 @@ func TestST1_DriverSoak(t *testing.T) {
 
 	soakDuration := 30 * time.Second
 	tickInterval := 500 * time.Millisecond
+
+	// Support full 12h soak for Weekly CI tier via environment variable
+	if tier := os.Getenv("MODE2_HARNESS_TIER"); tier == "weekly" {
+		soakDuration = 12 * time.Hour
+		tickInterval = 5 * time.Second
+		t.Logf("MODE2_HARNESS_TIER=weekly: running full 12h soak")
+	}
 
 	mon := monitor.NewAgentMonitor()
 	defer mon.Close()

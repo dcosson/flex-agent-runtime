@@ -1,10 +1,13 @@
 package mode2
 
 import (
+	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"h2-agent-runtime/e2etests/mode2/harness"
 )
@@ -213,7 +216,8 @@ func TestSEC3_SessionLogSanitization_EnvVars(t *testing.T) {
 // =============================================================================
 
 func TestSEC4_PTYInputHardening_ControlSequences(t *testing.T) {
-	// Test that various control sequences don't cause crashes
+	// Test that various control sequences fed to a real PTY don't cause crashes.
+	// Uses a live shell process (cat > /dev/null) to absorb the input.
 	testInputs := [][]byte{
 		// ANSI escape sequences
 		[]byte("\x1b[0m"),       // Reset
@@ -243,45 +247,90 @@ func TestSEC4_PTYInputHardening_ControlSequences(t *testing.T) {
 		make([]byte, 8192),
 	}
 
+	// Launch a real PTY session that absorbs input
+	env := harness.NewTermmuxEnv(t, harness.TermmuxEnvConfig{
+		SessionID: "sec4-input-hardening",
+		Command:   "/bin/sh",
+		Args:      []string{"-c", "cat > /dev/null"},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := env.Start(ctx, ""); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
 	for i, input := range testInputs {
 		t.Run(fmt.Sprintf("input-%d", i), func(t *testing.T) {
-			// Create a sandbox that accepts input
-			entries := buildSimpleReplayScript()
-			sim := harness.NewDeterministicDriverSimulator(entries, harness.ReplayFastForward)
-
-			var ptyOutputs [][]byte
-			sim.OnPTYOutput = func(data []byte) {
-				ptyOutputs = append(ptyOutputs, data)
+			// Feed malformed input directly to the PTY
+			_, err := env.WritePTY(input)
+			if err != nil {
+				t.Logf("write returned error (acceptable for malformed input): %v", err)
 			}
-
-			// Should not panic or crash
-			if err := sim.Run(); err != nil {
-				t.Logf("run with input %d returned error (acceptable): %v", i, err)
-			}
-
-			// If we got this far, the system handled the input without crashing
-			_ = input // the input itself isn't fed to sim, but validates the system doesn't crash
 		})
 	}
+
+	// Session should still be controllable after all malformed inputs
+	if !env.IsRunning() {
+		t.Fatal("session crashed after malformed input injection")
+	}
+
+	env.Stop()
 }
 
 func TestSEC4_PTYOutputBoundaryHardening(t *testing.T) {
-	// Test that large and malformed PTY output is handled safely
-	entries := buildSimpleReplayScript()
+	// Test that malformed PTY output is handled safely by the simulator.
+	// Build a replay script with PTY entries containing malformed data.
+	base := time.Date(2026, 3, 12, 10, 0, 0, 0, time.UTC)
+
+	malformedOutputs := [][]byte{
+		[]byte("\x1b[0m\x1b[1;31mred text\x1b[0m"),      // ANSI color sequences
+		{0x00, 0x01, 0x02, 0x7f},                         // Control characters
+		[]byte("\x1b[999;999H\x1b[2J"),                    // Extreme cursor + clear
+		{0xc0, 0x80, 0xfe, 0xff},                         // Malformed UTF-8
+		append(make([]byte, 4096), []byte("end marker")...), // Large output block
+		[]byte("\x1b]0;evil\x07\x1b]52;c;\x07"),           // OSC sequences
+	}
+
+	var entries []harness.ReplayEntry
+	entries = append(entries, harness.ReplayEntry{
+		Timestamp: base,
+		Source:    "otel",
+		Data:      mustJSON(harness.OTELData{Span: "session_started", Attrs: map[string]any{"session_id": "sec4-output"}}),
+	})
+
+	for i, output := range malformedOutputs {
+		entries = append(entries, harness.ReplayEntry{
+			Timestamp: base.Add(time.Duration(i+1) * 100 * time.Millisecond),
+			Source:    "pty",
+			Data:      mustJSON(base64Encode(output)),
+		})
+	}
+
 	sim := harness.NewDeterministicDriverSimulator(entries, harness.ReplayFastForward)
 
 	var totalOutput int
+	var outputCount int
 	sim.OnPTYOutput = func(data []byte) {
 		totalOutput += len(data)
-		// Should not panic on any output
+		outputCount++
 	}
 
 	if err := sim.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
-	// Basic sanity: we processed some output
-	t.Logf("total PTY output processed: %d bytes", totalOutput)
+	// Verify all malformed outputs were processed
+	if outputCount != len(malformedOutputs) {
+		t.Fatalf("expected %d PTY outputs, got %d", len(malformedOutputs), outputCount)
+	}
+	if totalOutput == 0 {
+		t.Fatal("no PTY output bytes processed")
+	}
+	t.Logf("total PTY output processed: %d bytes across %d entries", totalOutput, outputCount)
 }
 
 // --- Helpers ---
@@ -301,4 +350,8 @@ func stringContains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func base64Encode(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
 }

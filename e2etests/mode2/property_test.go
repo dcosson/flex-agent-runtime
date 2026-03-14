@@ -1,6 +1,7 @@
 package mode2
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -345,53 +346,65 @@ func TestP4_IdleSnapshotTriggerInvariant(t *testing.T) {
 // =============================================================================
 
 func TestP5_AttachDetachSafety(t *testing.T) {
+	// Launch a real PTY session for attach/detach cycling
+	env := harness.NewTermmuxEnv(t, harness.TermmuxEnvConfig{
+		SessionID: "p5-attach-detach",
+		Command:   "/bin/sh",
+		Args:      []string{"-c", "while true; do sleep 0.1; done"},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := env.Start(ctx, ""); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
 	rapid.Check(t, func(rt *rapid.T) {
-		numCycles := rapid.IntRange(1, 10).Draw(rt, "numCycles")
+		numCycles := rapid.IntRange(1, 8).Draw(rt, "numCycles")
 
-		// Use the DeterministicDriverSimulator to create consistent state
-		entries := buildSimpleReplayScript()
-		sim := harness.NewDeterministicDriverSimulator(entries, harness.ReplayFastForward)
+		// Record state and metrics before attach/detach cycles
+		stateBefore, _ := env.Monitor.State()
+		metricsBefore := env.Monitor.Metrics()
 
-		mon := monitor.NewAgentMonitor()
-		defer mon.Close()
-
-		evtCh := make(chan monitor.AgentEvent, 256)
-		_, unsub := mon.Subscribe(evtCh)
-		defer unsub()
-
-		sim.MonitorSubmit = mon.Submit
-
-		// Run the simulator to establish state
-		if err := sim.Run(); err != nil {
-			rt.Fatalf("simulator run: %v", err)
-		}
-
-		// Wait for events to process
-		time.Sleep(10 * time.Millisecond)
-
-		// Record top-level state and metrics before attach/detach cycles
-		stateBeforeCycles, _ := mon.State()
-		metricsBefore := mon.Metrics()
-
-		// Perform attach/detach cycles — no PTY needed, just verifying
-		// that client connection/disconnection doesn't change semantic state
+		// Perform actual attach/detach operations
 		for i := 0; i < numCycles; i++ {
-			stateAfter, _ := mon.State()
+			clientID := fmt.Sprintf("p5-client-%d-%d", numCycles, i)
 
-			// Top-level state must not change due to attach/detach
-			// (sub-state may change due to monitor event processing timing)
-			if stateAfter != stateBeforeCycles {
-				rt.Fatalf("top-level state changed after cycle %d: %s → %s",
-					i, stateBeforeCycles, stateAfter)
+			client := env.Attach(clientID)
+			if client == nil {
+				rt.Fatalf("attach returned nil at cycle %d", i)
+			}
+
+			// Verify state unchanged after attach
+			stateAfter, _ := env.Monitor.State()
+			if stateAfter != stateBefore {
+				rt.Fatalf("state changed after attach cycle %d: %s → %s",
+					i, stateBefore, stateAfter)
+			}
+
+			env.Detach(clientID)
+
+			// Verify state unchanged after detach
+			stateAfter, _ = env.Monitor.State()
+			if stateAfter != stateBefore {
+				rt.Fatalf("state changed after detach cycle %d: %s → %s",
+					i, stateBefore, stateAfter)
 			}
 		}
 
 		// Metrics should be unchanged by attach/detach
-		metricsAfter := mon.Metrics()
+		metricsAfter := env.Monitor.Metrics()
 		if metricsAfter.TurnCount != metricsBefore.TurnCount {
 			rt.Fatalf("turn count changed: %d → %d", metricsBefore.TurnCount, metricsAfter.TurnCount)
 		}
 	})
+
+	// Session should still be alive after all cycles
+	if !env.IsRunning() {
+		t.Fatal("session died during attach/detach property test")
+	}
 }
 
 func buildSimpleReplayScript() []harness.ReplayEntry {
