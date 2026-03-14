@@ -18,8 +18,9 @@ type Session struct {
 	Config SessionConfig
 	VT     *VirtualTerminal
 
-	monitor *monitor.AgentMonitor
-	clients *ClientManager
+	monitor  *monitor.AgentMonitor
+	clients  *ClientManager
+	termSubs *terminalSubscribers
 
 	// Lifecycle
 	mu          sync.RWMutex
@@ -55,9 +56,10 @@ func NewSession(id string, cfg SessionConfig) *Session {
 	return &Session{
 		ID:         id,
 		Config:     cfg,
-		VT:         &VirtualTerminal{},
+		VT:         NewVirtualTerminal(),
 		monitor:    monitor.NewAgentMonitor(),
 		clients:    NewClientManager(),
+		termSubs:   newTerminalSubscribers(),
 		exitNotify: make(chan struct{}),
 		stopCh:     make(chan struct{}),
 		createdAt:  time.Now(),
@@ -112,6 +114,8 @@ func (s *Session) Start(ctx context.Context) error {
 
 		err := s.VT.PipeOutput(func(data []byte) {
 			s.clients.FanOut(data)
+			s.VT.AppendScrollback(data)
+			s.termSubs.FanOut(data)
 		})
 
 		// Child has exited
@@ -200,6 +204,7 @@ func (s *Session) cleanup() {
 	s.cleanupOnce.Do(func() {
 		s.VT.Close()
 		s.clients.CloseAll()
+		s.termSubs.CloseAll()
 		s.monitor.Close()
 		if s.cancelFn != nil {
 			s.cancelFn()
@@ -272,4 +277,27 @@ func (s *Session) CreatedAt() time.Time {
 // ClientCount returns the number of attached clients.
 func (s *Session) ClientCount() int {
 	return s.clients.Count()
+}
+
+// SubscribeTerminal creates a new terminal output subscription.
+// The subscriber receives a scrollback snapshot of recent output and
+// then live raw PTY output chunks via the Chunks channel.
+func (s *Session) SubscribeTerminal(subscriberID string) *TerminalSubscription {
+	s.VT.Mu.Lock()
+	scrollback := s.VT.ScrollbackSnapshot()
+	rows := s.VT.Rows
+	cols := s.VT.Cols
+	s.VT.Mu.Unlock()
+
+	return s.termSubs.Subscribe(subscriberID, scrollback, rows, cols)
+}
+
+// UnsubscribeTerminal removes a terminal output subscription.
+func (s *Session) UnsubscribeTerminal(subscriberID string) {
+	s.termSubs.Unsubscribe(subscriberID)
+}
+
+// TerminalSubscriberCount returns the number of active terminal subscribers.
+func (s *Session) TerminalSubscriberCount() int {
+	return s.termSubs.Count()
 }

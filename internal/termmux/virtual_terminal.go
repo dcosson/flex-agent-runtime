@@ -29,6 +29,33 @@ type VirtualTerminal struct {
 	ChildExited bool
 	ChildHung   bool
 	ExitError   error
+
+	// Scrollback for terminal streaming
+	scrollback *scrollbackBuffer
+}
+
+// NewVirtualTerminal creates a VirtualTerminal with scrollback support.
+func NewVirtualTerminal() *VirtualTerminal {
+	return &VirtualTerminal{
+		scrollback: newScrollbackBuffer(maxScrollbackBytes),
+	}
+}
+
+// AppendScrollback adds raw PTY output to the scrollback buffer.
+// This is called from PipeOutput's callback to record output for
+// late-attaching terminal subscribers.
+func (vt *VirtualTerminal) AppendScrollback(data []byte) {
+	vt.Mu.Lock()
+	defer vt.Mu.Unlock()
+	vt.scrollback.Write(data)
+}
+
+// ScrollbackSnapshot returns a copy of the most recent scrollback history
+// as raw bytes suitable for replay into xterm.js.
+// The snapshot is capped at MaxScrollbackSnapshotBytes.
+// Must be called with Mu held.
+func (vt *VirtualTerminal) ScrollbackSnapshot() []byte {
+	return vt.scrollback.Snapshot(MaxScrollbackSnapshotBytes)
 }
 
 // StartPTY allocates a PTY and starts the command in it.
@@ -58,8 +85,11 @@ func (vt *VirtualTerminal) StartPTY(command string, args []string, rows, cols in
 		cmd.Dir = cwd
 	}
 
-	// Build environment
+	// Build environment: system → terminal defaults → user overrides
 	cmdEnv := os.Environ()
+	for k, v := range TerminalEnvDefaults() {
+		cmdEnv = append(cmdEnv, k+"="+v)
+	}
 	for k, v := range env {
 		cmdEnv = append(cmdEnv, k+"="+v)
 	}
