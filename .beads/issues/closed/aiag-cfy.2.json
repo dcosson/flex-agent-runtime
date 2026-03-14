@@ -2,7 +2,7 @@
   "id": "aiag-cfy.2",
   "title": "Runtime Harness: Meta-tests (must-have P1-P3, F1-F2 + stretch suites)",
   "description": "Implement runtime harness meta-tests from docs/plans/16-runtime-test-harness-test-harness.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nKey deliverables (must-have):\n- P1: Workload generator validity (profile constraints, mode ratio ±1, concurrency caps)\n- P2: Metrics aggregation conservation (aggregated = sum of per-session)\n- P3: Baseline comparison determinism (identical verdicts across N\u003e=100 runs)\n- F1: Telemetry loss bursts (graceful degrade, data-quality flags)\n- F2: Clock skew simulation (timeline normalization, robust percentiles)\n\nStretch deliverables:\n- P4-P5, F3-F5, O1-O3, S1-S3, B1-B4, ST1-ST3, SEC1-SEC4\n\nCI tiers: PR-fast ~10m (must-have), Nightly ~1h (all), Weekly ~24h (stress/soak)\n\nDepends on: Runtime harness core task.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-cfy",
@@ -30,8 +30,16 @@
       "author": "Danny Cosson",
       "text": "Implementation complete @ 2f382be. All must-have tests (P1-P3, F1-F2) plus full stretch suite (P4-P5, F3/F5, O1-O3, S1-S3, B1-B4, ST1-ST3, SEC1-SEC4) implemented. 1933 lines across 8 test files. All pass including 30s soak, high-cardinality stress (100k events), concurrent scheduler isolation. SEC4 fuzzing found 2 controller panic bugs (negative concurrency, zero weights). Awaiting review.",
       "created_at": "2026-03-14T15:47:15.422838-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R1 review signed off by reviewer-sea. All 4 findings verified. Bead closed.",
+      "created_at": "2026-03-14T15:57:31.190769-07:00"
     }
   ],
   "created_at": "2026-03-14T14:16:44.186122-07:00",
-  "updated_at": "2026-03-14T15:47:15.423878-07:00"
+  "updated_at": "2026-03-14T15:57:31.190958-07:00",
+  "closed_at": "2026-03-14T15:57:27.969983-07:00",
+  "close_reason": "Closed"
 }
