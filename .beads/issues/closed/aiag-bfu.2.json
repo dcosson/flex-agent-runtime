@@ -2,7 +2,7 @@
   "id": "aiag-bfu.2",
   "title": "Embedding: Google + Cohere adapters",
   "description": "Implement Google and Cohere embedding provider adapters from docs/plans/01-ai-core.add01.md §8.2-§8.3.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nGoogle adapter (§8.2):\n- API ID: \"google-embeddings\"\n- Single: POST {baseUrl}/models/{model}:embedContent\n- Batch: POST {baseUrl}/models/{model}:batchEmbedContents\n- Request mapping: texts → requests[i].content.parts[0].text, TaskType → taskType (8 enum values), Dimensions → outputDimensionality, Encoding ignored (float only)\n- Response mapping: embeddings[i].values → Embedding.Values, usage estimated from input text\n- Google-specific task type mapping (RETRIEVAL_QUERY, RETRIEVAL_DOCUMENT, SEMANTIC_SIMILARITY, CLASSIFICATION, CLUSTERING, QUESTION_ANSWERING, FACT_VERIFICATION, CODE_RETRIEVAL)\n\nCohere adapter (§8.3):\n- API ID: \"cohere-embeddings\"\n- POST {baseUrl}/embed\n- Request mapping: texts, TaskType → input_type (required, defaults to \"search_document\"), Dimensions → output_dimension, Encoding → embedding_types\n- Response mapping: embeddings.float[i] → Values, embeddings.int8[i] → Raw, meta.billed_units.input_tokens → Usage.Tokens\n- Cohere requires input_type — adapter must default to \"search_document\" when TaskType is unspecified\n\nBoth: HTTP client, auth, error handling, RegisterEmbeddingProvider, unit tests with mock HTTP server.\nFollow the OpenAI adapter pattern established in the pattern leader task.\n\nDepends on: OpenAI adapter (pattern leader).",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-bfu",
@@ -32,5 +32,7 @@
     }
   ],
   "created_at": "2026-03-14T13:43:26.032554-07:00",
-  "updated_at": "2026-03-14T13:52:55.823093-07:00"
+  "updated_at": "2026-03-14T13:55:27.711764-07:00",
+  "closed_at": "2026-03-14T13:55:27.711764-07:00",
+  "close_reason": "Closed"
 }
