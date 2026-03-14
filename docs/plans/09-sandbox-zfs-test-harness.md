@@ -1026,12 +1026,12 @@ Before `09-sandbox-zfs` implementation is considered complete:
 - **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
-- **Commit**: 892bd15
+- **Commit**: 1070660
 - **Verified by**: coder-1-sea
 - **Test verification**: `go test -race ./internal/sandbox/zfs/...` — PASS
 - **Acceptance tests**: N/A (harness plan)
 - **Deviations from plan**:
-  - [Cosmetic] Test file names differ from examples, but P/FI/S/B/ST/SEC coverage exists in harness.
+  - [Cosmetic] Suite/test file names differ from doc examples; required coverage categories are present.
 - **Structural deviations resolved**: None found
 - **Additions beyond plan**:
-  - Added dedicated parser-focused tests (`cli_parse_test.go`) alongside core harness suites.
+  - Added parser-focused harness coverage in dedicated tests.

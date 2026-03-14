@@ -513,12 +513,12 @@ This metadata is included in `ExecuteToolResponse` so that the agent and Runtime
 - **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
-- **Commit**: 0fd4d02
+- **Commit**: 1070660
 - **Verified by**: coder-1-sea
-- **Test verification**: `go test -race ./internal/rpc/... ./internal/rpc/transport/...` — PASS
-- **Acceptance tests**: PASS (session lifecycle RPC, tool streaming, event stream, retry/error mapping, terminal stream seam)
+- **Test verification**: `go test -race ./internal/rpc/...` — PASS
+- **Acceptance tests**: PASS (session/tool/event/terminal transport and error-mapping contracts)
 - **Deviations from plan**:
-  - [Cosmetic] Transport currently uses JSON codec with connect handlers while preserving plan-level contracts and limits.
+  - [Cosmetic] Transport implementation uses Connect handlers with JSON codec while preserving planned contracts.
 - **Structural deviations resolved**: None found
 - **Additions beyond plan**:
-  - Added explicit `wsrelay` bridge package and terminal transport tests coupled to ConnectRPC handlers.
+  - Added dedicated websocket relay bridge package and transport-focused terminal tests.

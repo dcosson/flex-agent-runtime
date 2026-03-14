@@ -790,12 +790,12 @@ Before `11-sandbox-host-service` implementation is considered complete:
 - **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
-- **Commit**: 0fd4d02
+- **Commit**: 1070660
 - **Verified by**: coder-1-sea
-- **Test verification**: `go test -race ./cmd/sandbox-host ./internal/sandbox/...` — PASS
+- **Test verification**: `go test -race ./cmd/sandbox-host ./internal/sandbox/... ./internal/rpc/...` — PASS
 - **Acceptance tests**: N/A (harness plan)
 - **Deviations from plan**:
-  - [Cosmetic] Binary-level runtime checks are covered via focused host/transport tests plus sandbox integration tests rather than a standalone harness package.
+  - [Cosmetic] Harness scenarios are distributed across sandbox and transport test packages.
 - **Structural deviations resolved**: None found
 - **Additions beyond plan**:
-  - Added transport-coupled host validation paths via `internal/rpc/transport` tests.
+  - Added transport-coupled host validation coverage in RPC transport tests.

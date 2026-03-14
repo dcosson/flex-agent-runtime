@@ -1062,3 +1062,20 @@ No new external dependencies. Uses only stdlib (`context`, `fmt`, `sync`) and th
 | 3 | reviewer-sea | P2 | Provider plans 03/04 don't document embedding support | Not Incorporated | Out of scope for this addendum; tracked as future addenda for plans 03/04 |
 | 4 | reviewer-sea | P3 | Embed() takes modelID string vs chat's Stream() taking Model struct | Not Incorporated | Deliberate design choice; flat registry enables simpler lookup |
 | 5 | reviewer-sea | P3 | Error classification pattern differs between chat and embedding | Not Incorporated | Inherent to streaming vs synchronous API surface |
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-14
+- **Branch**: main
+- **Commit**: 1070660
+- **Verified by**: coder-1-sea
+- **Test verification**: `go test -race ./internal/ai/... ./internal/ai/provider/openai/... ./ai` — PASS
+- **Acceptance tests**: PASS (AC1-AC6 satisfied by embedding core + provider adapter implementation/tests)
+- **Deviations from plan**:
+  - [Cosmetic] Core and provider test coverage split between `embedding_*_test.go` and provider-specific harness files.
+- **Structural deviations resolved**: None found
+- **Additions beyond plan**:
+  - Added OpenAI embedding adapter as initial pattern-leader implementation with mock-server wire tests.

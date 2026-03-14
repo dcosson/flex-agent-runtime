@@ -1416,12 +1416,12 @@ Some environments require `sudo` for ZFS operations. The `WithSudo` option handl
 - **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
-- **Commit**: 892bd15
+- **Commit**: 1070660
 - **Verified by**: coder-1-sea
 - **Test verification**: `go test -race ./internal/sandbox/zfs/...` — PASS
-- **Acceptance tests**: PASS (mapped to AC + exit criteria via `internal/sandbox/zfs/ops_test.go` and `internal/sandbox/zfs/harness_test.go`)
+- **Acceptance tests**: PASS (AC + exit criteria scenarios validated in zfs unit/integration/harness suites)
 - **Deviations from plan**:
-  - [Cosmetic] Package file split differs slightly from illustrative structure; contracts and behavior match.
+  - [Cosmetic] Implementation file organization differs from illustrative package tree only.
 - **Structural deviations resolved**: None found
 - **Additions beyond plan**:
-  - Added explicit compile-time interface assertion (`assertions.go`) for `MockManager`.
+  - Compile-time interface assertion for mock/manager parity.

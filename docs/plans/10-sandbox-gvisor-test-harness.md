@@ -913,12 +913,12 @@ Implementation is considered complete when ALL of the following pass:
 - **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
-- **Commit**: 892bd15
+- **Commit**: 1070660
 - **Verified by**: coder-1-sea
 - **Test verification**: `go test -race ./internal/sandbox/gvisor/...` — PASS
 - **Acceptance tests**: N/A (harness plan)
 - **Deviations from plan**:
-  - [Cosmetic] Tier labels in comments differ slightly from doc wording; required suites are present.
+  - [Cosmetic] Tier labels and filenames vary slightly from the written examples.
 - **Structural deviations resolved**: None found
 - **Additions beyond plan**:
-  - Added targeted `exec_test.go` to isolate runsc arg/output behavior.
+  - Focused runsc arg/output tests in dedicated exec coverage.

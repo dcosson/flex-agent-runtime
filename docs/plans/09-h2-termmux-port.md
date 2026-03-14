@@ -692,12 +692,12 @@ internal/termmux/
 - **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
-- **Commit**: 892bd15
+- **Commit**: 1070660
 - **Verified by**: coder-1-sea
 - **Test verification**: `go test -race ./internal/termmux/... ./internal/agent/...` — PASS
-- **Acceptance tests**: PASS (session lifecycle/events/OTEL/session-log/codex paths covered in termmux + agent tests)
+- **Acceptance tests**: PASS (session lifecycle, event normalization, monitor/driver integration)
 - **Deviations from plan**:
-  - [Cosmetic] Some migration artifacts live in additional helper files compared to the illustrative package tree.
+  - [Cosmetic] Migration landed with extra helper files compared to illustrative tree.
 - **Structural deviations resolved**: None found
 - **Additions beyond plan**:
-  - Added dedicated `internal/agent/driver_termmux.go` adapter tests for seam validation.
+  - Added direct termmux-driver adapter seam tests in agent package.

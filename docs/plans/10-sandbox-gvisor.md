@@ -1734,12 +1734,12 @@ Should we capture runsc's debug logs for troubleshooting? Options:
 - **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
-- **Commit**: 892bd15
+- **Commit**: 1070660
 - **Verified by**: coder-1-sea
 - **Test verification**: `go test -race ./internal/sandbox/gvisor/...` — PASS
-- **Acceptance tests**: PASS (covered by manager/exec/health and harness suites)
+- **Acceptance tests**: PASS (manager lifecycle, limits, cleanup, and isolation behavior covered)
 - **Deviations from plan**:
-  - [Cosmetic] Some implementation details are split across `manager.go`/`exec.go`/`health.go` rather than exact plan file names.
+  - [Cosmetic] Implementation split across manager/exec/health files rather than exact illustrative filenames.
 - **Structural deviations resolved**: None found
 - **Additions beyond plan**:
-  - Added explicit stale-container cleanup and lifecycle tests in dedicated files.
+  - Explicit stale-container cleanup validation paths and tests.

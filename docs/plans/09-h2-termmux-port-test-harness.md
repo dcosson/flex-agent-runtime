@@ -192,12 +192,12 @@ Target:
 - **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
-- **Commit**: 892bd15
+- **Commit**: 1070660
 - **Verified by**: coder-1-sea
 - **Test verification**: `go test -race ./internal/termmux/... ./internal/agent/...` — PASS
 - **Acceptance tests**: N/A (harness plan)
 - **Deviations from plan**:
-  - [Cosmetic] Some suite names are grouped in `termmux_harness_test.go` rather than one file per suite.
+  - [Cosmetic] Suite colocation differs from one-file-per-suite examples.
 - **Structural deviations resolved**: None found
 - **Additions beyond plan**:
-  - Included integration checks tying terminal subscriptions directly to session lifecycle.
+  - Additional lifecycle-linked subscription checks in integration tests.

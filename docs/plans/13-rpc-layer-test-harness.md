@@ -204,12 +204,12 @@ Target:
 - **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
-- **Commit**: 0fd4d02
+- **Commit**: 1070660
 - **Verified by**: coder-1-sea
 - **Test verification**: `go test -race ./internal/rpc/rpctest/... ./internal/rpc/transport/... ./internal/rpc/wsrelay/...` — PASS
 - **Acceptance tests**: N/A (harness plan)
 - **Deviations from plan**:
-  - [Cosmetic] Transport-specific tests are split between `transport` and `wsrelay` packages in addition to `rpctest`.
+  - [Cosmetic] Harness assertions are split across rpctest/transport/wsrelay packages.
 - **Structural deviations resolved**: None found
 - **Additions beyond plan**:
-  - Added direct terminal stream relay tests to validate browser-bridge semantics under race detection.
+  - Added direct relay semantics checks under race detection.

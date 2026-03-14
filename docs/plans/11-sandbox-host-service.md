@@ -1524,12 +1524,12 @@ Should sessions have a configurable time-to-live after which they are automatica
 - **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
-- **Commit**: 0fd4d02
+- **Commit**: 1070660
 - **Verified by**: coder-1-sea
 - **Test verification**: `go test -race ./cmd/sandbox-host ./internal/sandbox/... ./internal/rpc/...` — PASS
-- **Acceptance tests**: PASS (AC1-AC6 mapped to `internal/sandbox/*` suites plus wired `cmd/sandbox-host` runtime path)
+- **Acceptance tests**: PASS (session lifecycle, tool execution, snapshots/rollback, host wiring)
 - **Deviations from plan**:
-  - [Cosmetic] Configuration file support is JSON-based and optional; plan did not mandate a specific file format.
+  - [Cosmetic] Optional JSON config-file overlay extends (but does not alter) planned startup configuration behavior.
 - **Structural deviations resolved**: None found
 - **Additions beyond plan**:
-  - `internal/rpc/transport` integration from host binary, including API version and auth hook enforcement.
+  - ConnectRPC transport wiring with version/auth enforcement integrated in host binary startup path.
