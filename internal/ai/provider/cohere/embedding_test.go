@@ -1,0 +1,323 @@
+package cohere
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"sync/atomic"
+	"testing"
+
+	"h2-agent-runtime/internal/ai"
+)
+
+func TestEmbeddingProvider_APIAndRegister(t *testing.T) {
+	ai.ClearEmbeddingProviders()
+	t.Cleanup(ai.ClearEmbeddingProviders)
+
+	p := RegisterEmbedding(Config{APIKey: "k"}, "src")
+	if p.API() != "cohere-embeddings" {
+		t.Fatalf("api=%q", p.API())
+	}
+	got, err := ai.GetEmbeddingProvider("cohere-embeddings")
+	if err != nil {
+		t.Fatalf("GetEmbeddingProvider err: %v", err)
+	}
+	if got.API() != p.API() {
+		t.Fatalf("registered provider mismatch")
+	}
+}
+
+func TestEmbeddingProvider_EmbedSingleSuccess(t *testing.T) {
+	var seenAuth string
+	var seenReq embedRequestWire
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/embed" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		seenAuth = r.Header.Get("authorization")
+		if err := json.NewDecoder(r.Body).Decode(&seenReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(embedResponseWire{
+			Embeddings: embeddingsContainer{
+				Float: [][]float32{{0.1, 0.2}, {0.3, 0.4}},
+			},
+			Meta: embedMeta{BilledUnits: billedUnits{InputTokens: 15}},
+		})
+	}))
+	defer srv.Close()
+
+	p := NewEmbedding(Config{BaseURL: srv.URL, APIKey: "secret"})
+	model := ai.EmbeddingModel{ID: "embed-v3.5", BaseURL: srv.URL, MaxBatchSize: 96}
+	resp, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
+		Texts:    []string{"hello", "world"},
+		TaskType: ai.EmbeddingTaskQuery,
+	})
+	if err != nil {
+		t.Fatalf("Embed err: %v", err)
+	}
+	if seenAuth != "Bearer secret" {
+		t.Fatalf("authorization=%q", seenAuth)
+	}
+	if seenReq.Model != "embed-v3.5" {
+		t.Fatalf("model=%q", seenReq.Model)
+	}
+	if seenReq.InputType != "search_query" {
+		t.Fatalf("input_type=%q", seenReq.InputType)
+	}
+	if !reflect.DeepEqual(seenReq.Texts, []string{"hello", "world"}) {
+		t.Fatalf("texts mismatch: %v", seenReq.Texts)
+	}
+	if resp.Usage.Tokens != 15 {
+		t.Fatalf("tokens=%d", resp.Usage.Tokens)
+	}
+	if len(resp.Embeddings) != 2 || resp.Embeddings[1].Index != 1 {
+		t.Fatalf("embeddings mismatch: %+v", resp.Embeddings)
+	}
+}
+
+func TestEmbeddingProvider_InputTypeMapping(t *testing.T) {
+	tests := []struct {
+		taskType  ai.EmbeddingTaskType
+		wantInput string
+	}{
+		{ai.EmbeddingTaskQuery, "search_query"},
+		{ai.EmbeddingTaskDocument, "search_document"},
+		{ai.EmbeddingTaskClassification, "classification"},
+		{ai.EmbeddingTaskClustering, "clustering"},
+		{ai.EmbeddingTaskSimilarity, "search_document"},
+		{ai.EmbeddingTaskUnspecified, "search_document"},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.taskType), func(t *testing.T) {
+			var seenReq embedRequestWire
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&seenReq)
+				_ = json.NewEncoder(w).Encode(embedResponseWire{
+					Embeddings: embeddingsContainer{Float: [][]float32{{1}}},
+				})
+			}))
+			defer srv.Close()
+
+			p := NewEmbedding(Config{BaseURL: srv.URL})
+			model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+			_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
+				Texts:    []string{"x"},
+				TaskType: tc.taskType,
+			})
+			if err != nil {
+				t.Fatalf("Embed err: %v", err)
+			}
+			if seenReq.InputType != tc.wantInput {
+				t.Fatalf("input_type=%q want=%q", seenReq.InputType, tc.wantInput)
+			}
+		})
+	}
+}
+
+func TestEmbeddingProvider_QuantizedEncoding(t *testing.T) {
+	tests := []struct {
+		name     string
+		encoding ai.EmbeddingEncoding
+		resp     embedResponseWire
+		wantRaw  any
+	}{
+		{
+			name:     "int8",
+			encoding: ai.EmbeddingEncodingInt8,
+			resp: embedResponseWire{
+				Embeddings: embeddingsContainer{Int8: [][]int8{{1, -2, 3}}},
+			},
+			wantRaw: []int8{1, -2, 3},
+		},
+		{
+			name:     "uint8",
+			encoding: ai.EmbeddingEncodingUint8,
+			resp: embedResponseWire{
+				Embeddings: embeddingsContainer{Uint8: [][]uint8{{10, 20, 30}}},
+			},
+			wantRaw: []uint8{10, 20, 30},
+		},
+		{
+			name:     "binary",
+			encoding: ai.EmbeddingEncodingBinary,
+			resp: embedResponseWire{
+				Embeddings: embeddingsContainer{Binary: [][]int8{{-1, 0, 1}}},
+			},
+			wantRaw: []int8{-1, 0, 1},
+		},
+		{
+			name:     "ubinary",
+			encoding: ai.EmbeddingEncodingUBinary,
+			resp: embedResponseWire{
+				Embeddings: embeddingsContainer{Ubinary: [][]uint8{{0, 1, 255}}},
+			},
+			wantRaw: []uint8{0, 1, 255},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req embedRequestWire
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				if len(req.EmbeddingTypes) != 1 || req.EmbeddingTypes[0] != string(tc.encoding) {
+					t.Fatalf("embedding_types=%v want=[%q]", req.EmbeddingTypes, tc.encoding)
+				}
+				_ = json.NewEncoder(w).Encode(tc.resp)
+			}))
+			defer srv.Close()
+
+			p := NewEmbedding(Config{BaseURL: srv.URL})
+			model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+			resp, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
+				Texts:    []string{"x"},
+				Encoding: tc.encoding,
+			})
+			if err != nil {
+				t.Fatalf("Embed err: %v", err)
+			}
+			if len(resp.Embeddings) != 1 {
+				t.Fatalf("embeddings=%d", len(resp.Embeddings))
+			}
+			if resp.Embeddings[0].Raw == nil {
+				t.Fatal("expected Raw to be set for quantized encoding")
+			}
+			if !reflect.DeepEqual(resp.Embeddings[0].Raw, tc.wantRaw) {
+				t.Fatalf("raw=%v want=%v", resp.Embeddings[0].Raw, tc.wantRaw)
+			}
+		})
+	}
+}
+
+func TestEmbeddingProvider_DimensionsAndDefaultEncoding(t *testing.T) {
+	var seenReq embedRequestWire
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&seenReq)
+		_ = json.NewEncoder(w).Encode(embedResponseWire{
+			Embeddings: embeddingsContainer{Float: [][]float32{{1}}},
+		})
+	}))
+	defer srv.Close()
+
+	p := NewEmbedding(Config{BaseURL: srv.URL})
+	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
+		Texts:      []string{"x"},
+		Dimensions: 512,
+	})
+	if err != nil {
+		t.Fatalf("Embed err: %v", err)
+	}
+	if seenReq.OutputDimension == nil || *seenReq.OutputDimension != 512 {
+		t.Fatal("output_dimension not propagated")
+	}
+	if seenReq.EmbeddingTypes != nil {
+		t.Fatalf("expected nil embedding_types for float, got %v", seenReq.EmbeddingTypes)
+	}
+}
+
+func TestEmbeddingProvider_ModelBaseURLOverride(t *testing.T) {
+	hit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		_ = json.NewEncoder(w).Encode(embedResponseWire{
+			Embeddings: embeddingsContainer{Float: [][]float32{{1}}},
+		})
+	}))
+	defer srv.Close()
+
+	p := NewEmbedding(Config{BaseURL: "http://127.0.0.1:1"})
+	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	if _, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}}); err != nil {
+		t.Fatalf("Embed err: %v", err)
+	}
+	if !hit {
+		t.Fatal("expected model baseURL override to be used")
+	}
+}
+
+func TestEmbeddingProvider_HTTPErrorClassification(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		code   ai.ProviderErrorCode
+		msg    string
+	}{
+		{name: "rate-limit", status: 429, code: ai.ErrRateLimit, msg: "too many"},
+		{name: "auth", status: 401, code: ai.ErrAuth, msg: "bad auth"},
+		{name: "forbidden", status: 403, code: ai.ErrAuth, msg: "forbidden"},
+		{name: "server", status: 500, code: ai.ErrServerError, msg: "boom"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_ = json.NewEncoder(w).Encode(cohereErrorResponse{Message: tc.msg})
+			}))
+			defer srv.Close()
+
+			p := NewEmbedding(Config{BaseURL: srv.URL})
+			_, err := p.Embed(context.Background(), ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}, ai.EmbeddingRequest{Texts: []string{"x"}})
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			var pErr *ai.ProviderError
+			if !errors.As(err, &pErr) {
+				t.Fatalf("expected ProviderError, got %T", err)
+			}
+			if pErr.Code != tc.code {
+				t.Fatalf("code=%q want=%q", pErr.Code, tc.code)
+			}
+		})
+	}
+}
+
+func TestEmbeddingProvider_BatchSplitAndProgress(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req embedRequestWire
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode req: %v", err)
+		}
+		call := int(calls.Add(1))
+		vecs := make([][]float32, len(req.Texts))
+		for i := range req.Texts {
+			vecs[i] = []float32{float32(call), float32(i)}
+		}
+		_ = json.NewEncoder(w).Encode(embedResponseWire{
+			Embeddings: embeddingsContainer{Float: vecs},
+			Meta:       embedMeta{BilledUnits: billedUnits{InputTokens: len(req.Texts)}},
+		})
+	}))
+	defer srv.Close()
+
+	progress := make([][2]int, 0)
+	p := NewEmbedding(Config{BaseURL: srv.URL})
+	resp, err := p.Embed(context.Background(), ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 2}, ai.EmbeddingRequest{
+		Texts: []string{"a", "b", "c", "d", "e"},
+		OnProgress: func(done, total int) {
+			progress = append(progress, [2]int{done, total})
+		},
+	})
+	if err != nil {
+		t.Fatalf("Embed err: %v", err)
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("calls=%d want=3", calls.Load())
+	}
+	if len(resp.Embeddings) != 5 {
+		t.Fatalf("embeddings=%d", len(resp.Embeddings))
+	}
+	for i := 0; i < 5; i++ {
+		if resp.Embeddings[i].Index != i {
+			t.Fatalf("index[%d]=%d", i, resp.Embeddings[i].Index)
+		}
+	}
+	wantProgress := [][2]int{{2, 5}, {4, 5}, {5, 5}}
+	if !reflect.DeepEqual(progress, wantProgress) {
+		t.Fatalf("progress=%v want=%v", progress, wantProgress)
+	}
+}
