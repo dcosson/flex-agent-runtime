@@ -97,8 +97,8 @@ func TestMockManagerSnapshotHoldRelease(t *testing.T) {
 	if err := m.HoldSnapshot(ctx, "pool/sessions/s1", "turn-1", "protect"); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.DestroySnapshot(ctx, "pool/sessions/s1", "turn-1"); !errors.Is(err, ErrBusy) {
-		t.Fatalf("expected ErrBusy, got %v", err)
+	if err := m.DestroySnapshot(ctx, "pool/sessions/s1", "turn-1"); !errors.Is(err, ErrSnapshotHeld) {
+		t.Fatalf("expected ErrSnapshotHeld, got %v", err)
 	}
 	if err := m.ReleaseSnapshot(ctx, "pool/sessions/s1", "turn-1", "protect"); err != nil {
 		t.Fatal(err)
@@ -112,6 +112,12 @@ func TestMockManagerSendReceive(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	m := NewMockManager()
+	if err := m.CreateDataset(ctx, "pool/base", DatasetOptions{}); err != nil {
+		t.Fatalf("CreateDataset error = %v", err)
+	}
+	if _, err := m.CreateSnapshot(ctx, "pool/base", "init"); err != nil {
+		t.Fatalf("CreateSnapshot error = %v", err)
+	}
 	var out bytes.Buffer
 	if err := m.Send(ctx, "pool/base@init", SendOptions{}, &out); err != nil {
 		t.Fatalf("Send error = %v", err)

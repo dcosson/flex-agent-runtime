@@ -189,7 +189,10 @@ func (m *CLIManager) exec(ctx context.Context, op string, args ...string) ([]byt
 		"stderr", stderrStr,
 	)
 	if err != nil {
-		wrapped := classifyError(stderrStr, exitCode)
+		wrapped := classifyError(op, stderrStr, exitCode)
+		if wrapped == nil {
+			return stdout, nil
+		}
 		if ctxErr := execCtx.Err(); ctxErr != nil {
 			wrapped = ctxErr
 		}
@@ -236,7 +239,10 @@ func (m *CLIManager) execStream(ctx context.Context, op string, args []string, s
 		"stderr", stderrStr,
 	)
 	if err != nil {
-		wrapped := classifyError(stderrStr, exitCode)
+		wrapped := classifyError(op, stderrStr, exitCode)
+		if wrapped == nil {
+			return stderr, nil
+		}
 		if ctxErr := execCtx.Err(); ctxErr != nil {
 			wrapped = ctxErr
 		}
@@ -292,10 +298,8 @@ func parseRatio(s string) (float64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("parse ratio %q: %w", s, err)
 	}
-	if v > 1 {
-		return v / 100, nil
-	}
-	return v, nil
+	// zpool list -p emits integer percentages (0..100).
+	return v / 100, nil
 }
 
 func parsePoolStatus(pool string, out []byte) (*PoolStatus, error) {

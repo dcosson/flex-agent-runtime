@@ -45,7 +45,7 @@ func TestP3ErrorClassificationTotality(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		stderr := rapid.String().Draw(rt, "stderr")
 		exitCode := rapid.IntRange(1, 255).Draw(rt, "exit")
-		err := classifyError(stderr, exitCode)
+		err := classifyError("Harness", stderr, exitCode)
 		if err == nil {
 			rt.Fatalf("expected non-nil classification for exit=%d", exitCode)
 		}
@@ -110,7 +110,7 @@ func TestFI1ContextCancellationDuringSend(t *testing.T) {
 }
 
 func TestFI2PoolSpaceExhaustionClassification(t *testing.T) {
-	err := &ZFSError{Err: classifyError("no space left on device", 1)}
+	err := &ZFSError{Err: classifyError("Harness", "no space left on device", 1)}
 	if !errors.Is(err, ErrNoSpace) {
 		t.Fatalf("expected ErrNoSpace, got %v", err)
 	}
@@ -267,7 +267,7 @@ func BenchmarkB2ValidateSnapshotName(b *testing.B) {
 
 func BenchmarkB3ClassifyError(b *testing.B) {
 	for b.Loop() {
-		_ = classifyError("no space left on device", 1)
+		_ = classifyError("Harness", "no space left on device", 1)
 	}
 }
 

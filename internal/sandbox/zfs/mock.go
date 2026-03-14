@@ -2,6 +2,7 @@ package zfs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -73,7 +74,7 @@ func (m *MockManager) CreateDataset(_ context.Context, name string, opts Dataset
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.datasets[name]; ok {
-		return ErrAlreadyExists
+		return errors.Join(ErrAlreadyExists, ErrDatasetExists)
 	}
 	mountpoint := opts.Mountpoint
 	if mountpoint == "" {
@@ -101,11 +102,11 @@ func (m *MockManager) CloneFromSnapshot(_ context.Context, snapshot, newDataset 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.datasets[newDataset]; ok {
-		return ErrAlreadyExists
+		return errors.Join(ErrAlreadyExists, ErrDatasetExists)
 	}
 	ms, ok := m.snapshots[snapshot]
 	if !ok {
-		return ErrNotFound
+		return errors.Join(ErrNotFound, ErrSnapshotNotFound)
 	}
 	m.datasets[newDataset] = &mockDataset{info: DatasetInfo{
 		Name:       newDataset,
@@ -128,7 +129,7 @@ func (m *MockManager) DestroyDataset(_ context.Context, name string, opts Destro
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.datasets[name]; !ok {
-		return ErrNotFound
+		return errors.Join(ErrNotFound, ErrDatasetNotFound)
 	}
 	if !opts.Recursive {
 		prefix := name + "/"
@@ -158,7 +159,7 @@ func (m *MockManager) GetMountpoint(_ context.Context, dataset string) (string, 
 	defer m.mu.RUnlock()
 	ds, ok := m.datasets[dataset]
 	if !ok {
-		return "", ErrNotFound
+		return "", errors.Join(ErrNotFound, ErrDatasetNotFound)
 	}
 	return ds.info.Mountpoint, nil
 }
@@ -177,7 +178,7 @@ func (m *MockManager) SetMountpoint(_ context.Context, dataset, mountpoint strin
 	defer m.mu.Unlock()
 	ds, ok := m.datasets[dataset]
 	if !ok {
-		return ErrNotFound
+		return errors.Join(ErrNotFound, ErrDatasetNotFound)
 	}
 	ds.info.Mountpoint = mountpoint
 	return nil
@@ -194,7 +195,7 @@ func (m *MockManager) GetDatasetInfo(_ context.Context, name string) (*DatasetIn
 	defer m.mu.RUnlock()
 	ds, ok := m.datasets[name]
 	if !ok {
-		return nil, ErrNotFound
+		return nil, errors.Join(ErrNotFound, ErrDatasetNotFound)
 	}
 	copy := ds.info
 	return &copy, nil
@@ -227,7 +228,7 @@ func (m *MockManager) DatasetExists(ctx context.Context, name string) (bool, err
 	if err == nil {
 		return true, nil
 	}
-	if err == ErrNotFound {
+	if errors.Is(err, ErrDatasetNotFound) || errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
 	return false, err
@@ -247,11 +248,11 @@ func (m *MockManager) CreateSnapshot(_ context.Context, dataset, snapName string
 	defer m.mu.Unlock()
 	ds, ok := m.datasets[dataset]
 	if !ok {
-		return nil, ErrNotFound
+		return nil, errors.Join(ErrNotFound, ErrDatasetNotFound)
 	}
 	key := dataset + "@" + snapName
 	if _, ok := m.snapshots[key]; ok {
-		return nil, ErrAlreadyExists
+		return nil, errors.Join(ErrAlreadyExists, ErrSnapshotExists)
 	}
 	ms := &mockSnapshot{info: SnapshotInfo{
 		Name:     snapName,
@@ -281,7 +282,7 @@ func (m *MockManager) Rollback(_ context.Context, dataset, snapName string, opts
 	targetKey := dataset + "@" + snapName
 	target, ok := m.snapshots[targetKey]
 	if !ok {
-		return ErrNotFound
+		return errors.Join(ErrNotFound, ErrSnapshotNotFound)
 	}
 	if !opts.DestroyLater {
 		return nil
@@ -334,10 +335,10 @@ func (m *MockManager) DestroySnapshot(_ context.Context, dataset, snapName strin
 	key := dataset + "@" + snapName
 	snap, ok := m.snapshots[key]
 	if !ok {
-		return ErrNotFound
+		return errors.Join(ErrNotFound, ErrSnapshotNotFound)
 	}
 	if len(snap.tags) > 0 {
-		return ErrBusy
+		return ErrSnapshotHeld
 	}
 	delete(m.snapshots, key)
 	return nil
@@ -361,7 +362,7 @@ func (m *MockManager) HoldSnapshot(_ context.Context, dataset, snapName, tag str
 	key := dataset + "@" + snapName
 	snap, ok := m.snapshots[key]
 	if !ok {
-		return ErrNotFound
+		return errors.Join(ErrNotFound, ErrSnapshotNotFound)
 	}
 	snap.tags[tag] = struct{}{}
 	return nil
@@ -385,7 +386,7 @@ func (m *MockManager) ReleaseSnapshot(_ context.Context, dataset, snapName, tag 
 	key := dataset + "@" + snapName
 	snap, ok := m.snapshots[key]
 	if !ok {
-		return ErrNotFound
+		return errors.Join(ErrNotFound, ErrSnapshotNotFound)
 	}
 	delete(snap.tags, tag)
 	return nil
@@ -414,6 +415,9 @@ func (m *MockManager) PoolStatus(_ context.Context, pool string) (*PoolStatus, e
 	if err := ValidatePoolName(pool); err != nil {
 		return nil, err
 	}
+	if pool == "missing" {
+		return nil, errors.Join(ErrNotFound, ErrPoolNotFound)
+	}
 	return &PoolStatus{Name: pool, State: PoolOnline}, nil
 }
 
@@ -423,6 +427,9 @@ func (m *MockManager) PoolSpace(_ context.Context, pool string) (*PoolSpace, err
 	}
 	if err := ValidatePoolName(pool); err != nil {
 		return nil, err
+	}
+	if pool == "missing" {
+		return nil, errors.Join(ErrNotFound, ErrPoolNotFound)
 	}
 	return &PoolSpace{Pool: pool}, nil
 }
@@ -456,6 +463,12 @@ func (m *MockManager) EstimateSendSize(_ context.Context, snapshot string, opts 
 			return 0, err
 		}
 	}
+	m.mu.RLock()
+	_, ok := m.snapshots[snapshot]
+	m.mu.RUnlock()
+	if !ok {
+		return 0, errors.Join(ErrNotFound, ErrSnapshotNotFound)
+	}
 	return 0, nil
 }
 
@@ -470,6 +483,12 @@ func (m *MockManager) Send(_ context.Context, snapshot string, opts SendOptions,
 		if err := ValidateSnapshotFullName(opts.Incremental); err != nil {
 			return err
 		}
+	}
+	m.mu.RLock()
+	_, ok := m.snapshots[snapshot]
+	m.mu.RUnlock()
+	if !ok {
+		return errors.Join(ErrNotFound, ErrSnapshotNotFound)
 	}
 	if w == nil {
 		return fmt.Errorf("writer is nil")
@@ -489,5 +508,17 @@ func (m *MockManager) Receive(_ context.Context, dataset string, r io.Reader) er
 		return fmt.Errorf("reader is nil")
 	}
 	_, err := io.Copy(io.Discard, r)
-	return err
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.datasets[dataset]; !ok {
+		m.datasets[dataset] = &mockDataset{info: DatasetInfo{
+			Name:       dataset,
+			Mountpoint: "/" + dataset,
+			Creation:   time.Now().UTC(),
+		}}
+	}
+	return nil
 }

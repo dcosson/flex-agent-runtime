@@ -50,7 +50,8 @@ func (m *CLIManager) Receive(ctx context.Context, dataset string, r io.Reader) e
 	if err := ValidateName(dataset); err != nil {
 		return err
 	}
-	_, err := m.execStream(ctx, "Receive", []string{"receive", "-F", dataset}, r, io.Discard)
+	// Intentionally do not force rollback (-F); caller controls destructive behavior.
+	_, err := m.execStream(ctx, "Receive", []string{"receive", dataset}, r, io.Discard)
 	return err
 }
 
