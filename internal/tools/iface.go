@@ -55,7 +55,7 @@ func ClassifyTool(name string) ToolTier {
 	case "read_file", "write_file", "edit_file", "grep", "glob",
 		"git_status", "git_diff", "git_log", "git_show":
 		return Tier1
-	case "bash", "git_add", "git_commit":
+	case "bash", "git_add", "git_commit", "git_push", "git_clone", "git_fetch", "git_pull":
 		return Tier2
 	default:
 		return Tier2 // default to isolated execution for unknown tools
