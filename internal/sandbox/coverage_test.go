@@ -69,24 +69,31 @@ func TestHealthCheckDegraded(t *testing.T) {
 	gm := newMockGVisor()
 	svc := newTestServiceWith(t, zm, gm)
 
-	// Make pool report degraded state
-	zm.SetError("PoolSpace", nil) // default mock returns 0 capacity
-	// We need to test the degraded path. The mock PoolStatus returns PoolOnline by default
-	// and PoolSpace returns Capacity=0. We need to inject values. Let's test with PoolStatus error.
-
-	// Test PoolSpace failure
+	// PoolSpace failure returns unhealthy status (not an error)
 	zm.SetError("PoolSpace", errors.New("zfs: pool I/O error"))
-	_, err := svc.HealthCheck(context.Background())
-	if err == nil {
-		t.Fatal("expected error when pool space check fails")
+	hs, err := svc.HealthCheck(context.Background())
+	if err != nil {
+		t.Fatalf("HealthCheck should not return error, got %v", err)
+	}
+	if hs.Status != "unhealthy" {
+		t.Errorf("status = %q, want unhealthy", hs.Status)
+	}
+	if len(hs.Errors) == 0 {
+		t.Error("expected errors in health status")
 	}
 	zm.ClearError("PoolSpace")
 
-	// Test PoolStatus failure
+	// PoolStatus failure also returns unhealthy status
 	zm.SetError("PoolStatus", errors.New("zfs: pool status error"))
-	_, err = svc.HealthCheck(context.Background())
-	if err == nil {
-		t.Fatal("expected error when pool status check fails")
+	hs, err = svc.HealthCheck(context.Background())
+	if err != nil {
+		t.Fatalf("HealthCheck should not return error, got %v", err)
+	}
+	if hs.Status != "unhealthy" {
+		t.Errorf("status = %q, want unhealthy", hs.Status)
+	}
+	if len(hs.Errors) == 0 {
+		t.Error("expected errors in health status")
 	}
 	zm.ClearError("PoolStatus")
 }
@@ -317,8 +324,8 @@ func TestExecuteToolRollingBackGuard(t *testing.T) {
 		ToolName:  "read_file",
 		Params:    map[string]any{"path": "test.txt"},
 	})
-	if !errors.Is(err, ErrToolsInFlight) {
-		t.Fatalf("expected ErrToolsInFlight during rollback, got %v", err)
+	if !errors.Is(err, ErrRollbackInProgress) {
+		t.Fatalf("expected ErrRollbackInProgress during rollback, got %v", err)
 	}
 }
 
