@@ -184,6 +184,21 @@ func (e *TermmuxEnv) HasEventSequence(types ...agent.AgentEventType) bool {
 	return idx == len(types)
 }
 
+// Pause pauses the session, gating new interactions.
+func (e *TermmuxEnv) Pause() error {
+	return e.Session.Pause()
+}
+
+// Resume unpauses the session.
+func (e *TermmuxEnv) Resume() error {
+	return e.Session.Resume()
+}
+
+// IsPaused returns whether the session is paused.
+func (e *TermmuxEnv) IsPaused() bool {
+	return e.Session.IsPaused()
+}
+
 // IsRunning returns whether the session's child process is running.
 func (e *TermmuxEnv) IsRunning() bool {
 	return e.Session.IsRunning()

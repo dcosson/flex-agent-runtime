@@ -1,6 +1,7 @@
 package mode2
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -94,10 +95,72 @@ drain:
 	}
 }
 
-// TestPauseResumeLifecycleAPI tests actual pause/resume API calls.
-// Skipped until termmux adapter exposes Pause/Resume methods.
+// TestPauseResumeLifecycleAPI tests actual pause/resume API calls on a
+// running termmux session, verifying state transitions and edge cases.
 func TestPauseResumeLifecycleAPI(t *testing.T) {
-	t.Skip("pause/resume API not yet available on TermmuxDriverAdapter — deferred to termmux implementation")
+	env := harness.NewTermmuxEnv(t, harness.TermmuxEnvConfig{
+		SessionID: "pause-resume-lifecycle",
+		Command:   "/bin/sh",
+		Args:      []string{"-c", "cat > /dev/null"},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := env.Start(ctx, ""); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	if !env.IsRunning() {
+		t.Fatal("session not running after start")
+	}
+
+	// Initially not paused
+	if env.IsPaused() {
+		t.Fatal("session should not be paused initially")
+	}
+
+	// Pause
+	if err := env.Pause(); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if !env.IsPaused() {
+		t.Fatal("session should be paused after Pause()")
+	}
+
+	// Double-pause is idempotent
+	if err := env.Pause(); err != nil {
+		t.Fatalf("double pause: %v", err)
+	}
+	if !env.IsPaused() {
+		t.Fatal("session should still be paused after double Pause()")
+	}
+
+	// Resume
+	if err := env.Resume(); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if env.IsPaused() {
+		t.Fatal("session should not be paused after Resume()")
+	}
+
+	// Double-resume is idempotent
+	if err := env.Resume(); err != nil {
+		t.Fatalf("double resume: %v", err)
+	}
+	if env.IsPaused() {
+		t.Fatal("session should still not be paused after double Resume()")
+	}
+
+	// Pause then stop — should clean up without deadlock
+	if err := env.Pause(); err != nil {
+		t.Fatalf("pause before stop: %v", err)
+	}
+	env.Stop()
+	if env.IsRunning() {
+		t.Fatal("session still running after stop")
+	}
 }
 
 func buildPauseResumeReplayScript() []harness.ReplayEntry {

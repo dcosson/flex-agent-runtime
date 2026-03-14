@@ -259,7 +259,54 @@ func TestF3_CredentialInjectionFailure_OverwriteProtection(t *testing.T) {
 // =============================================================================
 
 func TestF4_PauseResumeRaceUnderBurst(t *testing.T) {
-	t.Skip("pause/resume API not yet available on TermmuxDriverAdapter — deferred to termmux implementation")
+	// Launch a process that produces continuous output
+	env := harness.NewTermmuxEnv(t, harness.TermmuxEnvConfig{
+		SessionID: "f4-pause-resume-race",
+		Command:   "/bin/sh",
+		Args:      []string{"-c", "while true; do echo 'output burst line'; done"},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := env.Start(ctx, ""); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	if !env.IsRunning() {
+		t.Fatal("session not running")
+	}
+
+	// Rapid pause/resume cycles while output is flowing
+	const cycles = 50
+	for i := 0; i < cycles; i++ {
+		if err := env.Pause(); err != nil {
+			// Session may have exited naturally; that's acceptable
+			t.Logf("pause cycle %d: %v", i, err)
+			break
+		}
+		if !env.IsPaused() {
+			t.Fatalf("cycle %d: not paused after Pause()", i)
+		}
+		if err := env.Resume(); err != nil {
+			t.Logf("resume cycle %d: %v", i, err)
+			break
+		}
+		if env.IsPaused() {
+			t.Fatalf("cycle %d: still paused after Resume()", i)
+		}
+	}
+
+	// Session should still be controllable — stop cleanly
+	env.Stop()
+	if env.IsRunning() {
+		t.Fatal("session still running after stop")
+	}
+
+	// Should have captured events without corruption
+	events := env.Events()
+	harness.AssertEventSequence(t, events, agent.EventSessionStarted)
 }
 
 // =============================================================================

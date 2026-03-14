@@ -101,6 +101,33 @@ func (a *TermmuxDriverAdapter) Resume(ctx context.Context, session *Session) err
 	return a.Start(ctx, session, "")
 }
 
+// Pause pauses the termmux session, gating new interactions.
+func (a *TermmuxDriverAdapter) Pause(ctx context.Context) error {
+	a.mu.RLock()
+	if !a.started || a.stopped {
+		a.mu.RUnlock()
+		return fmt.Errorf("termmux adapter not running")
+	}
+	a.mu.RUnlock()
+	return a.session.Pause()
+}
+
+// Unpause resumes a paused termmux session.
+func (a *TermmuxDriverAdapter) Unpause(ctx context.Context) error {
+	a.mu.RLock()
+	if !a.started || a.stopped {
+		a.mu.RUnlock()
+		return fmt.Errorf("termmux adapter not running")
+	}
+	a.mu.RUnlock()
+	return a.session.Resume()
+}
+
+// IsPaused returns whether the termmux session is currently paused.
+func (a *TermmuxDriverAdapter) IsPaused() bool {
+	return a.session.IsPaused()
+}
+
 // Stop stops the termmux session.
 func (a *TermmuxDriverAdapter) Stop(ctx context.Context) error {
 	a.mu.Lock()

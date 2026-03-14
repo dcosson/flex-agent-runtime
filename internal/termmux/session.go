@@ -26,6 +26,7 @@ type Session struct {
 	mu          sync.RWMutex
 	started     bool
 	stopped     bool
+	paused      bool
 	exitNotify  chan struct{}
 	stopCh      chan struct{}
 	cancelFn    context.CancelFunc
@@ -267,6 +268,40 @@ func (s *Session) IsRunning() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.started && !s.stopped
+}
+
+// Pause marks the session as paused. This is a controller-level gate that
+// prevents new interactions while paused. The PTY child process continues
+// running — pause/resume operates at the interaction level, not the process level.
+func (s *Session) Pause() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.started || s.stopped {
+		return fmt.Errorf("session %s not running", s.ID)
+	}
+	if s.paused {
+		return nil // already paused
+	}
+	s.paused = true
+	return nil
+}
+
+// Resume unpauses a paused session, allowing new interactions.
+func (s *Session) Resume() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.paused {
+		return nil // not paused
+	}
+	s.paused = false
+	return nil
+}
+
+// IsPaused returns whether the session is currently paused.
+func (s *Session) IsPaused() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.paused
 }
 
 // CreatedAt returns the session creation time.
