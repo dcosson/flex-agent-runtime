@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"io"
 	"sync"
+	"sync/atomic"
 )
 
 var ErrStreamClosed = errors.New("rpc stream closed")
@@ -129,4 +131,61 @@ func (r *chanEventReceiver) Close() error {
 	}
 	r.closed = true
 	return r.close()
+}
+
+// terminalStreamHandle wraps a pair of channels for bidirectional terminal I/O.
+// The output pump goroutine sends to toClient; the caller reads via Recv.
+// The caller sends via Send; the input pump goroutine reads from fromClient.
+type terminalStreamHandle struct {
+	toClient   <-chan *TerminalServerMessage
+	fromClient chan<- *TerminalClientMessage
+	cancel     context.CancelFunc
+	ctx        context.Context
+	closeOnce  sync.Once
+	closed     atomic.Bool
+}
+
+// NewTerminalStreamHandle creates a TerminalStreamHandle from channels.
+// The ctx/cancel control the stream lifecycle: cancelling ctx causes
+// the backing goroutines to exit, which closes toClient (triggering EOF on Recv).
+func NewTerminalStreamHandle(
+	toClient <-chan *TerminalServerMessage,
+	fromClient chan<- *TerminalClientMessage,
+	ctx context.Context,
+	cancel context.CancelFunc,
+) TerminalStreamHandle {
+	return &terminalStreamHandle{
+		toClient:   toClient,
+		fromClient: fromClient,
+		cancel:     cancel,
+		ctx:        ctx,
+	}
+}
+
+func (h *terminalStreamHandle) Send(msg *TerminalClientMessage) error {
+	if h.closed.Load() {
+		return ErrStreamClosed
+	}
+	select {
+	case <-h.ctx.Done():
+		return ErrStreamClosed
+	case h.fromClient <- msg:
+		return nil
+	}
+}
+
+func (h *terminalStreamHandle) Recv() (*TerminalServerMessage, error) {
+	msg, ok := <-h.toClient
+	if !ok {
+		return nil, io.EOF
+	}
+	return msg, nil
+}
+
+func (h *terminalStreamHandle) Close() error {
+	h.closeOnce.Do(func() {
+		h.closed.Store(true)
+		h.cancel()
+	})
+	return nil
 }
