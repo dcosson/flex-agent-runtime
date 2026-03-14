@@ -155,6 +155,21 @@ func TestMemorySandboxService_TierClassification(t *testing.T) {
 	}
 }
 
+func TestMemorySandboxService_TurnCompleteReleasesLock(t *testing.T) {
+	svc, sessionID := newTestMemoryService(t)
+	ctx := context.Background()
+
+	if _, err := svc.TurnComplete(ctx, &api.TurnCompleteRequest{SessionID: sessionID}); err != nil {
+		t.Fatalf("turn complete #1: %v", err)
+	}
+	if _, err := svc.TurnComplete(ctx, &api.TurnCompleteRequest{SessionID: sessionID}); err != nil {
+		t.Fatalf("turn complete #2: %v", err)
+	}
+	if _, err := svc.GetSession(ctx, &api.GetSessionRequest{SessionID: sessionID}); err != nil {
+		t.Fatalf("get session after turn complete: %v", err)
+	}
+}
+
 func newTestMemoryService(t *testing.T) (*MemorySandboxService, string) {
 	t.Helper()
 	svc := NewMemorySandboxService()

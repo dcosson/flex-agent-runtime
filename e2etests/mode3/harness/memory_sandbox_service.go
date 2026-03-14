@@ -272,8 +272,8 @@ func (m *MemorySandboxService) TurnComplete(_ context.Context, req *api.TurnComp
 		return nil, err
 	}
 	sess.mu.Lock()
+	defer sess.mu.Unlock()
 	if sess.state != memoryStateActive {
-		sess.mu.Unlock()
 		return nil, rpc.NewRPCError(rpc.CodeFailedPrecondition, fmt.Sprintf("invalid state: %s", sess.state), sandbox.ErrInvalidState)
 	}
 	sess.turnCount++
