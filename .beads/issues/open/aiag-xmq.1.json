@@ -26,6 +26,14 @@
     "plan-doc=10-sandbox-gvisor"
   ],
   "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "coder-2-sea",
+      "text": "R1 review findings incorporated @ 39cf839. Fixed: swap.max F1, detectOOMKill fallback F3, strings.Contains P3. Logger field F2 was done in prior commit.",
+      "created_at": "2026-03-13T20:06:43.240197-07:00"
+    }
+  ],
   "created_at": "2026-03-13T17:59:15.037583-07:00",
-  "updated_at": "2026-03-13T18:01:50.74289-07:00"
+  "updated_at": "2026-03-13T20:06:43.240996-07:00"
 }
