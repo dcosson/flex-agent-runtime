@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"h2-agent-runtime/internal/sandbox/zfs"
 
@@ -60,7 +61,7 @@ var rapidSessionCounter atomic.Uint64
 
 // rapidCreateSession creates a service and session for use inside rapid.Check.
 // It avoids testing.TB methods that rapid.T doesn't have (like TempDir).
-func rapidCreateSession(t *rapid.T) (*SandboxHostService, *SessionInfo) {
+func rapidCreateSession(t *rapid.T) (svc *SandboxHostService, info *SessionInfo, cleanup func()) {
 	zm := zfs.NewMockManager()
 	gm := newMockGVisor()
 	ctx := context.Background()
@@ -75,12 +76,13 @@ func rapidCreateSession(t *rapid.T) (*SandboxHostService, *SessionInfo) {
 	cfg.BasesDataset = "pool/bases"
 	cfg.SessionsDataset = "pool/sessions"
 	cfg.ToolTimeout = 0
-	cfg.PauseDrainTimeout = 50 * 1e6 // 50ms in nanoseconds
-	cfg.ShutdownTimeout = 50 * 1e6
-	svc := NewSandboxHostService(cfg, zm, gm, nil)
+	cfg.PauseDrainTimeout = 50 * time.Millisecond
+	cfg.ShutdownTimeout = 50 * time.Millisecond
+	svc = NewSandboxHostService(cfg, zm, gm, nil)
 
 	id := fmt.Sprintf("rapid-%d", rapidSessionCounter.Add(1))
-	info, err := svc.CreateSession(ctx, CreateSessionRequest{
+	var err error
+	info, err = svc.CreateSession(ctx, CreateSessionRequest{
 		BaseSnapshot: "pool/bases/test@v1",
 		SessionID:    id,
 	})
@@ -105,13 +107,14 @@ func rapidCreateSession(t *rapid.T) (*SandboxHostService, *SessionInfo) {
 	sess.mu.Unlock()
 	info.Mountpoint = tmpDir
 
-	return svc, info
+	return svc, info, func() { os.RemoveAll(tmpDir) }
 }
 
 // P1. Session State Machine Validity
 func TestPropertySessionStateMachine(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		svc, sess := rapidCreateSession(t)
+		svc, sess, cleanup := rapidCreateSession(t)
+		defer cleanup()
 		ctx := context.Background()
 		shadow := &shadowState{state: SessionActive}
 
@@ -139,7 +142,11 @@ func TestPropertySessionStateMachine(t *testing.T) {
 			case 4: // Rollback
 				snaps, _ := svc.ListSnapshots(ctx, sess.ID)
 				if len(snaps) == 0 {
-					continue // no snapshots to rollback to
+					// Shadow model predicts error for rollback with no snapshots.
+					// We skip the actual call because RollbackSession transitions
+					// to SessionFailed on ZFS errors (even for nonexistent targets),
+					// which would make the session unusable for subsequent ops.
+					continue
 				}
 				targetIdx := rapid.IntRange(0, len(snaps)-1).Draw(t, fmt.Sprintf("rollback-target-%d", i))
 				opErr = svc.RollbackSession(ctx, sess.ID, snaps[targetIdx].Name)
@@ -221,7 +228,8 @@ func TestTierClassificationKnownTools(t *testing.T) {
 // P3. Snapshot Ordering Consistency
 func TestPropertySnapshotOrderingConsistency(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		svc, sess := rapidCreateSession(t)
+		svc, sess, cleanup := rapidCreateSession(t)
+		defer cleanup()
 		ctx := context.Background()
 
 		n := rapid.IntRange(1, 50).Draw(t, "turns")
@@ -297,7 +305,8 @@ func TestPropertySnapshotOrderingConsistency(t *testing.T) {
 // P4. Concurrent Tool Execution Safety
 func TestPropertyConcurrentToolSafety(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		svc, sess := rapidCreateSession(t)
+		svc, sess, cleanup := rapidCreateSession(t)
+		defer cleanup()
 		ctx := context.Background()
 
 		concurrency := rapid.IntRange(2, 20).Draw(t, "concurrency")

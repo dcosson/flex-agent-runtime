@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -121,7 +122,9 @@ func TestST3_BurstToolExecution(t *testing.T) {
 	const burstSize = 100
 	var wg sync.WaitGroup
 	results := make(chan error, burstSize)
+	var peakActive atomic.Int32
 
+	s, _ := svc.getSession(sess.ID)
 	for i := 0; i < burstSize; i++ {
 		wg.Add(1)
 		go func() {
@@ -131,6 +134,15 @@ func TestST3_BurstToolExecution(t *testing.T) {
 				ToolName:  "read_file",
 				Params:    map[string]any{"path": "test.txt"},
 			})
+			// Sample active tools after tool starts (best-effort peak tracking)
+			if cur := s.activeTools.Load(); cur > 0 {
+				for {
+					old := peakActive.Load()
+					if cur <= old || peakActive.CompareAndSwap(old, cur) {
+						break
+					}
+				}
+			}
 			results <- err
 		}()
 	}
@@ -147,8 +159,12 @@ func TestST3_BurstToolExecution(t *testing.T) {
 		t.Fatal("all burst tool calls failed")
 	}
 
+	// Verify concurrency actually happened — peak should be > 1
+	if peak := peakActive.Load(); peak <= 1 {
+		t.Logf("warning: peak activeTools = %d, expected concurrent execution", peak)
+	}
+
 	// ActiveTools should be back to 0
-	s, _ := svc.getSession(sess.ID)
 	if active := s.activeTools.Load(); active != 0 {
 		t.Fatalf("activeTools = %d after burst, want 0", active)
 	}

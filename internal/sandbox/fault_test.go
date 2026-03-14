@@ -259,6 +259,20 @@ func TestFI6_PoolExhaustionDuringOps(t *testing.T) {
 		t.Fatal("expected error from pool exhaustion")
 	}
 
+	// Verify HealthCheck reports unhealthy during pool exhaustion
+	zm.SetError("PoolSpace", fmt.Errorf("zfs: pool I/O error"))
+	health, err := svc.HealthCheck(ctx)
+	if err != nil {
+		t.Fatalf("HealthCheck should not return error: %v", err)
+	}
+	if health.Status != "unhealthy" {
+		t.Fatalf("HealthCheck status = %q, want unhealthy", health.Status)
+	}
+	if len(health.Errors) == 0 {
+		t.Fatal("HealthCheck should report errors during pool exhaustion")
+	}
+	zm.ClearError("PoolSpace")
+
 	// Existing session should still work for reads (Tier 1)
 	zm.ClearError("CreateSnapshot")
 	_, err = svc.ExecuteTool(ctx, ExecuteToolRequest{
