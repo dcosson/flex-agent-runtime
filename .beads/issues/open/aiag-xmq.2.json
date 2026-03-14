@@ -29,6 +29,14 @@
     "batch=4",
     "plan-doc=10-sandbox-gvisor"
   ],
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implementation complete. Branch batch4/gvisor-lifecycle @ 9bcf7e0. 79 tests, staticcheck clean. Waiting on review.",
+      "created_at": "2026-03-13T18:25:22.538094-07:00"
+    }
+  ],
   "created_at": "2026-03-13T17:59:22.645562-07:00",
-  "updated_at": "2026-03-13T17:59:22.645562-07:00"
+  "updated_at": "2026-03-13T18:25:22.539061-07:00"
 }
