@@ -17,6 +17,7 @@ type mockDataset struct {
 type mockSnapshot struct {
 	info SnapshotInfo
 	tags map[string]struct{}
+	seq  int64
 }
 
 // MockManager implements ZFSManager in-memory for tests.
@@ -26,6 +27,7 @@ type MockManager struct {
 	datasets  map[string]*mockDataset
 	snapshots map[string]*mockSnapshot // dataset@snapshot
 	errors    map[string]error         // op -> error injection
+	seq       int64
 }
 
 func NewMockManager() *MockManager {
@@ -257,13 +259,14 @@ func (m *MockManager) CreateSnapshot(_ context.Context, dataset, snapName string
 		Refer:    ds.info.Referenced,
 		Used:     0,
 		Creation: time.Now().UTC(),
-	}, tags: make(map[string]struct{})}
+	}, tags: make(map[string]struct{}), seq: m.seq}
+	m.seq++
 	m.snapshots[key] = ms
 	copy := ms.info
 	return &copy, nil
 }
 
-func (m *MockManager) Rollback(_ context.Context, dataset, snapName string, _ RollbackOptions) error {
+func (m *MockManager) Rollback(_ context.Context, dataset, snapName string, opts RollbackOptions) error {
 	if err := m.injected("Rollback"); err != nil {
 		return err
 	}
@@ -273,10 +276,24 @@ func (m *MockManager) Rollback(_ context.Context, dataset, snapName string, _ Ro
 	if err := ValidateSnapshotName(snapName); err != nil {
 		return err
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if _, ok := m.snapshots[dataset+"@"+snapName]; !ok {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	targetKey := dataset + "@" + snapName
+	target, ok := m.snapshots[targetKey]
+	if !ok {
 		return ErrNotFound
+	}
+	if !opts.DestroyLater {
+		return nil
+	}
+	targetSeq := target.seq
+	for key, snap := range m.snapshots {
+		if !strings.HasPrefix(key, dataset+"@") {
+			continue
+		}
+		if snap.seq > targetSeq {
+			delete(m.snapshots, key)
+		}
 	}
 	return nil
 }
