@@ -1,0 +1,28 @@
+{
+  "id": "aiag-cfy.2",
+  "title": "Runtime Harness: Meta-tests (must-have P1-P3, F1-F2 + stretch suites)",
+  "description": "Implement runtime harness meta-tests from docs/plans/16-runtime-test-harness-test-harness.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nKey deliverables (must-have):\n- P1: Workload generator validity (profile constraints, mode ratio ±1, concurrency caps)\n- P2: Metrics aggregation conservation (aggregated = sum of per-session)\n- P3: Baseline comparison determinism (identical verdicts across N\u003e=100 runs)\n- F1: Telemetry loss bursts (graceful degrade, data-quality flags)\n- F2: Clock skew simulation (timeline normalization, robust percentiles)\n\nStretch deliverables:\n- P4-P5, F3-F5, O1-O3, S1-S3, B1-B4, ST1-ST3, SEC1-SEC4\n\nCI tiers: PR-fast ~10m (must-have), Nightly ~1h (all), Weekly ~24h (stress/soak)\n\nDepends on: Runtime harness core task.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-cfy",
+  "dependencies": [
+    {
+      "id": "aiag-cfy",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-cfy.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=5",
+    "plan-doc=16-runtime-test-harness"
+  ],
+  "created_at": "2026-03-14T14:16:44.186122-07:00",
+  "updated_at": "2026-03-14T14:16:44.186122-07:00"
+}

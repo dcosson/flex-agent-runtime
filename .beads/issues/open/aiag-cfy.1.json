@@ -1,0 +1,38 @@
+{
+  "id": "aiag-cfy.1",
+  "title": "Runtime Harness: Workload wrappers, controller, profiles, metrics, reporting",
+  "description": "Implement runtime cross-cutting test harness core from docs/plans/16-runtime-test-harness.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: §2-5 (architecture, suite structure, workload models, metrics \u0026 SLAs)\n\nKey deliverables:\n- Workload interface: Setup/Run/Teardown pattern wrapping Mode 2 and Mode 3 E2E scenarios\n- Controller orchestration: goroutine pools per mode, unified telemetry collection\n- Concurrency profiles: P-small (10 sessions), P-medium (50), P-large (200+)\n- Soak profiles: 12h/24h with drift monitoring (goroutine \u003c5%, RSS \u003c10%, fd ±2, RPC error slope \u003c0.01%/hr)\n- 5 test families in e2etests/runtime/:\n  - Load scaling tests (concurrency + throughput)\n  - Soak stability tests (long-duration + drift)\n  - Snapshot growth analysis (storage + retention)\n  - Container boot benchmarks (Tier 2 cold-start)\n  - RPC latency profiling (p50/p95/p99 + retry/error)\n- Baseline management: baselines/ directory, comparison engine, regression gating\n- Artifact generation: JSON/CSV metrics, markdown reports, storage growth reports\n- Host config: hosts.yaml for CI fleet\n- CI tiers: PR-fast ~5m, PR-standard ~30m, Nightly ~4h, Weekly ~36h\n\nAC: Load harness executes P-small/P-medium, soak detects regressions, snapshot analysis automated, container benchmarks repeatable, RPC profiled under load, baseline gating works.\n\nDepends on: Mode 3 E2E core (aiag-orl.1) and Mode 2 E2E core (aiag-91v.1).",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-cfy",
+  "dependencies": [
+    {
+      "id": "aiag-cfy",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-orl.1",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-91v.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-cfy.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=5",
+    "plan-doc=16-runtime-test-harness"
+  ],
+  "created_at": "2026-03-14T14:16:31.264942-07:00",
+  "updated_at": "2026-03-14T14:16:31.264942-07:00"
+}
