@@ -36,10 +36,16 @@
       "author": "Danny Cosson",
       "text": "R1 review fixes incorporated and pushed @ 0c727db. All 5 findings addressed: SEC4 real PTY+replay, O2/O3 structurally different scripts, P5 real attach/detach, B2 goroutine leak fix, ST1 tier-gating. All tests pass, vet+staticcheck clean. Awaiting reviewer sign-off.",
       "created_at": "2026-03-14T15:17:20.490836-07:00"
+    },
+    {
+      "id": 3,
+      "author": "Danny Cosson",
+      "text": "R1 review signed off by reviewer-sea. All 5 findings verified. Bead closed.",
+      "created_at": "2026-03-14T15:20:56.357818-07:00"
     }
   ],
   "created_at": "2026-03-14T14:16:12.571398-07:00",
-  "updated_at": "2026-03-14T15:20:51.97323-07:00",
+  "updated_at": "2026-03-14T15:20:56.358024-07:00",
   "closed_at": "2026-03-14T15:20:46.881048-07:00",
   "close_reason": "Closed"
 }
