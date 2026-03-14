@@ -225,6 +225,8 @@ func (m *MemorySandboxService) DestroySession(_ context.Context, req *api.Destro
 		return nil, rpc.NewRPCError(rpc.CodeNotFound, "session not found", sandbox.ErrSessionNotFound)
 	}
 	sess.mu.Lock()
+	// Preserve the real host FSM shape; this transition is intentionally brief
+	// in the in-memory fake before the session is removed from the registry.
 	sess.state = memoryStateDestroying
 	sess.state = memoryStateDestroyed
 	sess.mu.Unlock()
@@ -270,8 +272,8 @@ func (m *MemorySandboxService) TurnComplete(_ context.Context, req *api.TurnComp
 		return nil, err
 	}
 	sess.mu.Lock()
-	defer sess.mu.Unlock()
 	if sess.state != memoryStateActive {
+		sess.mu.Unlock()
 		return nil, rpc.NewRPCError(rpc.CodeFailedPrecondition, fmt.Sprintf("invalid state: %s", sess.state), sandbox.ErrInvalidState)
 	}
 	sess.turnCount++
@@ -389,8 +391,8 @@ func (m *MemorySandboxService) executeTool(ctx context.Context, req *api.Execute
 		return nil, err
 	}
 	sess.mu.Lock()
-	defer sess.mu.Unlock()
 	if sess.state != memoryStateActive {
+		sess.mu.Unlock()
 		return nil, rpc.NewRPCError(rpc.CodeFailedPrecondition, fmt.Sprintf("invalid state: %s", sess.state), sandbox.ErrInvalidState)
 	}
 
@@ -401,6 +403,7 @@ func (m *MemorySandboxService) executeTool(ctx context.Context, req *api.Execute
 
 	content, exitCode, execErr := executeInMemoryTool(req.ToolName, req.Params, sess.files)
 	if execErr != nil {
+		sess.mu.Unlock()
 		return nil, rpc.NewRPCError(rpc.CodeInternal, execErr.Error(), execErr)
 	}
 
@@ -416,6 +419,7 @@ func (m *MemorySandboxService) executeTool(ctx context.Context, req *api.Execute
 		})
 		sess.snapCount = len(sess.snapshots)
 	}
+	sess.mu.Unlock()
 
 	m.executeCalls.Add(1)
 	m.mu.Lock()
