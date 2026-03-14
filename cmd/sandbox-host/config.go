@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,6 +30,8 @@ type Config struct {
 	RPCMaxMessageBytes int
 	APIVersion         string
 	MinAPIVersion      string
+	AuthToken          string
+	EnableTerminal     bool
 }
 
 func LoadConfig() Config {
@@ -50,9 +55,37 @@ func LoadConfig() Config {
 	flag.IntVar(&cfg.RPCMaxMessageBytes, "rpc-max-message-bytes", envIntOrDefault("SANDBOX_HOST_RPC_MAX_MESSAGE_BYTES", 16<<20), "max rpc message size in bytes")
 	flag.StringVar(&cfg.APIVersion, "api-version", envOrDefault("SANDBOX_HOST_API_VERSION", "v1"), "advertised api version")
 	flag.StringVar(&cfg.MinAPIVersion, "min-api-version", envOrDefault("SANDBOX_HOST_MIN_API_VERSION", "v1"), "minimum supported api version")
+	flag.StringVar(&cfg.AuthToken, "auth-token", envOrDefault("SANDBOX_HOST_AUTH_TOKEN", ""), "bearer auth token; empty disables auth")
+	flag.BoolVar(&cfg.EnableTerminal, "enable-terminal", envBoolOrDefault("SANDBOX_HOST_ENABLE_TERMINAL", false), "enable terminal streaming service")
 	flag.Parse()
 
 	return cfg
+}
+
+func (cfg Config) Validate() error {
+	var errs []error
+	if strings.TrimSpace(cfg.PoolName) == "" {
+		errs = append(errs, fmt.Errorf("pool is required"))
+	}
+	if strings.TrimSpace(cfg.BasesDataset) == "" {
+		errs = append(errs, fmt.Errorf("bases-dataset is required"))
+	}
+	if strings.TrimSpace(cfg.SessionsDataset) == "" {
+		errs = append(errs, fmt.Errorf("sessions-dataset is required"))
+	}
+	if strings.TrimSpace(cfg.BundleBaseDir) == "" {
+		errs = append(errs, fmt.Errorf("bundle-base-dir is required"))
+	}
+	if cfg.RPCMaxMessageBytes <= 0 {
+		errs = append(errs, fmt.Errorf("rpc-max-message-bytes must be > 0"))
+	}
+	if strings.TrimSpace(cfg.APIVersion) == "" {
+		errs = append(errs, fmt.Errorf("api-version is required"))
+	}
+	if strings.TrimSpace(cfg.MinAPIVersion) == "" {
+		errs = append(errs, fmt.Errorf("min-api-version is required"))
+	}
+	return errors.Join(errs...)
 }
 
 func envOrDefault(name, def string) string {

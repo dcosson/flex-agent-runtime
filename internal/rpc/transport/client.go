@@ -13,8 +13,10 @@ import (
 type ClientConfig struct {
 	APIVersion      string
 	MaxMessageBytes int
-	AuthHook        AuthHook
+	HeaderInjector  ClientHeaderInjector
 }
+
+type ClientHeaderInjector func(ctx context.Context, procedure string, headers http.Header) error
 
 type SandboxClient struct {
 	CreateSession  *connect.Client[api.CreateSessionRequest, api.CreateSessionResponse]
@@ -83,7 +85,7 @@ func clientOptions(cfg ClientConfig) []connect.ClientOption {
 	}
 }
 
-func HeaderTokenAuth(name, token string) AuthHook {
+func HeaderTokenAuth(name, token string) ClientHeaderInjector {
 	if name == "" {
 		name = "authorization"
 	}
@@ -109,7 +111,9 @@ func (i clientPolicyInterceptor) WrapUnary(next connect.UnaryFunc) connect.Unary
 func (i clientPolicyInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
 	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
 		conn := next(ctx, spec)
-		_ = i.apply(ctx, spec.Procedure, conn.RequestHeader())
+		if err := i.apply(ctx, spec.Procedure, conn.RequestHeader()); err != nil {
+			return &errorStreamingClientConn{StreamingClientConn: conn, err: connect.NewError(connect.CodeUnauthenticated, err)}
+		}
 		return conn
 	}
 }
@@ -120,10 +124,22 @@ func (i clientPolicyInterceptor) WrapStreamingHandler(next connect.StreamingHand
 
 func (i clientPolicyInterceptor) apply(ctx context.Context, procedure string, headers http.Header) error {
 	headers.Set(rpc.APIVersionHeaderName(), i.cfg.APIVersion)
-	if i.cfg.AuthHook != nil {
-		if err := i.cfg.AuthHook(ctx, procedure, headers); err != nil {
+	if i.cfg.HeaderInjector != nil {
+		if err := i.cfg.HeaderInjector(ctx, procedure, headers); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+type errorStreamingClientConn struct {
+	connect.StreamingClientConn
+	err error
+}
+
+func (c *errorStreamingClientConn) Send(any) error      { return c.err }
+func (c *errorStreamingClientConn) CloseRequest() error { return c.err }
+func (c *errorStreamingClientConn) Receive(any) error   { return c.err }
+func (c *errorStreamingClientConn) CloseResponse() error {
+	return c.err
 }

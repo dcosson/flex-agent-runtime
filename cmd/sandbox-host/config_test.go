@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -47,5 +48,42 @@ func TestEnvParsersFallback(t *testing.T) {
 	}
 	if got := envOrDefault(missing, "x"); got != "x" {
 		t.Fatalf("fallback string = %q, want x", got)
+	}
+}
+
+func TestConfigValidate(t *testing.T) {
+	cfg := Config{
+		PoolName:           "tank",
+		BasesDataset:       "tank/bases",
+		SessionsDataset:    "tank/sessions",
+		BundleBaseDir:      "/tmp/sandbox-host-bundles",
+		RPCMaxMessageBytes: 1024,
+		APIVersion:         "v1",
+		MinAPIVersion:      "v1",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+}
+
+func TestConfigValidateMissingRequired(t *testing.T) {
+	cfg := Config{}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatalf("Validate() expected error")
+	}
+	checks := []string{
+		"pool is required",
+		"bases-dataset is required",
+		"sessions-dataset is required",
+		"bundle-base-dir is required",
+		"rpc-max-message-bytes must be > 0",
+		"api-version is required",
+		"min-api-version is required",
+	}
+	for _, want := range checks {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Validate() error missing %q: %v", want, err)
+		}
 	}
 }

@@ -4,16 +4,17 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"connectrpc.com/connect"
 	"h2-agent-runtime/internal/rpc"
 )
 
-type AuthHook func(ctx context.Context, procedure string, headers http.Header) error
+type ServerAuthHook func(ctx context.Context, procedure string, headers http.Header) error
 
 type InterceptorConfig struct {
-	AuthHook       AuthHook
+	AuthHook       ServerAuthHook
 	APIVersion     string
 	MinAPIVersion  string
 	APIVersionName string
@@ -85,13 +86,7 @@ func (i *policyInterceptor) validate(ctx context.Context, procedure string, head
 func versionLessThan(a, b string) bool {
 	parse := func(v string) int {
 		v = strings.TrimPrefix(strings.TrimSpace(v), "v")
-		n := 0
-		for _, ch := range v {
-			if ch < '0' || ch > '9' {
-				break
-			}
-			n = (n * 10) + int(ch-'0')
-		}
+		n, _ := strconv.Atoi(v)
 		return n
 	}
 	return parse(a) < parse(b)
