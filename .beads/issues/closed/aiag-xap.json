@@ -2,7 +2,7 @@
   "id": "aiag-xap",
   "title": "Built-in Tools Test Harness: Deferred Suites",
   "description": "Follow-up from Batch 3 signoff. Complete deferred test harness items from docs/plans/06-built-in-tools-test-harness.md.\n\nDeferred items (7):\n- P3: Backend parity (LocalBackend vs SandboxBackend — requires sandbox env)\n- S2: Callback event ordering for long-running bash (requires sandbox streaming)\n- SEC3: Secret redaction in tool outputs/logging\n- O2: Differential grep oracle (pure-Go vs rg reference comparison)\n- B5: Bash callback forwarding overhead benchmark (\u003c3% wall-time)\n- ST1: 12-hour mixed-tool soak test (requires CI soak runner)\n- ST2: High-fanout grep stress test\n\nThese were deferred because they depend on Batch 4 infrastructure (sandbox env, CI soak runners).\n\nRequired reading: docs/plans/00-implementation-guide.md\nReferences:\n- Test harness: docs/plans/06-built-in-tools-test-harness.md §1 (P3), §4 (S2), §7 (SEC3), §3 (O2), §5 (B5), §6 (ST1, ST2)",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "created_by": "Danny Cosson",
@@ -12,6 +12,16 @@
     "batch=4",
     "plan-doc=06-built-in-tools"
   ],
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "R1 code review complete. Approved. 3 P3 findings, no blocking issues. See docs/reviews/aiag-xap-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-14T10:37:29.848241-07:00"
+    }
+  ],
   "created_at": "2026-03-13T17:34:40.310592-07:00",
-  "updated_at": "2026-03-13T17:34:40.310592-07:00"
+  "updated_at": "2026-03-14T10:37:39.050071-07:00",
+  "closed_at": "2026-03-14T10:37:39.050071-07:00",
+  "close_reason": "Closed"
 }
