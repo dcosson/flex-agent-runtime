@@ -9,7 +9,7 @@ import (
 func TestVirtualTerminal_StartPTY(t *testing.T) {
 	vt := &VirtualTerminal{}
 
-	err := vt.StartPTY("/bin/echo", []string{"hello"}, 24, 80, nil)
+	err := vt.StartPTY("/bin/echo", []string{"hello"}, 24, 80, nil, "")
 	if err != nil {
 		t.Fatalf("StartPTY: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestVirtualTerminal_WritePTY(t *testing.T) {
 	vt := &VirtualTerminal{}
 
 	// Start cat which reads stdin and echoes to stdout
-	err := vt.StartPTY("/bin/cat", nil, 24, 80, nil)
+	err := vt.StartPTY("/bin/cat", nil, 24, 80, nil, "")
 	if err != nil {
 		t.Fatalf("StartPTY: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestVirtualTerminal_WritePTYTimeout(t *testing.T) {
 	vt := &VirtualTerminal{}
 
 	// Start sleep which doesn't read stdin
-	err := vt.StartPTY("/bin/sleep", []string{"30"}, 24, 80, nil)
+	err := vt.StartPTY("/bin/sleep", []string{"30"}, 24, 80, nil, "")
 	if err != nil {
 		t.Fatalf("StartPTY: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestVirtualTerminal_WritePTYTimeout(t *testing.T) {
 func TestVirtualTerminal_Resize(t *testing.T) {
 	vt := &VirtualTerminal{}
 
-	err := vt.StartPTY("/bin/sleep", []string{"5"}, 24, 80, nil)
+	err := vt.StartPTY("/bin/sleep", []string{"5"}, 24, 80, nil, "")
 	if err != nil {
 		t.Fatalf("StartPTY: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestVirtualTerminal_Resize(t *testing.T) {
 func TestVirtualTerminal_KillChild(t *testing.T) {
 	vt := &VirtualTerminal{}
 
-	err := vt.StartPTY("/bin/sleep", []string{"300"}, 24, 80, nil)
+	err := vt.StartPTY("/bin/sleep", []string{"300"}, 24, 80, nil, "")
 	if err != nil {
 		t.Fatalf("StartPTY: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestVirtualTerminal_EnvVars(t *testing.T) {
 		"TEST_VAR": "hello_world",
 	}
 
-	err := vt.StartPTY("/bin/sh", []string{"-c", "echo $TEST_VAR"}, 24, 80, env)
+	err := vt.StartPTY("/bin/sh", []string{"-c", "echo $TEST_VAR"}, 24, 80, env, "")
 	if err != nil {
 		t.Fatalf("StartPTY: %v", err)
 	}

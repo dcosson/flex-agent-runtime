@@ -33,7 +33,8 @@ type VirtualTerminal struct {
 }
 
 // StartPTY allocates a PTY and starts the command in it.
-func (vt *VirtualTerminal) StartPTY(command string, args []string, rows, cols int, env map[string]string) error {
+// If cwd is non-empty, the child process starts in that directory.
+func (vt *VirtualTerminal) StartPTY(command string, args []string, rows, cols int, env map[string]string, cwd string) error {
 	ptm, pts, err := openPTY()
 	if err != nil {
 		return fmt.Errorf("open pty: %w", err)
@@ -53,6 +54,9 @@ func (vt *VirtualTerminal) StartPTY(command string, args []string, rows, cols in
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid:  true,
 		Setctty: true,
+	}
+	if cwd != "" {
+		cmd.Dir = cwd
 	}
 
 	// Build environment

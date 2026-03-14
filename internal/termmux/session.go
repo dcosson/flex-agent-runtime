@@ -85,6 +85,7 @@ func (s *Session) Start(ctx context.Context) error {
 		s.Config.InitialRows,
 		s.Config.InitialCols,
 		s.Config.Env,
+		s.Config.CWD,
 	)
 	if err != nil {
 		return fmt.Errorf("start pty: %w", err)
