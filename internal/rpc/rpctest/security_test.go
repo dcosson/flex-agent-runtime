@@ -3,6 +3,7 @@ package rpctest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -22,12 +23,30 @@ func TestSEC1_UnauthorizedSessionAccess(t *testing.T) {
 		name string
 		fn   func() error
 	}{
-		{"GetSession", func() error { _, err := stack.Server.GetSession(ctx, &api.GetSessionRequest{SessionID: "nonexistent"}); return err }},
-		{"PauseSession", func() error { _, err := stack.Server.PauseSession(ctx, &api.PauseSessionRequest{SessionID: "nonexistent"}); return err }},
-		{"ResumeSession", func() error { _, err := stack.Server.ResumeSession(ctx, &api.ResumeSessionRequest{SessionID: "nonexistent"}); return err }},
-		{"DestroySession", func() error { _, err := stack.Server.DestroySession(ctx, &api.DestroySessionRequest{SessionID: "nonexistent"}); return err }},
-		{"TurnComplete", func() error { _, err := stack.Server.TurnComplete(ctx, &api.TurnCompleteRequest{SessionID: "nonexistent"}); return err }},
-		{"ListSnapshots", func() error { _, err := stack.Server.ListSnapshots(ctx, &api.ListSnapshotsRequest{SessionID: "nonexistent"}); return err }},
+		{"GetSession", func() error {
+			_, err := stack.Server.GetSession(ctx, &api.GetSessionRequest{SessionID: "nonexistent"})
+			return err
+		}},
+		{"PauseSession", func() error {
+			_, err := stack.Server.PauseSession(ctx, &api.PauseSessionRequest{SessionID: "nonexistent"})
+			return err
+		}},
+		{"ResumeSession", func() error {
+			_, err := stack.Server.ResumeSession(ctx, &api.ResumeSessionRequest{SessionID: "nonexistent"})
+			return err
+		}},
+		{"DestroySession", func() error {
+			_, err := stack.Server.DestroySession(ctx, &api.DestroySessionRequest{SessionID: "nonexistent"})
+			return err
+		}},
+		{"TurnComplete", func() error {
+			_, err := stack.Server.TurnComplete(ctx, &api.TurnCompleteRequest{SessionID: "nonexistent"})
+			return err
+		}},
+		{"ListSnapshots", func() error {
+			_, err := stack.Server.ListSnapshots(ctx, &api.ListSnapshotsRequest{SessionID: "nonexistent"})
+			return err
+		}},
 		{"RollbackSession", func() error {
 			_, err := stack.Server.RollbackSession(ctx, &api.RollbackSessionRequest{SessionID: "nonexistent", SnapshotID: "snap-1"})
 			return err
@@ -95,10 +114,10 @@ func TestSEC2b_BoundaryParameters(t *testing.T) {
 	// May succeed or fail, but must not panic
 	_ = err
 
-	// Very large params map
+	// Very large params map with distinct keys
 	bigParams := make(map[string]any)
 	for i := 0; i < 1000; i++ {
-		bigParams[strings.Repeat("k", 50)] = strings.Repeat("v", 100)
+		bigParams[fmt.Sprintf("key-%04d-%s", i, strings.Repeat("k", 45))] = strings.Repeat("v", 100)
 	}
 	_, err = stack.Server.ExecuteTool(ctx, &api.ExecuteToolRequest{
 		SessionID: sess.ID, ToolCallID: "tc-big-params", ToolName: "bash",

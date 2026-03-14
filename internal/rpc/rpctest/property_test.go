@@ -406,6 +406,7 @@ func TestPropertySessionIDAuthority(t *testing.T) {
 			t.Fatalf("expected CodeNotFound for driver ID, got: %v", getErr)
 		}
 
-		_ = stack.Server.DestroySession // cleanup happens via t.Cleanup
+		// Clean up session to avoid accumulation across rapid iterations
+		stack.Server.DestroySession(ctx, &api.DestroySessionRequest{SessionID: runtimeID})
 	})
 }
