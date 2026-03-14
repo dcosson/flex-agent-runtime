@@ -29,10 +29,16 @@
       "author": "Danny Cosson",
       "text": "Implementation complete @ d0bf886. Google + Cohere embedding adapters with full test suites. 7 files, 1060 lines. All tests pass with -race. Sending for review.",
       "created_at": "2026-03-14T13:52:55.822881-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R1 review fixes incorporated @ d7cade8. All 3 P3 findings addressed: Google usage estimation, Cohere generic dedup, task type comment.",
+      "created_at": "2026-03-14T13:56:51.473385-07:00"
     }
   ],
   "created_at": "2026-03-14T13:43:26.032554-07:00",
-  "updated_at": "2026-03-14T13:55:27.711764-07:00",
+  "updated_at": "2026-03-14T13:56:51.474734-07:00",
   "closed_at": "2026-03-14T13:55:27.711764-07:00",
   "close_reason": "Closed"
 }
