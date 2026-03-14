@@ -35,8 +35,14 @@
       "author": "Danny Cosson",
       "text": "Implementation complete. Branch batch4/gvisor-lifecycle @ 9bcf7e0. 79 tests, staticcheck clean. Waiting on review.",
       "created_at": "2026-03-13T18:25:22.538094-07:00"
+    },
+    {
+      "id": 2,
+      "author": "coder-2-sea",
+      "text": "R1 review findings incorporated @ 39cf839. Fixed: checkOOMKill dead code replaced with detectOOMFromCgroup F1, readPeakMemory stub removed F2, orphaned detectOOMKill unified with Manager F3. Ready for R2 review.",
+      "created_at": "2026-03-13T20:06:57.673621-07:00"
     }
   ],
   "created_at": "2026-03-13T17:59:22.645562-07:00",
-  "updated_at": "2026-03-13T18:25:22.539061-07:00"
+  "updated_at": "2026-03-13T20:06:57.673936-07:00"
 }
