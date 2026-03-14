@@ -13,6 +13,10 @@
     {
       "id": "aiag-glo.2",
       "type": "parent-child"
+    },
+    {
+      "id": "aiag-glo.3",
+      "type": "parent-child"
     }
   ],
   "created_by": "Danny Cosson",

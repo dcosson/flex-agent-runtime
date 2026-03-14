@@ -684,3 +684,20 @@ internal/termmux/
 - **Not incorporated**: #9 (P3 plan numbering collision — disambiguation note added in plan index instead of renumbering)
 - **Open questions**: All resolved
 - **Reviewers**: coder-1-sea, coder-2-sea, reviewer-sea
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-14
+- **Branch**: main
+- **Commit**: 892bd15
+- **Verified by**: coder-1-sea
+- **Test verification**: `go test -race ./internal/termmux/... ./internal/agent/...` — PASS
+- **Acceptance tests**: PASS (session lifecycle/events/OTEL/session-log/codex paths covered in termmux + agent tests)
+- **Deviations from plan**:
+  - [Cosmetic] Some migration artifacts live in additional helper files compared to the illustrative package tree.
+- **Structural deviations resolved**: None found
+- **Additions beyond plan**:
+  - Added dedicated `internal/agent/driver_termmux.go` adapter tests for seam validation.

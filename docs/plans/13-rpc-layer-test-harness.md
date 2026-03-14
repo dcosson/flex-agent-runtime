@@ -196,3 +196,17 @@ Target:
 6. Stress/soak tests ST1-ST3 pass in scheduled CI.
 7. Security tests SEC1-SEC4 pass.
 8. Manual QA checklist completed for release-candidate commit.
+
+---
+
+## Completion Signoff
+
+- **Status**: Partial
+- **Date**: 2026-03-14
+- **Branch**: main
+- **Verified by**: coder-1-sea
+- **Completed items**: Extensive `internal/rpc/rpctest` suites (P/F/O/S/B/ST/SEC categories) are implemented and pass under `-race`.
+- **Deviations**:
+  - [Contractual] Security/auth and transport-level behaviors that depend on concrete ConnectRPC server wiring are only partially testable with current in-process transport.
+- **Outstanding gaps**:
+  - `aiag-glo.3`: Add transport-integrated harness coverage after ConnectRPC wiring lands.

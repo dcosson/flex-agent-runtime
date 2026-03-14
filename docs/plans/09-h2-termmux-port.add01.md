@@ -803,3 +803,18 @@ When the child enables CSI?2026 (synchronized output), the `pipeChunk` callback 
 | 5 | reviewer-sea | P3 | Resize handler passes rows for childRows without explanation | Incorporated | Added inline comment explaining childRows == rows for browser clients |
 | 6 | reviewer-sea | P3 | StreamTerminal service location ambiguous | Incorporated | Resolved as separate `TerminalService` with rationale in §5.1 |
 | 7 | reviewer-sea | P3 | Multi-client resize contention not addressed | Incorporated | Added §6.4 with last-resize-wins + debouncing strategy |
+
+---
+
+## Completion Signoff
+
+- **Status**: Partial
+- **Date**: 2026-03-14
+- **Branch**: main
+- **Verified by**: coder-1-sea
+- **Completed items**: `TerminalSubscription` model, session subscribe/unsubscribe, stream message DTOs, and harness coverage for subscription behavior are implemented.
+- **Deviations**:
+  - [Contractual] `StreamTerminal` RPC endpoint and transport bridging described in the addendum are not implemented in the RPC layer.
+  - [Missing] Browser-facing WebSocket relay and input rate-limit/auth enforcement path are not implemented.
+- **Outstanding gaps**:
+  - `aiag-0bh.4`: Implement StreamTerminal RPC + WebSocket relay with attach/output/input/resize semantics and tests.

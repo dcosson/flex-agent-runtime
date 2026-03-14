@@ -505,3 +505,18 @@ This metadata is included in `ExecuteToolResponse` so that the agent and Runtime
 - **Not incorporated**: None
 - **Open questions**: All resolved
 - **Reviewers**: reviewer-sea, coder-1-sea
+
+---
+
+## Completion Signoff
+
+- **Status**: Partial
+- **Date**: 2026-03-14
+- **Branch**: main
+- **Verified by**: coder-1-sea
+- **Completed items**: RPC domain API contracts, sandbox server/client adapters, error mapping/retry logic, idempotent tool dispatch, event stream server, and race-clean RPC tests are implemented.
+- **Deviations**:
+  - [Contractual] Plan-specified ConnectRPC transport wiring/interceptors are not implemented; current implementation uses in-process interfaces and adapters.
+  - [Missing] Terminal streaming RPC service seam from addendum scope is not wired through RPC transport.
+- **Outstanding gaps**:
+  - `aiag-glo.3`: Implement concrete ConnectRPC transport + policy interceptors + terminal service integration.

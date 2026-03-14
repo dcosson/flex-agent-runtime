@@ -184,3 +184,20 @@ Target:
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
 | 1 | coder-2-sea | P0 | Companion test harness doc missing | Incorporated | Created this document with property, chaos, simulation, benchmark, stress, and security coverage. |
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-14
+- **Branch**: main
+- **Commit**: 892bd15
+- **Verified by**: coder-1-sea
+- **Test verification**: `go test -race ./internal/termmux/... ./internal/agent/...` — PASS
+- **Acceptance tests**: N/A (harness plan)
+- **Deviations from plan**:
+  - [Cosmetic] Some suite names are grouped in `termmux_harness_test.go` rather than one file per suite.
+- **Structural deviations resolved**: None found
+- **Additions beyond plan**:
+  - Included integration checks tying terminal subscriptions directly to session lifecycle.

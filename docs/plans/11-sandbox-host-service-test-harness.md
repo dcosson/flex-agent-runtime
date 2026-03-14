@@ -782,3 +782,17 @@ Before `11-sandbox-host-service` implementation is considered complete:
 | `internal/sandbox/zfs.MockManager` | Mock ZFS for unit/component tests |
 | Go stdlib `testing` | Benchmarks, test framework |
 | Linux + ZFS + gVisor | Integration tests (build-tag gated) |
+
+---
+
+## Completion Signoff
+
+- **Status**: Partial
+- **Date**: 2026-03-14
+- **Branch**: main
+- **Verified by**: coder-1-sea
+- **Completed items**: Property/fault/simulation/benchmark/stress/security suites under `internal/sandbox/` are implemented and passing with race detection.
+- **Deviations**:
+  - [Contractual] Exit criterion requiring end-to-end `cmd/sandbox-host` runtime validation cannot be fully met while the host binary remains a skeleton.
+- **Outstanding gaps**:
+  - `aiag-zvy.3`: Complete host binary wiring and add binary-level harness/acceptance coverage.

@@ -905,3 +905,20 @@ Implementation is considered complete when ALL of the following pass:
 | 3 | coder-2-sea | P2 | Sustained-load error threshold too permissive | Incorporated | SK2 threshold tightened to <0.01% with categorized error accounting. |
 | 4 | coder-2-sea | P3 | Missing explicit OOM behavior test | Incorporated | Added SEC7 OOM behavior test. |
 | 5 | coder-2-sea | P3 | Output-capture benchmark lacks baseline comparison | Incorporated | B4 now runs baseline and capture-enabled sub-benchmarks. |
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-14
+- **Branch**: main
+- **Commit**: 892bd15
+- **Verified by**: coder-1-sea
+- **Test verification**: `go test -race ./internal/sandbox/gvisor/...` — PASS
+- **Acceptance tests**: N/A (harness plan)
+- **Deviations from plan**:
+  - [Cosmetic] Tier labels in comments differ slightly from doc wording; required suites are present.
+- **Structural deviations resolved**: None found
+- **Additions beyond plan**:
+  - Added targeted `exec_test.go` to isolate runsc arg/output behavior.

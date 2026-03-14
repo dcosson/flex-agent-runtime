@@ -1018,3 +1018,20 @@ Before `09-sandbox-zfs` implementation is considered complete:
 | 3 | coder-2-sea | P2 | Pool import/export missing from coverage | Incorporated | Added explicit export/import cycle security/integration test. |
 | 4 | coder-2-sea | P3 | Rollback benchmark currently measures create+rollback combined | Incorporated | B3 now pre-creates snapshots and times rollback path only. |
 | 5 | coder-2-sea | P3 | Stress snapshot count bookkeeping is brittle | Incorporated | ST1 now derives expectations from `ListSnapshots` and validates ordering. |
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-14
+- **Branch**: main
+- **Commit**: 892bd15
+- **Verified by**: coder-1-sea
+- **Test verification**: `go test -race ./internal/sandbox/zfs/...` — PASS
+- **Acceptance tests**: N/A (harness plan)
+- **Deviations from plan**:
+  - [Cosmetic] Test file names differ from examples, but P/FI/S/B/ST/SEC coverage exists in harness.
+- **Structural deviations resolved**: None found
+- **Additions beyond plan**:
+  - Added dedicated parser-focused tests (`cli_parse_test.go`) alongside core harness suites.

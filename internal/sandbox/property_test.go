@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"h2-agent-runtime/internal/sandbox/zfs"
+	"h2-agent-runtime/internal/tools"
 
 	"pgregory.net/rapid"
 )
@@ -198,8 +199,8 @@ func TestPropertySessionStateMachine(t *testing.T) {
 func TestPropertyTierClassificationCompleteness(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		name := rapid.String().Draw(t, "toolName")
-		tier := ClassifyTool(name)
-		if tier != Tier1 && tier != Tier2 {
+		tier := tools.ClassifyTool(name)
+		if tier != tools.Tier1 && tier != tools.Tier2 {
 			t.Fatalf("invalid tier %d for tool %q", tier, name)
 		}
 	})
@@ -211,16 +212,16 @@ func TestTierClassificationKnownTools(t *testing.T) {
 	tier2Tools := []string{"bash", "git_push", "git_clone", "git_fetch", "git_pull", "git_add", "git_commit"}
 
 	for _, tool := range tier1Tools {
-		if tier := ClassifyTool(tool); tier != Tier1 {
+		if tier := tools.ClassifyTool(tool); tier != tools.Tier1 {
 			t.Errorf("ClassifyTool(%q) = %d, want Tier1", tool, tier)
 		}
 	}
 	for _, tool := range tier2Tools {
-		if tier := ClassifyTool(tool); tier != Tier2 {
+		if tier := tools.ClassifyTool(tool); tier != tools.Tier2 {
 			t.Errorf("ClassifyTool(%q) = %d, want Tier2", tool, tier)
 		}
 	}
-	if tier := ClassifyTool("unknown_tool"); tier != Tier2 {
+	if tier := tools.ClassifyTool("unknown_tool"); tier != tools.Tier2 {
 		t.Errorf("ClassifyTool(unknown_tool) = %d, want Tier2", tier)
 	}
 }
