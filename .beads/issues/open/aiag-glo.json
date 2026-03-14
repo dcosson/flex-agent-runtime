@@ -1,0 +1,26 @@
+{
+  "id": "aiag-glo",
+  "title": "RPC Layer Implementation",
+  "description": "Implement internal/rpc from plan 13-rpc-layer. ConnectRPC services (SandboxService, AgentEventService), SandboxBackend adapter, error model, retry policy, event streaming protocol. Plan: docs/plans/13-rpc-layer.md + test harness.",
+  "status": "open",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-glo.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-glo.2",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4"
+  ],
+  "created_at": "2026-03-13T17:58:44.458622-07:00",
+  "updated_at": "2026-03-13T17:58:44.458622-07:00"
+}

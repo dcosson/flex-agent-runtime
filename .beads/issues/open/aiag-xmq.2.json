@@ -1,0 +1,34 @@
+{
+  "id": "aiag-xmq.2",
+  "title": "gVisor: Container lifecycle, GVisorManager impl + test harness",
+  "description": "Implement gVisor container lifecycle and full GVisorManager + test harness from docs/plans/10-sandbox-gvisor.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: §4.4 (container lifecycle — create/run/destroy), §4.5 (health + cleanup), §4.6 (runsc integration), test harness from docs/plans/10-sandbox-gvisor-test-harness.md\n\nKey deliverables:\n- GVisorManager implementation: Run(), CleanupStale(), ActiveContainers(), Close()\n- Container lifecycle: create bundle dir → write OCI spec → invoke runsc create → runsc start → wait → capture output → destroy → cleanup\n- runsc executor: command building, output/error capture, exit code extraction\n- Health monitoring: detect hung containers, enforce timeouts via context cancellation\n- CleanupStale: scan for orphaned containers/bundles, clean up, return count\n- Close: cancel in-flight containers, wait for completion, mark manager closed\n- Idempotent Close (ErrManagerClosed on subsequent Run calls)\n- Test harness suites: P1-P5 (property), F1-F5 (fault injection), S1-S2 (stress), B1-B5 (benchmarks), SK1-SK3 (soak), SEC1-SEC7 (security), O1-O2 (observability)\n- Unit tests for container lifecycle, cleanup, concurrent Run scenarios\n\nDepends on: gVisor core types task for interface, types, OCI spec builder, cgroup translator.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-xmq",
+  "dependencies": [
+    {
+      "id": "aiag-xmq",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-xmq.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-zvy.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4",
+    "plan-doc=10-sandbox-gvisor"
+  ],
+  "created_at": "2026-03-13T17:59:22.645562-07:00",
+  "updated_at": "2026-03-13T17:59:22.645562-07:00"
+}

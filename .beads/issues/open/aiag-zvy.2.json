@@ -1,0 +1,28 @@
+{
+  "id": "aiag-zvy.2",
+  "title": "Sandbox Host: Test harness",
+  "description": "Implement test harness for SandboxHostService from docs/plans/11-sandbox-host-service-test-harness.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: Full test harness doc — P1-P5 (property), FI1-FI6 (fault injection), DS1-DS3 (deterministic simulation), B1-B5 (benchmarks), ST1-ST3 (stress), SEC1-SEC3 (security)\n\nKey deliverables:\n- Property tests: session lifecycle invariants, tool dispatch correctness, snapshot ordering, tier classification consistency, concurrent session isolation\n- Fault injection: ZFS failure during session create, gVisor crash during tool exec, snapshot failure during TurnComplete, timeout propagation, cascading failures, partial cleanup\n- Deterministic simulation: session state machine exhaustive walks, snapshot DAG correctness, concurrent session interleavings\n- Benchmarks: session create/destroy throughput, tool dispatch latency by tier, snapshot create/rollback time, concurrent session scaling\n- Stress tests: max concurrent sessions, rapid create/destroy cycles, snapshot accumulation\n- Security tests: session isolation verification, path traversal prevention, resource limit enforcement\n- Integration tests using MockManager for both ZFS and gVisor\n\nDepends on: Sandbox Host Service core implementation task.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-zvy",
+  "dependencies": [
+    {
+      "id": "aiag-zvy",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-zvy.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4",
+    "plan-doc=11-sandbox-host-service"
+  ],
+  "created_at": "2026-03-13T17:59:44.726697-07:00",
+  "updated_at": "2026-03-13T17:59:44.726697-07:00"
+}
