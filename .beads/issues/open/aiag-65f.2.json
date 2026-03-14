@@ -1,0 +1,28 @@
+{
+  "id": "aiag-65f.2",
+  "title": "Embedding: Test harness (P/F/O/B/ST/SEC suites)",
+  "description": "Implement embedding test harness from docs/plans/01-ai-core.add01-test-harness.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: Full test harness doc\n\nKey deliverables:\n- Property tests P1-P5: batch splitting ordering, dimension bounds, cost monotonicity, registry isolation, task type mapping completeness\n- Fault injection F1-F4: provider API errors (429/400/500/timeout), partial batch failure, malformed response handling, context cancellation\n- Oracle O3: Embed() entry point contract (O1/O2 deferred to provider plans)\n- Benchmarks B1-B4: registry lookup \u003c100ns, batch split overhead \u003c1ms, vector validation \u003c1us, cost calc \u003c100ns\n- Stress tests ST1-ST3: concurrent registry access (100 goroutines), large batch 100k texts, concurrent Embed calls (50×1000)\n- Security SEC1-SEC2: input validation (empty/null/oversized/bad dims), API key handling\n- CI tier mapping: Tier 1 (P+F+O3+SEC), Tier 2 (B+ST)\n- Exit criteria: 100+ property iterations, no panics, benchmarks meet targets, -race clean, 90%+ coverage\n\nDepends on: Embedding core implementation task.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-65f",
+  "dependencies": [
+    {
+      "id": "aiag-65f",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-65f.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "plan-doc=01-ai-core.add01"
+  ],
+  "assignee": "coder-2-sea",
+  "created_at": "2026-03-14T11:21:32.744325-07:00",
+  "updated_at": "2026-03-14T11:21:46.196788-07:00"
+}

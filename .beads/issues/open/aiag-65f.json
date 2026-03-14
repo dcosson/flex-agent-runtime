@@ -1,0 +1,26 @@
+{
+  "id": "aiag-65f",
+  "title": "Embedding API Core Implementation",
+  "description": "Implement embedding API support from docs/plans/01-ai-core.add01.md. Core types, registries, catalog, BatchEmbed, Embed entry point, public re-exports, and test harness. Provider adapters are separate (need provider plan addenda).",
+  "status": "open",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-65f.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-65f.2",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "plan-doc=01-ai-core.add01"
+  ],
+  "created_at": "2026-03-14T11:20:58.960317-07:00",
+  "updated_at": "2026-03-14T11:20:58.960317-07:00"
+}
