@@ -1,7 +1,6 @@
 package mode2
 
 import (
-	"path/filepath"
 	"testing"
 
 	"h2-agent-runtime/e2etests/mode2/harness"
@@ -45,37 +44,30 @@ func TestConfigDirectoryPersistence(t *testing.T) {
 	}
 
 	// Simulate restart: create second sandbox env with SAME session ID
-	// This simulates a session restart where the config dir path should be stable
+	// sharing the same data directory — credentials should actually persist.
 	sandbox2 := harness.NewSandboxEnv(t, harness.SandboxEnvConfig{
 		SessionID: sessionID,
+		DataDir:   sandbox1.DataDir + "/..", // share the same base dir
 	})
-	injector2 := harness.NewConfigInjector(t, sandbox2.ConfigDir)
 
-	// Verify path derivation is deterministic from session ID
+	// Config paths should be identical (same base + same session ID)
 	path2 := sandbox2.ConfigPath()
-
-	// Both paths should end with the same session-relative component
-	// (they have different temp bases but the session-relative path is the same)
-	rel1 := filepath.Base(filepath.Dir(path1)) + "/" + filepath.Base(path1)
-	rel2 := filepath.Base(filepath.Dir(path2)) + "/" + filepath.Base(path2)
-	if rel1 != rel2 {
-		t.Fatalf("config path not deterministic:\n  path1=%s (rel=%s)\n  path2=%s (rel=%s)",
-			path1, rel1, path2, rel2)
+	if path1 != path2 {
+		t.Fatalf("config path not stable across restart:\n  path1=%s\n  path2=%s", path1, path2)
 	}
 
-	// Expected relative path: configs/<sessionID>
-	expectedRel := "configs/" + sessionID
-	if rel1 != expectedRel {
-		t.Fatalf("relative path mismatch: got %q, want %q", rel1, expectedRel)
-	}
-
-	// Inject credentials in new env (simulating fresh config dir on restart)
-	injector2.InjectAPIKey("api_key.txt", "sk-persist-key-original")
-
-	// Verify credential is accessible after restart
+	// Credentials injected in sandbox1 should be readable from sandbox2
+	// without re-injection — this tests actual cross-restart persistence
+	injector2 := harness.NewConfigInjector(t, sandbox2.ConfigDir)
 	key2 := injector2.ReadCredential("api_key.txt")
 	if key2 != "sk-persist-key-original" {
 		t.Fatalf("credential not preserved after restart: %q", key2)
+	}
+
+	// Settings modified during session should also persist
+	settings2 := injector2.ReadCredential("settings.json")
+	if settings2 != `{"model":"claude-sonnet-4-20250514","updated":true}` {
+		t.Fatalf("settings not preserved after restart: %q", settings2)
 	}
 }
 

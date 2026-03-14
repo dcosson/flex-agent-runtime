@@ -20,6 +20,11 @@ type SandboxEnv struct {
 // SandboxEnvConfig controls SandboxEnv setup.
 type SandboxEnvConfig struct {
 	SessionID string
+	// DataDir overrides the sandbox data directory (parent of configs/).
+	// If empty, a new temp directory is created. Set this to share
+	// a data directory across multiple SandboxEnv instances (e.g.,
+	// to test config persistence across restart).
+	DataDir string
 }
 
 // NewSandboxEnv creates a SandboxEnv with isolated temp directories.
@@ -30,7 +35,12 @@ func NewSandboxEnv(t *testing.T, cfg SandboxEnvConfig) *SandboxEnv {
 		cfg.SessionID = "mode2-sandbox-" + t.Name()
 	}
 
-	base := t.TempDir()
+	var base string
+	if cfg.DataDir != "" {
+		base = cfg.DataDir
+	} else {
+		base = t.TempDir()
+	}
 	workspaceDir := filepath.Join(base, "workspace")
 	dataDir := filepath.Join(base, "sandbox-data")
 	configDir := filepath.Join(dataDir, "configs", cfg.SessionID)

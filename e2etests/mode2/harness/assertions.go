@@ -54,8 +54,9 @@ func (n *EventNormalizer) Events() []NormalizedEvent {
 }
 
 // ResolveConflicts applies the source priority hierarchy to deduplicate events.
-// When multiple sources report the same event type within a time window,
-// the higher-priority source wins.
+// When multiple sources report the same event type AND identity fields within
+// a time window, the higher-priority source wins. Events with different identity
+// fields (e.g., different tool names or call IDs) are never deduplicated.
 func (n *EventNormalizer) ResolveConflicts(window time.Duration) []NormalizedEvent {
 	if len(n.events) == 0 {
 		return nil
@@ -77,6 +78,10 @@ func (n *EventNormalizer) ResolveConflicts(window time.Duration) []NormalizedEve
 			if n.events[j].Event.Type != evt.Event.Type {
 				continue
 			}
+			// Check identity fields match — different logical events should not be deduped
+			if !eventsShareIdentity(n.events[best].Event, n.events[j].Event) {
+				continue
+			}
 			dt := n.events[j].Event.At.Sub(evt.Event.At)
 			if dt < 0 {
 				dt = -dt
@@ -84,7 +89,7 @@ func (n *EventNormalizer) ResolveConflicts(window time.Duration) []NormalizedEve
 			if dt > window {
 				continue
 			}
-			// Same event type within window — keep higher priority
+			// Same event type + identity within window — keep higher priority
 			if sourcePriority(n.events[j].Source) > sourcePriority(n.events[best].Source) {
 				used[best] = true
 				best = j
@@ -97,6 +102,21 @@ func (n *EventNormalizer) ResolveConflicts(window time.Duration) []NormalizedEve
 	}
 
 	return resolved
+}
+
+// eventsShareIdentity checks whether two events represent the same logical event.
+// Events with different tool names, call IDs, or session IDs are distinct.
+func eventsShareIdentity(a, b agent.AgentEvent) bool {
+	// Tool events: compare tool name and call ID
+	if a.ToolName != "" || b.ToolName != "" {
+		return a.ToolName == b.ToolName && a.ToolCallID == b.ToolCallID
+	}
+	// Session events: compare session ID
+	if a.SessionID != "" || b.SessionID != "" {
+		return a.SessionID == b.SessionID
+	}
+	// No identity fields — treat as same logical event
+	return true
 }
 
 func sourceToConfidence(source string) EventConfidence {

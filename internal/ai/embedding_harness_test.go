@@ -1031,7 +1031,6 @@ func TestSEC2_APIKeyHandling(t *testing.T) {
 	}
 }
 
-
 // =============================================================================
 // Additional: Embed() validation for dimension bounds via Embed() (not just batch)
 // =============================================================================

@@ -26,7 +26,7 @@ var cohereInputTypes = map[ai.EmbeddingTaskType]string{
 	ai.EmbeddingTaskClassification: "classification",
 	ai.EmbeddingTaskClustering:     "clustering",
 	ai.EmbeddingTaskSimilarity:     "search_document", // closest match
-	ai.EmbeddingTaskUnspecified:    "search_document",  // required, default
+	ai.EmbeddingTaskUnspecified:    "search_document", // required, default
 }
 
 // Config controls Cohere provider construction.

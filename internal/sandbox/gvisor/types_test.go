@@ -128,4 +128,3 @@ func TestConstants(t *testing.T) {
 		t.Error("MaxContainerNameLen should be positive")
 	}
 }
-

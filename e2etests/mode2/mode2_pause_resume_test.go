@@ -9,8 +9,9 @@ import (
 )
 
 // S4: Pause/resume with idle snapshot.
-// Validates that after idle transition, the session can be paused,
-// a snapshot captured, and the session resumed with config continuity.
+// Tests idle detection, snapshot creation, and config/workspace persistence
+// across simulated pause/resume. Actual pause/resume API calls are deferred
+// until the termmux adapter exposes Pause/Resume methods.
 func TestPauseResumeWithIdleSnapshot(t *testing.T) {
 	// Set up sandbox environment
 	sandbox := harness.NewSandboxEnv(t, harness.SandboxEnvConfig{
@@ -93,28 +94,34 @@ drain:
 	}
 }
 
+// TestPauseResumeLifecycleAPI tests actual pause/resume API calls.
+// Skipped until termmux adapter exposes Pause/Resume methods.
+func TestPauseResumeLifecycleAPI(t *testing.T) {
+	t.Skip("pause/resume API not yet available on TermmuxDriverAdapter — deferred to termmux implementation")
+}
+
 func buildPauseResumeReplayScript() []harness.ReplayEntry {
 	base := time.Date(2026, 3, 12, 10, 0, 0, 0, time.UTC)
 	return []harness.ReplayEntry{
 		{
 			Timestamp: base,
 			Source:    "otel",
-			Data:     mustJSON(harness.OTELData{Span: "session_started", Attrs: map[string]any{"session_id": "s4-pause-resume"}}),
+			Data:      mustJSON(harness.OTELData{Span: "session_started", Attrs: map[string]any{"session_id": "s4-pause-resume"}}),
 		},
 		{
 			Timestamp: base.Add(500 * time.Millisecond),
 			Source:    "otel",
-			Data:     mustJSON(harness.OTELData{Span: "tool_started", Attrs: map[string]any{"tool_name": "edit", "call_id": "c1"}}),
+			Data:      mustJSON(harness.OTELData{Span: "tool_started", Attrs: map[string]any{"tool_name": "edit", "call_id": "c1"}}),
 		},
 		{
 			Timestamp: base.Add(1000 * time.Millisecond),
 			Source:    "otel",
-			Data:     mustJSON(harness.OTELData{Span: "tool_completed", Attrs: map[string]any{"tool_name": "edit", "call_id": "c1"}}),
+			Data:      mustJSON(harness.OTELData{Span: "tool_completed", Attrs: map[string]any{"tool_name": "edit", "call_id": "c1"}}),
 		},
 		{
 			Timestamp: base.Add(2000 * time.Millisecond),
 			Source:    "otel",
-			Data:     mustJSON(harness.OTELData{Span: "turn_completed", Attrs: map[string]any{"input_tokens": float64(800), "output_tokens": float64(300)}}),
+			Data:      mustJSON(harness.OTELData{Span: "turn_completed", Attrs: map[string]any{"input_tokens": float64(800), "output_tokens": float64(300)}}),
 		},
 	}
 }
