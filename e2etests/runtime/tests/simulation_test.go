@@ -133,11 +133,14 @@ func TestS2_SyntheticDegradation_DetectionSensitivity(t *testing.T) {
 }
 
 // =============================================================================
-// S3: Soak Threshold Simulation
-// Verify soak threshold detection with controlled drift patterns.
+// S3: Soak Drift Threshold Simulation
+// Verify that each individual drift dimension (goroutine growth, RSS, FDs,
+// error slope) correctly triggers threshold failures when breached.
+// (The planned multi-dimensional tradeoff scenario is not applicable to the
+// current single-threshold comparison model in CompareAgainstBaseline.)
 // =============================================================================
 
-func TestS3_SoakThresholdSimulation(t *testing.T) {
+func TestS3_SoakDriftThresholdSimulation(t *testing.T) {
 	soak := rh.SoakProfile{
 		Name:     "s3-soak-sim",
 		Duration: 1 * time.Second,

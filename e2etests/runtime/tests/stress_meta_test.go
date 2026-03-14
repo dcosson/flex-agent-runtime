@@ -88,10 +88,13 @@ soak:
 		t.Fatalf("excessive goroutine growth during soak: %d", goroutineGrowth)
 	}
 
-	// Check heap growth
+	// Check heap growth (guard uint64 underflow — GC can reclaim between reads)
 	var memAfter runtime.MemStats
 	runtime.ReadMemStats(&memAfter)
-	heapGrowthMB := float64(memAfter.HeapInuse-memBefore.HeapInuse) / (1024 * 1024)
+	var heapGrowthMB float64
+	if memAfter.HeapInuse > memBefore.HeapInuse {
+		heapGrowthMB = float64(memAfter.HeapInuse-memBefore.HeapInuse) / (1024 * 1024)
+	}
 	t.Logf("heap growth: %.2f MB", heapGrowthMB)
 
 	if heapGrowthMB > 100 {

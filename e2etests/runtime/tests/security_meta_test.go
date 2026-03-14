@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,7 +152,7 @@ func TestSEC2_SecretRedactionInArtifacts(t *testing.T) {
 		}
 		content := string(data)
 		for _, pattern := range sensitivePatterns {
-			if containsStr(content, pattern) {
+			if strings.Contains(content, pattern) {
 				t.Fatalf("artifact %s contains sensitive pattern %q", path, pattern)
 			}
 		}
@@ -337,16 +338,3 @@ func TestSEC4_ProfileConfig_KnownPanics(t *testing.T) {
 	}
 }
 
-// --- Helpers ---
-
-func containsStr(haystack, needle string) bool {
-	if len(needle) == 0 {
-		return false
-	}
-	for i := 0; i <= len(haystack)-len(needle); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
-}

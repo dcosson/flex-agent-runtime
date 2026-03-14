@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -25,6 +26,9 @@ func TestF1_TelemetryLossBursts_GracefulDegradation(t *testing.T) {
 			fullCollector := rh.NewTelemetryCollector()
 			lossyCollector := rh.NewTelemetryCollector()
 
+			// Seeded RNG for deterministic but random-pattern loss
+			rng := rand.New(rand.NewSource(int64(lossRate * 1000)))
+
 			numSamples := 100
 			t0 := time.Now()
 			dropped := 0
@@ -45,9 +49,8 @@ func TestF1_TelemetryLossBursts_GracefulDegradation(t *testing.T) {
 					goroutines, rssMB, fdCount, errRate,
 				)
 
-				// Lossy collector drops some batches
-				shouldDrop := float64(i)/float64(numSamples) < lossRate
-				if shouldDrop {
+				// Lossy collector drops random batches (seeded for determinism)
+				if rng.Float64() < lossRate {
 					dropped++
 					continue
 				}
