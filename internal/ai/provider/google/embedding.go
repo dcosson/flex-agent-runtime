@@ -82,6 +82,7 @@ func (p *EmbeddingProvider) embedSingle(ctx context.Context, model ai.EmbeddingM
 				Parts: []part{{Text: text}},
 			},
 		}
+		// Unspecified maps to "" in googleTaskTypes; omit taskType from request via omitempty.
 		if tt, ok := googleTaskTypes[req.TaskType]; ok && tt != "" {
 			r.TaskType = tt
 		}
@@ -136,10 +137,16 @@ func (p *EmbeddingProvider) embedSingle(ctx context.Context, model ai.EmbeddingM
 		}
 	}
 
+	// Google doesn't report usage — estimate tokens from input text (~4 chars/token).
+	var estimatedTokens int
+	for _, text := range req.Texts {
+		estimatedTokens += (len(text) + 3) / 4
+	}
+
 	return &ai.EmbeddingResponse{
 		Embeddings: out,
 		Model:      model.ID,
-		Usage:      ai.EmbeddingUsage{}, // Google doesn't report usage
+		Usage:      ai.EmbeddingUsage{Tokens: estimatedTokens},
 	}, nil
 }
 

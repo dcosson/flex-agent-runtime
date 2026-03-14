@@ -92,6 +92,10 @@ func TestEmbeddingProvider_EmbedSingleSuccess(t *testing.T) {
 	if resp.Model != "gemini-embedding-001" {
 		t.Fatalf("model=%q", resp.Model)
 	}
+	// Usage estimated from input text: "hello"=(5+3)/4=2 + "world"=(5+3)/4=2 = 4 tokens
+	if resp.Usage.Tokens != 4 {
+		t.Fatalf("estimated tokens=%d want=4", resp.Usage.Tokens)
+	}
 }
 
 func TestEmbeddingProvider_TaskTypeMapping(t *testing.T) {

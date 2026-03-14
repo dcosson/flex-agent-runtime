@@ -141,57 +141,13 @@ func (p *EmbeddingProvider) embedSingle(ctx context.Context, model ai.EmbeddingM
 func extractEmbeddings(resp embedResponseWire, encoding ai.EmbeddingEncoding) []ai.Embedding {
 	switch encoding {
 	case ai.EmbeddingEncodingInt8:
-		out := make([]ai.Embedding, len(resp.Embeddings.Int8))
-		for i, vec := range resp.Embeddings.Int8 {
-			vals := make([]float32, len(vec))
-			for j, v := range vec {
-				vals[j] = float32(v)
-			}
-			raw := make([]int8, len(vec))
-			copy(raw, vec)
-			out[i] = ai.Embedding{Index: i, Values: vals, Raw: raw}
-		}
-		return out
-
-	case ai.EmbeddingEncodingUint8:
-		out := make([]ai.Embedding, len(resp.Embeddings.Uint8))
-		for i, vec := range resp.Embeddings.Uint8 {
-			vals := make([]float32, len(vec))
-			for j, v := range vec {
-				vals[j] = float32(v)
-			}
-			raw := make([]uint8, len(vec))
-			copy(raw, vec)
-			out[i] = ai.Embedding{Index: i, Values: vals, Raw: raw}
-		}
-		return out
-
+		return quantizedToEmbeddings(resp.Embeddings.Int8)
 	case ai.EmbeddingEncodingBinary:
-		out := make([]ai.Embedding, len(resp.Embeddings.Binary))
-		for i, vec := range resp.Embeddings.Binary {
-			vals := make([]float32, len(vec))
-			for j, v := range vec {
-				vals[j] = float32(v)
-			}
-			raw := make([]int8, len(vec))
-			copy(raw, vec)
-			out[i] = ai.Embedding{Index: i, Values: vals, Raw: raw}
-		}
-		return out
-
+		return quantizedToEmbeddings(resp.Embeddings.Binary)
+	case ai.EmbeddingEncodingUint8:
+		return quantizedToEmbeddings(resp.Embeddings.Uint8)
 	case ai.EmbeddingEncodingUBinary:
-		out := make([]ai.Embedding, len(resp.Embeddings.Ubinary))
-		for i, vec := range resp.Embeddings.Ubinary {
-			vals := make([]float32, len(vec))
-			for j, v := range vec {
-				vals[j] = float32(v)
-			}
-			raw := make([]uint8, len(vec))
-			copy(raw, vec)
-			out[i] = ai.Embedding{Index: i, Values: vals, Raw: raw}
-		}
-		return out
-
+		return quantizedToEmbeddings(resp.Embeddings.Ubinary)
 	default: // float (default)
 		out := make([]ai.Embedding, len(resp.Embeddings.Float))
 		for i, vec := range resp.Embeddings.Float {
@@ -202,6 +158,22 @@ func extractEmbeddings(resp embedResponseWire, encoding ai.EmbeddingEncoding) []
 		}
 		return out
 	}
+}
+
+// quantizedToEmbeddings converts quantized integer vectors to embeddings with both
+// float32 Values (for uniform access) and Raw (for quantized consumers).
+func quantizedToEmbeddings[T int8 | uint8](vecs [][]T) []ai.Embedding {
+	out := make([]ai.Embedding, len(vecs))
+	for i, vec := range vecs {
+		vals := make([]float32, len(vec))
+		for j, v := range vec {
+			vals[j] = float32(v)
+		}
+		raw := make([]T, len(vec))
+		copy(raw, vec)
+		out[i] = ai.Embedding{Index: i, Values: vals, Raw: raw}
+	}
+	return out
 }
 
 func resolveInputType(taskType ai.EmbeddingTaskType) string {
