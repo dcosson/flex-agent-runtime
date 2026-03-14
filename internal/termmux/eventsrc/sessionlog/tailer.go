@@ -149,8 +149,11 @@ func (t *Tailer) poll(offset int64, partial []byte) (int64, []byte, error) {
 		return offset + bytesRead, partial, err
 	}
 
-	// Check if we read to the end of the file or if there's a partial line
+	// Clamp to file size to prevent overcounting when last line lacks trailing newline
 	newOffset := offset + bytesRead
+	if newOffset > info.Size() {
+		newOffset = info.Size()
+	}
 	remaining := info.Size() - newOffset
 	if remaining > 0 {
 		// There's data remaining that didn't end with a newline — partial line

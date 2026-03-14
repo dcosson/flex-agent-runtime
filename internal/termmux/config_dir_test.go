@@ -103,6 +103,34 @@ func TestConfigDirManager_InjectFile(t *testing.T) {
 	}
 }
 
+func TestConfigDirManager_InjectFilePathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	m := NewConfigDirManager(dir)
+
+	_, err := m.EnsureDir("s1")
+	if err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
+	// Attempt path traversal
+	traversalPaths := []string{
+		"../../etc/shadow",
+		"../other-session/secrets",
+		"subdir/../../escape",
+	}
+	for _, p := range traversalPaths {
+		err := m.InjectFile("s1", p, []byte("malicious"))
+		if err == nil {
+			t.Errorf("expected error for path traversal %q, got nil", p)
+		}
+	}
+
+	// Valid nested path should still work
+	if err := m.InjectFile("s1", "subdir/file.txt", []byte("ok")); err != nil {
+		t.Errorf("valid nested path failed: %v", err)
+	}
+}
+
 func TestConfigDirManager_InjectFileNestedPath(t *testing.T) {
 	dir := t.TempDir()
 	m := NewConfigDirManager(dir)

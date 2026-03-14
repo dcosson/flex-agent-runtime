@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -90,7 +91,7 @@ func (s *Server) Start() error {
 
 	go func() {
 		if err := s.server.Serve(s.listener); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("OTEL server error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "OTEL server error: %v\n", err)
 		}
 	}()
 

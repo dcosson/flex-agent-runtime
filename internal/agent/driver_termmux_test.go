@@ -102,7 +102,7 @@ func TestAdaptMonitorEvent_AgentMessage(t *testing.T) {
 
 func TestAdaptMonitorEvent_StateChange(t *testing.T) {
 	tests := []struct {
-		monitorState monitor.State
+		monitorState  monitor.State
 		expectedState AgentState
 	}{
 		{monitor.StateInitialized, StateIdle},

@@ -45,7 +45,7 @@ func TestSessionEventSources_WithSessionLog(t *testing.T) {
 	var mu sync.Mutex
 
 	sources, err := s.StartEventSources(EventSourceConfig{
-		OtelCallbacks: otelserver.Callbacks{},
+		OtelCallbacks:  otelserver.Callbacks{},
 		SessionLogPath: logPath,
 		OnSessionLogLine: func(line []byte) {
 			mu.Lock()

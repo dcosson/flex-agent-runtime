@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ConfigDirManager manages per-session config directories for 3rd party agent drivers.
@@ -47,7 +48,12 @@ func (m *ConfigDirManager) Cleanup(sessionID string) error {
 // This is used by orchestrators to inject CLAUDE.md, agents.md, MCP configs, etc.
 func (m *ConfigDirManager) InjectFile(sessionID, relativePath string, data []byte) error {
 	dir := m.StablePath(sessionID)
-	fullPath := filepath.Join(dir, relativePath)
+	fullPath := filepath.Clean(filepath.Join(dir, relativePath))
+
+	// Prevent path traversal outside the session directory
+	if !strings.HasPrefix(fullPath, filepath.Clean(dir)+string(os.PathSeparator)) {
+		return fmt.Errorf("relative path %q escapes config directory", relativePath)
+	}
 
 	// Ensure parent directories exist
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0700); err != nil {

@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -84,4 +85,89 @@ type AgentMessageData struct {
 type StateChangeData struct {
 	State    State    `json:"state"`
 	SubState SubState `json:"sub_state,omitempty"`
+}
+
+// agentEventJSON is a helper for custom JSON unmarshalling.
+type agentEventJSON struct {
+	Type      AgentEventType  `json:"type"`
+	Timestamp time.Time       `json:"timestamp"`
+	Data      json.RawMessage `json:"data,omitempty"`
+}
+
+// UnmarshalJSON deserializes an AgentEvent, using the Type field to
+// reconstruct the correct typed Data payload instead of a generic map.
+func (e *AgentEvent) UnmarshalJSON(b []byte) error {
+	var raw agentEventJSON
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return fmt.Errorf("unmarshal agent event: %w", err)
+	}
+
+	e.Type = raw.Type
+	e.Timestamp = raw.Timestamp
+
+	if len(raw.Data) == 0 || string(raw.Data) == "null" {
+		return nil
+	}
+
+	var data any
+	switch raw.Type {
+	case EventSessionStarted:
+		var d SessionStartedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		data = d
+	case EventSessionEnded:
+		var d SessionEndedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		data = d
+	case EventTurnCompleted:
+		var d TurnCompletedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		data = d
+	case EventToolStarted:
+		var d ToolStartedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		data = d
+	case EventToolCompleted:
+		var d ToolCompletedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		data = d
+	case EventApprovalRequested:
+		var d ApprovalRequestedData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		data = d
+	case EventAgentMessage:
+		var d AgentMessageData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		data = d
+	case EventStateChange:
+		var d StateChangeData
+		if err := json.Unmarshal(raw.Data, &d); err != nil {
+			return err
+		}
+		data = d
+	default:
+		// Unknown event type — keep as raw JSON
+		var m map[string]any
+		if err := json.Unmarshal(raw.Data, &m); err != nil {
+			return err
+		}
+		data = m
+	}
+
+	e.Data = data
+	return nil
 }

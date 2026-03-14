@@ -14,8 +14,8 @@ import (
 
 const (
 	// Debouncing parameters from plan §4.5
-	idleDelay             = 200 * time.Millisecond
-	interruptSuppression  = 500 * time.Millisecond
+	idleDelay            = 200 * time.Millisecond
+	interruptSuppression = 500 * time.Millisecond
 )
 
 // EventHandler processes OTEL events from Codex and normalizes them
@@ -24,9 +24,9 @@ type EventHandler struct {
 	mu sync.Mutex
 
 	// Debouncing state
-	lastEventTime   time.Time
-	interruptedAt   time.Time
-	idleTimer       *time.Timer
+	lastEventTime time.Time
+	interruptedAt time.Time
+	idleTimer     *time.Timer
 
 	// Token baseline tracking for delta calculation
 	baselineInputTokens  int64

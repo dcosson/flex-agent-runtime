@@ -26,9 +26,9 @@ type EventSourceConfig struct {
 
 // SessionEventSources holds the running event sources for a session.
 type SessionEventSources struct {
-	OtelServer     *otelserver.Server
-	SessionTailer  *sessionlog.Tailer
-	cancelTailer   context.CancelFunc
+	OtelServer    *otelserver.Server
+	SessionTailer *sessionlog.Tailer
+	cancelTailer  context.CancelFunc
 }
 
 // StartEventSources initializes and starts the event sources for a session.

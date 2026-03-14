@@ -22,13 +22,14 @@ type Session struct {
 	clients *ClientManager
 
 	// Lifecycle
-	mu         sync.RWMutex
-	started    bool
-	stopped    bool
-	exitNotify chan struct{}
-	stopCh     chan struct{}
-	cancelFn   context.CancelFunc
-	createdAt  time.Time
+	mu          sync.RWMutex
+	started     bool
+	stopped     bool
+	exitNotify  chan struct{}
+	stopCh      chan struct{}
+	cancelFn    context.CancelFunc
+	createdAt   time.Time
+	cleanupOnce sync.Once
 }
 
 // SessionConfig configures a new session.
@@ -102,6 +103,7 @@ func (s *Session) Start(ctx context.Context) error {
 
 	// Start output piping goroutine with panic recovery
 	go func() {
+		defer close(s.exitNotify) // Always close, even on panic (defers are LIFO)
 		defer func() {
 			if r := recover(); r != nil {
 				fmt.Fprintf(os.Stderr, "panic recovered in session %s output goroutine: %v\n%s\n", s.ID, r, debug.Stack())
@@ -132,8 +134,6 @@ func (s *Session) Start(ctx context.Context) error {
 				Reason: reason,
 			},
 		})
-
-		close(s.exitNotify)
 	}()
 
 	// Start context cancellation watcher
@@ -148,7 +148,8 @@ func (s *Session) Start(ctx context.Context) error {
 		case <-ctx.Done():
 			s.Stop()
 		case <-s.exitNotify:
-			// Session already exited
+			// Natural exit — ensure cleanup runs
+			s.cleanup()
 		}
 	}()
 
@@ -160,8 +161,11 @@ func (s *Session) Stop() {
 	s.mu.Lock()
 	if s.stopped {
 		s.mu.Unlock()
+		// Even if already stopped (natural exit), ensure cleanup runs.
+		s.cleanup()
 		return
 	}
+	s.stopped = true
 	s.mu.Unlock()
 
 	// Send SIGTERM first, give process time to clean up
@@ -171,7 +175,8 @@ func (s *Session) Stop() {
 		// Wait briefly for clean exit
 		select {
 		case <-s.exitNotify:
-			goto cleanup
+			s.cleanup()
+			return
 		case <-time.After(3 * time.Second):
 			// Force kill
 		}
@@ -187,13 +192,19 @@ func (s *Session) Stop() {
 		// Give up waiting
 	}
 
-cleanup:
-	s.VT.Close()
-	s.clients.CloseAll()
-	s.monitor.Close()
-	if s.cancelFn != nil {
-		s.cancelFn()
-	}
+	s.cleanup()
+}
+
+// cleanup releases all session resources. Safe to call multiple times.
+func (s *Session) cleanup() {
+	s.cleanupOnce.Do(func() {
+		s.VT.Close()
+		s.clients.CloseAll()
+		s.monitor.Close()
+		if s.cancelFn != nil {
+			s.cancelFn()
+		}
+	})
 }
 
 // Wait blocks until the session exits.

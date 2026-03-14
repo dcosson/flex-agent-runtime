@@ -100,6 +100,85 @@ func TestStore_ReadAllEmpty(t *testing.T) {
 	}
 }
 
+func TestStore_ReadAllTypedData(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "events.jsonl")
+
+	s, err := New(path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer s.Close()
+
+	// Write events with typed data
+	now := time.Now().Truncate(time.Millisecond)
+	events := []monitor.AgentEvent{
+		{
+			Type:      monitor.EventSessionStarted,
+			Timestamp: now,
+			Data:      monitor.SessionStartedData{SessionID: "s1", Model: "claude-3"},
+		},
+		{
+			Type:      monitor.EventTurnCompleted,
+			Timestamp: now,
+			Data:      monitor.TurnCompletedData{InputTokens: 1000, OutputTokens: 500, CostUSD: 0.05},
+		},
+		{
+			Type:      monitor.EventToolCompleted,
+			Timestamp: now,
+			Data:      monitor.ToolCompletedData{ToolName: "bash", CallID: "c1", Success: true, DurationMs: 100},
+		},
+		{
+			Type:      monitor.EventAgentMessage,
+			Timestamp: now,
+			Data:      monitor.AgentMessageData{Content: "Hello world"},
+		},
+	}
+
+	for _, evt := range events {
+		if err := s.Append(evt); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+
+	// Read back and verify typed Data payloads
+	readEvents, err := s.ReadAll()
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if len(readEvents) != 4 {
+		t.Fatalf("expected 4 events, got %d", len(readEvents))
+	}
+
+	// SessionStartedData
+	if d, ok := readEvents[0].Data.(monitor.SessionStartedData); !ok {
+		t.Errorf("event 0: expected SessionStartedData, got %T", readEvents[0].Data)
+	} else if d.SessionID != "s1" || d.Model != "claude-3" {
+		t.Errorf("event 0: unexpected data: %+v", d)
+	}
+
+	// TurnCompletedData
+	if d, ok := readEvents[1].Data.(monitor.TurnCompletedData); !ok {
+		t.Errorf("event 1: expected TurnCompletedData, got %T", readEvents[1].Data)
+	} else if d.InputTokens != 1000 || d.OutputTokens != 500 {
+		t.Errorf("event 1: unexpected data: %+v", d)
+	}
+
+	// ToolCompletedData
+	if d, ok := readEvents[2].Data.(monitor.ToolCompletedData); !ok {
+		t.Errorf("event 2: expected ToolCompletedData, got %T", readEvents[2].Data)
+	} else if d.ToolName != "bash" || !d.Success {
+		t.Errorf("event 2: unexpected data: %+v", d)
+	}
+
+	// AgentMessageData
+	if d, ok := readEvents[3].Data.(monitor.AgentMessageData); !ok {
+		t.Errorf("event 3: expected AgentMessageData, got %T", readEvents[3].Data)
+	} else if d.Content != "Hello world" {
+		t.Errorf("event 3: unexpected content: %s", d.Content)
+	}
+}
+
 func TestStore_Writer(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "events.jsonl")
