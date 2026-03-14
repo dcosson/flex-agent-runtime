@@ -30,8 +30,14 @@
       "author": "Danny Cosson",
       "text": "Implementation complete @ 9513762. All suites: P1-P5 property tests (rapid), F1-F5 fault injection, O1-O3 oracle, S1-S3 simulation, B1-B4 benchmarks (all targets met), ST1-ST3 stress (30s soak, multi-session, burst), SEC1-SEC4 security. 50+ tests, all passing. Sending for review.",
       "created_at": "2026-03-14T15:03:31.618762-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R1 review fixes incorporated and pushed @ 0c727db. All 5 findings addressed: SEC4 real PTY+replay, O2/O3 structurally different scripts, P5 real attach/detach, B2 goroutine leak fix, ST1 tier-gating. All tests pass, vet+staticcheck clean. Awaiting reviewer sign-off.",
+      "created_at": "2026-03-14T15:17:20.490836-07:00"
     }
   ],
   "created_at": "2026-03-14T14:16:12.571398-07:00",
-  "updated_at": "2026-03-14T15:03:31.61951-07:00"
+  "updated_at": "2026-03-14T15:17:20.492397-07:00"
 }
