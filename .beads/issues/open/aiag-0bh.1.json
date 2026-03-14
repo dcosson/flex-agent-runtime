@@ -26,6 +26,14 @@
     "plan-doc=09-h2-termmux-port"
   ],
   "assignee": "reviewer-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "coder-2-sea",
+      "text": "R1 code review complete — approved with revisions. 7 findings: 1 P1, 4 P2, 2 P3. See docs/reviews/aiag-0bh.1-r1-review-coder-2-sea.md. Key issue: Session.Stop() resource leak on natural exit.",
+      "created_at": "2026-03-13T20:16:19.442735-07:00"
+    }
+  ],
   "created_at": "2026-03-13T17:59:55.656325-07:00",
-  "updated_at": "2026-03-13T18:01:50.753338-07:00"
+  "updated_at": "2026-03-13T20:16:19.443336-07:00"
 }
