@@ -1,6 +1,7 @@
 package gvisor
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -72,7 +73,7 @@ func TestContainerOptions_Validate(t *testing.T) {
 				t.Fatal("expected error")
 			}
 			if tt.wantErr != "" {
-				if !contains(err.Error(), tt.wantErr) {
+				if !strings.Contains(err.Error(), tt.wantErr) {
 					t.Errorf("error %q should contain %q", err, tt.wantErr)
 				}
 			}
@@ -128,15 +129,3 @@ func TestConstants(t *testing.T) {
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

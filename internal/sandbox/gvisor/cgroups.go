@@ -72,28 +72,30 @@ func ValidateResources(res ResourceSpec) error {
 	return nil
 }
 
-// detectOOMKill checks if the container was killed due to memory limit.
-// Uses cgroup memory.events if accessible, falls back to exit code 137.
-func detectOOMKill(cgroupPath string, exitCode int) bool {
-	// Method 1: Read cgroup memory events
-	if cgroupPath != "" {
-		eventsPath := filepath.Join(cgroupPath, "memory.events")
-		data, err := os.ReadFile(eventsPath)
-		if err == nil {
-			for _, line := range strings.Split(string(data), "\n") {
-				if strings.HasPrefix(line, "oom_kill ") {
-					count := strings.TrimPrefix(line, "oom_kill ")
-					if n, err := strconv.Atoi(strings.TrimSpace(count)); err == nil && n > 0 {
-						return true
-					}
-				}
+// detectOOMFromCgroup checks if the container was OOM-killed by reading
+// cgroup v2 memory.events. Returns false if the cgroup path is unavailable
+// or no OOM kill was recorded. Does NOT fall back to exit code heuristics;
+// the caller is responsible for any exit-code-based classification.
+func detectOOMFromCgroup(cgroupPath string) bool {
+	if cgroupPath == "" {
+		return false
+	}
+
+	eventsPath := filepath.Join(cgroupPath, "memory.events")
+	data, err := os.ReadFile(eventsPath)
+	if err != nil {
+		return false
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "oom_kill ") {
+			count := strings.TrimPrefix(line, "oom_kill ")
+			if n, err := strconv.Atoi(strings.TrimSpace(count)); err == nil && n > 0 {
+				return true
 			}
 		}
 	}
-
-	// Method 2: Exit code 137 = SIGKILL (128 + 9), common OOM indicator
-	// Per P1 review finding: only when Status==StatusExited && ExitCode==137
-	return exitCode == 137
+	return false
 }
 
 // CgroupV2Entries returns the cgroup v2 filesystem entries for the given
@@ -125,10 +127,10 @@ func ToCgroupV2Entries(res ResourceSpec) []CgroupV2Entry {
 			File:  "memory.max",
 			Value: fmt.Sprintf("%d", limit),
 		})
-		// memory.swap.max = same as memory.max (disable swap)
+		// memory.swap.max = 0 to disable swap (cgroup v2: controls swap-only portion)
 		entries = append(entries, CgroupV2Entry{
 			File:  "memory.swap.max",
-			Value: fmt.Sprintf("%d", limit),
+			Value: "0",
 		})
 	}
 

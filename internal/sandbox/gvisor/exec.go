@@ -5,8 +5,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"os/exec"
 	"strings"
 	"sync"
@@ -114,14 +114,11 @@ func (m *Manager) runContainer(
 	// Per implementation guide §1.12: only set OOMKilled=true when
 	// Status==StatusExited && ExitCode==137.
 	if result.Status == StatusExited && result.ExitCode == 137 {
-		result.OOMKilled = m.checkOOMKill(containerID, result.ExitCode)
+		result.OOMKilled = m.checkOOMKill(containerID)
 		if result.OOMKilled {
 			result.Status = StatusOOMKilled
 		}
 	}
-
-	// Read peak memory if available
-	result.PeakMemoryBytes = m.readPeakMemory(containerID)
 
 	return result, nil
 }
@@ -168,42 +165,21 @@ func (m *Manager) deleteContainer(containerID string) {
 	}
 }
 
-// checkOOMKill checks if a container was OOM-killed.
-func (m *Manager) checkOOMKill(containerID string, exitCode int) bool {
-	if exitCode != 137 {
-		return false
-	}
-
-	// Try to get container state from runsc for OOM info
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, m.config.RunscPath,
-		"--root", m.config.RunscRoot,
-		"state", containerID,
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		// Can't get state, fall back to exit code heuristic
-		return exitCode == 137
-	}
-
-	var state struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal(out, &state); err != nil {
-		return exitCode == 137
-	}
-
-	// Conservatively classify SIGKILL exits (137) as OOM candidates
-	return exitCode == 137
+// checkOOMKill checks if a container was OOM-killed using cgroup v2
+// memory.events. Only called when exit code is 137 (SIGKILL).
+// Returns true if cgroup data confirms an OOM kill, false otherwise
+// (including when cgroup path is unavailable — exit code 137 alone
+// is not sufficient to classify as OOM).
+func (m *Manager) checkOOMKill(containerID string) bool {
+	cgroupPath := m.cgroupPathForContainer(containerID)
+	return detectOOMFromCgroup(cgroupPath)
 }
 
-// readPeakMemory reads peak memory usage from runsc container state.
-func (m *Manager) readPeakMemory(containerID string) int64 {
-	// In production, this would read from cgroup memory.peak or runsc events.
-	// For now, return 0 as peak memory tracking requires a running cgroup path.
-	return 0
+// cgroupPathForContainer returns the cgroup v2 path for a container.
+// Uses the standard runsc cgroup hierarchy under the configured root.
+func (m *Manager) cgroupPathForContainer(containerID string) string {
+	// runsc places container cgroups under /sys/fs/cgroup/<runsc-root>/<container-id>
+	return filepath.Join("/sys/fs/cgroup", m.config.RunscRoot, containerID)
 }
 
 // generateContainerID creates a unique, runsc-compatible container ID.

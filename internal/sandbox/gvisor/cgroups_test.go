@@ -3,6 +3,7 @@ package gvisor
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -161,14 +162,14 @@ func TestValidateResources_Invalid(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if !searchString(err.Error(), tt.wantErr) {
+			if !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("error %q should contain %q", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestDetectOOMKill_CgroupEvents(t *testing.T) {
+func TestDetectOOMFromCgroup_CgroupEvents(t *testing.T) {
 	dir := t.TempDir()
 	eventsFile := filepath.Join(dir, "memory.events")
 	content := "low 0\nhigh 0\nmax 0\noom 0\noom_kill 1\noom_group_kill 0\n"
@@ -176,12 +177,12 @@ func TestDetectOOMKill_CgroupEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !detectOOMKill(dir, 0) {
+	if !detectOOMFromCgroup(dir) {
 		t.Error("should detect OOM from cgroup memory.events")
 	}
 }
 
-func TestDetectOOMKill_CgroupNoOOM(t *testing.T) {
+func TestDetectOOMFromCgroup_CgroupNoOOM(t *testing.T) {
 	dir := t.TempDir()
 	eventsFile := filepath.Join(dir, "memory.events")
 	content := "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\n"
@@ -189,33 +190,20 @@ func TestDetectOOMKill_CgroupNoOOM(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if detectOOMKill(dir, 0) {
+	if detectOOMFromCgroup(dir) {
 		t.Error("should not detect OOM when oom_kill is 0")
 	}
 }
 
-func TestDetectOOMKill_ExitCode137(t *testing.T) {
-	if !detectOOMKill("", 137) {
-		t.Error("should detect OOM from exit code 137")
+func TestDetectOOMFromCgroup_EmptyPath(t *testing.T) {
+	if detectOOMFromCgroup("") {
+		t.Error("should return false for empty cgroup path")
 	}
 }
 
-func TestDetectOOMKill_NormalExit(t *testing.T) {
-	if detectOOMKill("", 0) {
-		t.Error("should not detect OOM on exit code 0")
-	}
-	if detectOOMKill("", 1) {
-		t.Error("should not detect OOM on exit code 1")
-	}
-}
-
-func TestDetectOOMKill_MissingCgroupPath(t *testing.T) {
-	// Non-existent path falls back to exit code check
-	if detectOOMKill("/nonexistent/path", 137) {
-		// Should still detect via exit code
-	}
-	if detectOOMKill("/nonexistent/path", 0) {
-		t.Error("should not detect OOM with missing cgroup and exit code 0")
+func TestDetectOOMFromCgroup_MissingPath(t *testing.T) {
+	if detectOOMFromCgroup("/nonexistent/path") {
+		t.Error("should return false for non-existent cgroup path")
 	}
 }
 
@@ -249,8 +237,8 @@ func TestToCgroupV2Entries_MemoryOnly(t *testing.T) {
 	if swapMax == nil {
 		t.Fatal("missing memory.swap.max entry")
 	}
-	if swapMax.Value != expected {
-		t.Errorf("memory.swap.max = %q, want %q", swapMax.Value, expected)
+	if swapMax.Value != "0" {
+		t.Errorf("memory.swap.max = %q, want %q", swapMax.Value, "0")
 	}
 }
 
