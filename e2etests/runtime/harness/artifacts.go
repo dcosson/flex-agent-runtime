@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -101,17 +100,10 @@ func writeMarkdown(path string, summary *RunSummary) error {
 }
 
 func MetricsMap(summary *RunSummary) map[string]float64 {
-	m := map[string]float64{
+	return map[string]float64{
 		"rpc_latency_p95_ms":    summary.RPCLatencyP95Ms,
 		"container_boot_p95_ms": summary.ContainerBootP95Ms,
 		"errors":                float64(summary.Errors),
 		"runs":                  float64(len(summary.Results)),
 	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	_ = keys
-	return m
 }

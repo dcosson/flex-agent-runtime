@@ -14,9 +14,10 @@ func TestSoakStability_DetectsDriftRegressions(t *testing.T) {
 
 	telemetry := rh.NewTelemetryCollector()
 	// Simulate a healthy progression after warmup.
-	telemetry.RecordDriftSample(100, 1000, 30, 0.10)
-	telemetry.RecordDriftSample(102, 1035, 31, 0.105)
-	telemetry.RecordDriftSample(103, 1050, 31, 0.108)
+	t0 := time.Now()
+	telemetry.RecordDriftSample(t0, 100, 1000, 30, 0.10)
+	telemetry.RecordDriftSample(t0.Add(1*time.Hour), 102, 1035, 31, 0.105)
+	telemetry.RecordDriftSample(t0.Add(2*time.Hour), 103, 1050, 31, 0.108)
 	err := rh.AssertSoakThresholds(soak, telemetry.Snapshot())
 	if err != nil {
 		t.Fatalf("healthy soak should pass: %v", err)
@@ -24,9 +25,9 @@ func TestSoakStability_DetectsDriftRegressions(t *testing.T) {
 
 	// Simulate breach in RPC error-rate slope.
 	telemetry = rh.NewTelemetryCollector()
-	telemetry.RecordDriftSample(100, 1000, 30, 0.10)
-	telemetry.RecordDriftSample(103, 1080, 31, 0.13)
-	telemetry.RecordDriftSample(104, 1090, 31, 0.16)
+	telemetry.RecordDriftSample(t0, 100, 1000, 30, 0.10)
+	telemetry.RecordDriftSample(t0.Add(1*time.Hour), 103, 1080, 31, 0.13)
+	telemetry.RecordDriftSample(t0.Add(2*time.Hour), 104, 1090, 31, 0.16)
 	if err := rh.AssertSoakThresholds(soak, telemetry.Snapshot()); err == nil {
 		t.Fatal("expected soak threshold failure for rpc error slope")
 	}

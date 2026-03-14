@@ -18,6 +18,7 @@ type TelemetryCollector struct {
 	rssMB         []float64
 	fdCount       []int
 	errorRateHist []float64
+	errorRateAt   []time.Time
 }
 
 type TelemetrySnapshot struct {
@@ -64,13 +65,17 @@ func (c *TelemetryCollector) RecordSnapshotDelta(n int64) {
 	defer c.mu.Unlock()
 	c.snapshotDelta += n
 }
-func (c *TelemetryCollector) RecordDriftSample(goroutines int, rssMB float64, fdCount int, errRate float64) {
+func (c *TelemetryCollector) RecordDriftSample(at time.Time, goroutines int, rssMB float64, fdCount int, errRate float64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if at.IsZero() {
+		at = time.Now()
+	}
 	c.goroutines = append(c.goroutines, goroutines)
 	c.rssMB = append(c.rssMB, rssMB)
 	c.fdCount = append(c.fdCount, fdCount)
 	c.errorRateHist = append(c.errorRateHist, errRate)
+	c.errorRateAt = append(c.errorRateAt, at)
 }
 
 func (c *TelemetryCollector) Snapshot() *TelemetrySnapshot {
@@ -87,7 +92,7 @@ func (c *TelemetryCollector) Snapshot() *TelemetrySnapshot {
 			GoroutineGrowthPct: growthPctInt(c.goroutines),
 			RSSGrowthPct:       growthPctFloat(c.rssMB),
 			FDDelta:            deltaInt(c.fdCount),
-			RPCErrorSlopePctHr: slopePerHour(c.errorRateHist),
+			RPCErrorSlopePctHr: slopePerHour(c.errorRateHist, c.errorRateAt),
 		},
 	}
 }
@@ -125,9 +130,13 @@ func deltaInt(in []int) int {
 	}
 	return in[len(in)-1] - in[0]
 }
-func slopePerHour(in []float64) float64 {
-	if len(in) < 2 {
+func slopePerHour(in []float64, at []time.Time) float64 {
+	if len(in) < 2 || len(at) < 2 {
 		return 0
 	}
-	return (in[len(in)-1] - in[0]) / float64(len(in)-1)
+	hours := at[len(at)-1].Sub(at[0]).Hours()
+	if hours <= 0 {
+		return 0
+	}
+	return (in[len(in)-1] - in[0]) / hours
 }
