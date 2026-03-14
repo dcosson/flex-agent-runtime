@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 )
 
@@ -179,5 +180,6 @@ type ManagerConfig struct {
 	MaxConcurrentContainers int
 	DefaultNetwork          NetworkMode
 	DefaultResources        ResourceSpec
+	Logger                  *slog.Logger
 	EnableMetrics           bool
 }
