@@ -8,17 +8,17 @@
 
 ### P1. Batch Splitting Preserves Ordering
 
-**Invariant:** For any input of N texts and a model with max batch size B, the provider adapter makes `ceil(N/B)` internal calls and returns exactly N embeddings with indices [0, N).
+**Invariant:** For any input of N texts and a model with max batch size B, `BatchEmbed` makes `ceil(N/B)` internal calls and returns exactly N embeddings with indices [0, N).
 
 ```
 Property: forall texts []string, batchSize int (1..100):
-    resp := adapter.Embed(model{maxBatch: batchSize}, EmbeddingRequest{Texts: texts})
+    resp := BatchEmbed(ctx, mockProvider, model{maxBatch: batchSize}, EmbeddingRequest{Texts: texts})
     assert len(resp.Embeddings) == len(texts)
     for i, e := range resp.Embeddings:
         assert e.Index == i
 ```
 
-Use a mock HTTP transport that records call count and returns deterministic vectors.
+Use a mock `EmbeddingProvider` that records call count and returns deterministic vectors. This tests the shared `BatchEmbed` utility in the core, not provider-specific code.
 
 ### P2. Dimension Bound
 
@@ -107,30 +107,13 @@ Start an embedding request with a context, cancel it mid-flight. Verify:
 
 ## O: Oracle / Golden Tests
 
-### O1. Request Wire Format
+### O1. Request Wire Format — **Deferred to Provider Plans**
 
-For each provider adapter, verify the JSON request body matches the expected wire format:
+Wire format golden tests (JSON request bodies for OpenAI, Google, Cohere) belong in the provider-specific test harnesses (plans 02-04), since the core addendum contains no provider adapters. Each provider plan should include its own O1-equivalent test.
 
-**OpenAI:**
-```json
-{"model": "text-embedding-3-small", "input": ["hello", "world"], "dimensions": 512}
-```
+### O2. Response Parsing — **Deferred to Provider Plans**
 
-**Google:**
-```json
-{"requests": [{"model": "models/gemini-embedding-001", "content": {"parts": [{"text": "hello"}]}, "taskType": "RETRIEVAL_DOCUMENT", "outputDimensionality": 768}]}
-```
-
-**Cohere:**
-```json
-{"model": "embed-v4.0", "texts": ["hello", "world"], "input_type": "search_document", "embedding_types": ["float"], "output_dimension": 1024}
-```
-
-Use a mock HTTP server that captures and compares request bodies.
-
-### O2. Response Parsing
-
-For each provider, feed known JSON responses through the adapter and verify the parsed `EmbeddingResponse` matches expected values. Use real API response samples (sanitized) as golden fixtures.
+Response parsing golden tests also belong in provider-specific test harnesses. Each provider plan should include golden fixtures using real (sanitized) API responses.
 
 ### O3. Embed() Entry Point Contract
 

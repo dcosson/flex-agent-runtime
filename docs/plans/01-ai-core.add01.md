@@ -1,6 +1,6 @@
 # 01-ai-core Addendum 01: Embedding API Support
 
-**Status:** Draft
+**Status:** Reviewed
 **Parent plan:** [01-ai-core](./01-ai-core.md)
 **Depends on:** 01-ai-core (core types, Provider interface, registry)
 **Depended on by:** 02-provider-anthropic (no embedding), 03-provider-openai, 04-provider-google, future provider plans
@@ -163,8 +163,14 @@ const (
     // EmbeddingEncodingInt8 returns int8-quantized vectors (Cohere, Voyage).
     EmbeddingEncodingInt8 EmbeddingEncoding = "int8"
 
+    // EmbeddingEncodingUint8 returns unsigned int8-quantized vectors (Cohere, Voyage).
+    EmbeddingEncodingUint8 EmbeddingEncoding = "uint8"
+
     // EmbeddingEncodingBinary returns binary-quantized vectors (Cohere, Voyage).
     EmbeddingEncodingBinary EmbeddingEncoding = "binary"
+
+    // EmbeddingEncodingUBinary returns unsigned binary-quantized vectors (Cohere, Voyage).
+    EmbeddingEncodingUBinary EmbeddingEncoding = "ubinary"
 )
 ```
 
@@ -186,6 +192,11 @@ type EmbeddingRequest struct {
 
     // Encoding specifies the output format. Default is float.
     Encoding EmbeddingEncoding
+
+    // OnProgress is an optional callback for batch progress reporting.
+    // Called with (completed, total) counts as batches complete.
+    // Only meaningful when len(Texts) > model's MaxBatchSize.
+    OnProgress func(completed, total int)
 }
 
 // EmbeddingResponse is the provider-agnostic embedding response.
@@ -254,7 +265,7 @@ type EmbeddingCost struct {
 }
 ```
 
-Catalog entries go in a new section of `models/catalog.json` under an `"embeddingModels"` key, separate from the chat models array.
+Catalog entries go in a separate file `models/embedding_catalog.json` to avoid format conflicts with the existing `catalog.json` (which uses `map[string]map[string]Model`). See §7 for details.
 
 ---
 
@@ -312,11 +323,15 @@ func RegisterEmbeddingProvider(p EmbeddingProvider, sourceID string) {
 }
 
 // GetEmbeddingProvider retrieves a registered embedding provider by API.
-func GetEmbeddingProvider(api string) (EmbeddingProvider, bool) {
+// Returns an error if no provider is registered — matches GetProvider signature.
+func GetEmbeddingProvider(api string) (EmbeddingProvider, error) {
     embeddingProviderMu.RLock()
     defer embeddingProviderMu.RUnlock()
     rp, ok := embeddingProviderRegistry[api]
-    return rp.provider, ok
+    if !ok {
+        return nil, fmt.Errorf("no embedding provider registered for API: %s", api)
+    }
+    return rp.provider, nil
 }
 
 // UnregisterEmbeddingProviders removes all providers registered with the given sourceID.
@@ -329,11 +344,19 @@ func UnregisterEmbeddingProviders(sourceID string) {
         }
     }
 }
+
+// ClearEmbeddingProviders removes all registered embedding providers.
+// For use in tests only.
+func ClearEmbeddingProviders() {
+    embeddingProviderMu.Lock()
+    defer embeddingProviderMu.Unlock()
+    embeddingProviderRegistry = make(map[string]registeredEmbeddingProvider)
+}
 ```
 
 ### 5.3 Embedding Model Registry
 
-Same pattern as the chat model registry:
+Uses a flat map keyed by model ID, unlike the chat model registry's nested `provider→modelID` structure. The flat structure is intentional: embedding model IDs are globally unique across providers (e.g., "text-embedding-3-small" is unambiguously OpenAI, "gemini-embedding-001" is unambiguously Google). This simplifies lookup — callers just pass the model ID, no provider disambiguation needed. A `ListEmbeddingModelsByProvider` helper is provided for provider-scoped queries.
 
 ```go
 // embedding_models.go (in internal/ai)
@@ -368,9 +391,91 @@ func ListEmbeddingModels() []EmbeddingModel {
     }
     return models
 }
+
+// ListEmbeddingModelsByProvider returns all embedding models for a given provider.
+func ListEmbeddingModelsByProvider(provider string) []EmbeddingModel {
+    embeddingModelMu.RLock()
+    defer embeddingModelMu.RUnlock()
+    var models []EmbeddingModel
+    for _, m := range embeddingModelRegistry {
+        if m.Provider == provider {
+            models = append(models, m)
+        }
+    }
+    return models
+}
+
+// ClearEmbeddingModels removes all registered embedding models.
+// For use in tests only.
+func ClearEmbeddingModels() {
+    embeddingModelMu.Lock()
+    defer embeddingModelMu.Unlock()
+    embeddingModelRegistry = make(map[string]EmbeddingModel)
+}
 ```
 
-### 5.4 Top-level Entry Point
+### 5.4 Shared Batch Splitting Utility
+
+Batch splitting is a cross-cutting concern — every provider needs to split large input batches, merge results, maintain index ordering, and report progress. Rather than each provider implementing this independently (with risk of subtle ordering bugs), the core provides a shared `BatchEmbed` utility:
+
+```go
+// embedding_batch.go (in internal/ai)
+
+// BatchEmbed splits a large embedding request into sub-batches of at most
+// model.MaxBatchSize texts, calls the provider for each sub-batch, merges
+// results maintaining original index ordering, and reports progress.
+func BatchEmbed(
+    ctx context.Context,
+    provider EmbeddingProvider,
+    model EmbeddingModel,
+    req EmbeddingRequest,
+) (*EmbeddingResponse, error) {
+    if len(req.Texts) <= model.MaxBatchSize {
+        return provider.Embed(ctx, model, req)
+    }
+
+    var allEmbeddings []Embedding
+    var totalUsage EmbeddingUsage
+    total := len(req.Texts)
+
+    for start := 0; start < total; start += model.MaxBatchSize {
+        end := start + model.MaxBatchSize
+        if end > total {
+            end = total
+        }
+        batchReq := req
+        batchReq.Texts = req.Texts[start:end]
+        batchReq.OnProgress = nil // don't double-report
+
+        resp, err := provider.Embed(ctx, model, batchReq)
+        if err != nil {
+            return nil, err // preserve ProviderError type
+        }
+
+        // Re-index embeddings to original positions
+        for _, e := range resp.Embeddings {
+            e.Index += start
+            allEmbeddings = append(allEmbeddings, e)
+        }
+        totalUsage.Tokens += resp.Usage.Tokens
+        totalUsage.Cost += resp.Usage.Cost
+
+        if req.OnProgress != nil {
+            req.OnProgress(end, total)
+        }
+    }
+
+    return &EmbeddingResponse{
+        Embeddings: allEmbeddings,
+        Model:      model.ID,
+        Usage:      totalUsage,
+    }, nil
+}
+```
+
+Provider adapters call `BatchEmbed` from their `Embed()` implementation rather than implementing splitting themselves. This ensures consistent behavior for P1 (batch splitting preserves ordering) and F2 (partial batch failure) across all providers.
+
+### 5.5 Top-level Entry Point
 
 ```go
 // embedding_api.go (in internal/ai)
@@ -383,9 +488,9 @@ func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*Embeddin
         return nil, fmt.Errorf("unknown embedding model: %s", modelID)
     }
 
-    provider, ok := GetEmbeddingProvider(model.API)
-    if !ok {
-        return nil, fmt.Errorf("no embedding provider for API: %s", model.API)
+    provider, err := GetEmbeddingProvider(model.API)
+    if err != nil {
+        return nil, err
     }
 
     if len(req.Texts) == 0 {
@@ -396,6 +501,11 @@ func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*Embeddin
         return nil, fmt.Errorf("model %s does not support dimension control", modelID)
     }
 
+    if req.Dimensions > 0 && model.MinDims > 0 && req.Dimensions < model.MinDims {
+        return nil, fmt.Errorf("requested dimensions %d below min %d for model %s",
+            req.Dimensions, model.MinDims, modelID)
+    }
+
     if req.Dimensions > 0 && model.MaxDims > 0 && req.Dimensions > model.MaxDims {
         return nil, fmt.Errorf("requested dimensions %d exceeds max %d for model %s",
             req.Dimensions, model.MaxDims, modelID)
@@ -403,7 +513,10 @@ func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*Embeddin
 
     resp, err := provider.Embed(ctx, model, req)
     if err != nil {
-        return nil, fmt.Errorf("embed %s: %w", modelID, err)
+        // Preserve ProviderError type information for error classification.
+        // Callers use IsRetryable(), IsContextOverflow() etc. on the error.
+        // Wrapping with fmt.Errorf would strip the type — return as-is.
+        return nil, err
     }
 
     // Calculate cost
@@ -438,7 +551,7 @@ graph TB
     end
 
     subgraph "internal/ai/models"
-        catalog[catalog.json<br/>embeddingModels section]
+        catalog[embedding_catalog.json<br/>separate embedded file]
     end
 
     embed_api --> embed_registry
@@ -497,23 +610,40 @@ sequenceDiagram
 ### 6.3 Import Flow
 
 ```
-internal/ai/models       → embedded JSON (add embeddingModels section)
+internal/ai/models       → embedding_catalog.json (separate //go:embed, separate init())
 internal/ai              → internal/ai/models (load embedding catalog at init)
 internal/ai/provider/X   → internal/ai (implement EmbeddingProvider)
 ```
 
-No new packages needed. Embedding types and interfaces live in `internal/ai` alongside the existing chat types. This keeps the import graph simple and allows providers to implement both interfaces in the same package.
+No new packages needed. Embedding types and interfaces live in `internal/ai` alongside the existing chat types. The embedding catalog is a separate embedded file to avoid format conflicts with the existing `catalog.json`.
 
 ---
 
 ## 7. Catalog Extension
 
-The embedded `models/catalog.json` gains a new top-level key:
+Embedding models live in a **separate file** `models/embedding_catalog.json`, not in the existing `catalog.json`. This avoids format conflicts: the existing catalog uses `map[string]map[string]Model` (provider→modelID→Model), while embedding models use a flat array keyed by globally unique model ID.
+
+The embedding catalog gets its own `//go:embed` directive and `init()` function in `embedding_models.go`:
+
+```go
+//go:embed embedding_catalog.json
+var embeddingCatalogJSON []byte
+
+func init() {
+    var models []EmbeddingModel
+    if err := json.Unmarshal(embeddingCatalogJSON, &models); err != nil {
+        panic(fmt.Sprintf("embedding catalog: %v", err))
+    }
+    for _, m := range models {
+        RegisterEmbeddingModel(m)
+    }
+}
+```
+
+`models/embedding_catalog.json`:
 
 ```json
-{
-  "models": [ ... ],
-  "embeddingModels": [
+[
     {
       "id": "text-embedding-3-small",
       "name": "Text Embedding 3 Small",
@@ -574,8 +704,7 @@ The embedded `models/catalog.json` gains a new top-level key:
       "supportsTaskType": true,
       "cost": { "perMTok": 0.12 }
     }
-  ]
-}
+]
 ```
 
 ---
@@ -702,15 +831,26 @@ const (
     EmbeddingTaskClustering     = ai.EmbeddingTaskClustering
     EmbeddingTaskSimilarity     = ai.EmbeddingTaskSimilarity
     EmbeddingTaskUnspecified    = ai.EmbeddingTaskUnspecified
+
+    EmbeddingEncodingFloat   = ai.EmbeddingEncodingFloat
+    EmbeddingEncodingBase64  = ai.EmbeddingEncodingBase64
+    EmbeddingEncodingInt8    = ai.EmbeddingEncodingInt8
+    EmbeddingEncodingUint8   = ai.EmbeddingEncodingUint8
+    EmbeddingEncodingBinary  = ai.EmbeddingEncodingBinary
+    EmbeddingEncodingUBinary = ai.EmbeddingEncodingUBinary
 )
 
 var (
-    Embed                       = ai.Embed
-    RegisterEmbeddingProvider   = ai.RegisterEmbeddingProvider
-    GetEmbeddingProvider        = ai.GetEmbeddingProvider
-    RegisterEmbeddingModel      = ai.RegisterEmbeddingModel
-    GetEmbeddingModel           = ai.GetEmbeddingModel
-    ListEmbeddingModels         = ai.ListEmbeddingModels
+    Embed                          = ai.Embed
+    BatchEmbed                     = ai.BatchEmbed
+    RegisterEmbeddingProvider      = ai.RegisterEmbeddingProvider
+    GetEmbeddingProvider           = ai.GetEmbeddingProvider
+    ClearEmbeddingProviders        = ai.ClearEmbeddingProviders
+    RegisterEmbeddingModel         = ai.RegisterEmbeddingModel
+    GetEmbeddingModel              = ai.GetEmbeddingModel
+    ListEmbeddingModels            = ai.ListEmbeddingModels
+    ListEmbeddingModelsByProvider  = ai.ListEmbeddingModelsByProvider
+    ClearEmbeddingModels           = ai.ClearEmbeddingModels
 )
 ```
 
@@ -767,7 +907,7 @@ After receiving embeddings from any provider, validate:
 
 ### 11.3 Rate Limit Aware Batching
 
-Providers have different rate limits. The adapter should accept a `*rate.Limiter` (from `golang.org/x/time/rate`) and use it to throttle batch requests. This prevents `429 Too Many Requests` errors during large embedding jobs without requiring caller-side rate limiting.
+Providers have different rate limits. Provider adapters should implement rate-limit-aware batching to throttle requests and avoid `429 Too Many Requests` errors during large embedding jobs. This is a **provider-level concern**, not a core concern — each provider adapter manages its own rate limiting using whatever mechanism is appropriate (e.g., `golang.org/x/time/rate.Limiter`, `time.Ticker`, or provider-specific backoff). The core `internal/ai` package remains stdlib-only.
 
 ---
 
@@ -816,7 +956,7 @@ For large embedding jobs, pipeline HTTP requests so that while one batch is in-f
 | Boundary | Interface | Notes |
 |----------|-----------|-------|
 | Chat Provider ↔ Embedding Provider | Same package, separate interfaces | A provider can implement both `Provider` and `EmbeddingProvider` |
-| Model Catalog | `catalog.json` extended with `embeddingModels` key | Loaded at init alongside chat models |
+| Model Catalog | `embedding_catalog.json` (separate file, own `//go:embed`) | Loaded at init independently of chat models |
 | Provider Registry | Parallel `embeddingProviderRegistry` | Same `sync.RWMutex` pattern as chat |
 | Public API | `ai/embedding.go` re-exports | Same pattern as existing `ai/` package |
 | Agent Loop | Not directly connected | Agent loop uses chat, not embeddings. Embeddings are used by tools (e.g., RAG) or external callers |
@@ -825,9 +965,9 @@ For large embedding jobs, pipeline HTTP requests so that while one batch is in-f
 
 ## 15. Acceptance Criteria
 
-1. **AC1:** `ai.Embed("text-embedding-3-small", req)` with a mock provider returns correct embeddings with proper dimensions and index ordering.
+1. **AC1:** `ai.Embed(ctx, "text-embedding-3-small", req)` with a mock provider returns correct embeddings with proper dimensions and index ordering.
 2. **AC2:** Registering and unregistering embedding providers is thread-safe and does not affect the chat provider registry.
-3. **AC3:** Embedding models load from `catalog.json` at init and are queryable via `GetEmbeddingModel`.
+3. **AC3:** Embedding models load from `embedding_catalog.json` at init and are queryable via `GetEmbeddingModel`.
 4. **AC4:** Request validation rejects: empty texts, unsupported dimensions, unknown models.
 5. **AC5:** Cost calculation correctly computes from token count and model pricing.
 6. **AC6:** Provider adapter correctly maps all `EmbeddingTaskType` values to provider-specific equivalents (verified per-provider in provider plans).
@@ -843,9 +983,13 @@ internal/ai/
     embedding.go            # Types: EmbeddingRequest, EmbeddingResponse, EmbeddingTaskType, etc.
     embedding_provider.go   # EmbeddingProvider interface
     embedding_registry.go   # Provider + model registries
-    embedding_models.go     # EmbeddingModel type, catalog loading
+    embedding_models.go     # EmbeddingModel type, catalog loading, //go:embed embedding_catalog.json
+    embedding_batch.go      # BatchEmbed shared utility
     embedding_api.go        # Embed() entry point
     embedding_test.go       # Unit tests
+
+internal/ai/models/
+    embedding_catalog.json  # Separate embedded catalog for embedding models
 
 ai/
     embedding.go            # Public re-exports
@@ -858,3 +1002,22 @@ This is a modest addition to `internal/ai` — ~400 lines of types/interfaces/re
 ### Dependencies
 
 No new external dependencies. Uses only stdlib (`context`, `fmt`, `sync`) and the existing `internal/ai` infrastructure.
+
+---
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P1 | Catalog format incompatible with existing catalog.json | Incorporated | §7 rewritten: separate `embedding_catalog.json` with own `//go:embed` and `init()` |
+| 2 | reviewer-sea | P2 | GetEmbeddingProvider returns (T, bool) vs GetProvider's (T, error) | Incorporated | §5.2 updated to return `(EmbeddingProvider, error)` |
+| 3 | reviewer-sea | P2 | Flat model registry vs nested provider→modelID map | Incorporated | §5.3 justified flat structure, added `ListEmbeddingModelsByProvider` |
+| 4 | reviewer-sea | P2 | MinDims validation missing from Embed() | Incorporated | §5.5 added MinDims check before MaxDims check |
+| 5 | reviewer-sea | P2 | Missing uint8 and ubinary encoding constants | Incorporated | §4.2 added `EmbeddingEncodingUint8` and `EmbeddingEncodingUBinary` |
+| 6 | reviewer-sea | P2 | OnProgress callback not in EmbeddingRequest | Incorporated | §4.3 added `OnProgress func(completed, total int)` field |
+| 7 | reviewer-sea | P2 | Dependencies section contradicts rate limiter requirement | Incorporated | §11.3 moved rate limiting to provider-level concern, core stays stdlib-only |
+| 8 | reviewer-sea | P2 | No error classification (ProviderError) for embedding errors | Incorporated | §5.5 preserves ProviderError type instead of wrapping with fmt.Errorf |
+| 9 | reviewer-sea | P3 | O1 tests provider wire formats, out of scope for core | Incorporated | Test harness O1/O2 deferred to provider-specific harnesses |
+| 10 | reviewer-sea | P3 | AC1 missing ctx parameter | Incorporated | §15 AC1 fixed to `ai.Embed(ctx, ...)` |
+| 11 | reviewer-sea | P3 | No Clear* functions for test teardown | Incorporated | §5.2/§5.3 added `ClearEmbeddingProviders()` and `ClearEmbeddingModels()` |
+| 12 | reviewer-sea | P3 | Batch splitting tested in core but deferred to providers | Incorporated | §5.4 added shared `BatchEmbed` utility in core, P1/F2 tests apply to it |
