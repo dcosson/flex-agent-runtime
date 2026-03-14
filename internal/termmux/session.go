@@ -290,6 +290,9 @@ func (s *Session) Pause() error {
 func (s *Session) Resume() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.started || s.stopped {
+		return fmt.Errorf("session %s not running", s.ID)
+	}
 	if !s.paused {
 		return nil // not paused
 	}

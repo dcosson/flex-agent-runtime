@@ -113,6 +113,8 @@ func (a *TermmuxDriverAdapter) Pause(ctx context.Context) error {
 }
 
 // Unpause resumes a paused termmux session.
+// Named Unpause (not Resume) to avoid conflict with the existing
+// Resume(ctx, session) method which restarts a stopped session.
 func (a *TermmuxDriverAdapter) Unpause(ctx context.Context) error {
 	a.mu.RLock()
 	if !a.started || a.stopped {
@@ -125,6 +127,11 @@ func (a *TermmuxDriverAdapter) Unpause(ctx context.Context) error {
 
 // IsPaused returns whether the termmux session is currently paused.
 func (a *TermmuxDriverAdapter) IsPaused() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if !a.started || a.stopped {
+		return false
+	}
 	return a.session.IsPaused()
 }
 
