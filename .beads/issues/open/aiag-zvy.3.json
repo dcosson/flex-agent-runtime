@@ -2,7 +2,7 @@
   "id": "aiag-zvy.3",
   "title": "Sandbox Host: Wire sandbox-host binary to service + RPC",
   "description": "Signoff gap from docs/plans/11-sandbox-host-service.md and 11-sandbox-host-service-test-harness.md: cmd/sandbox-host is still a skeleton. Implement full binary wiring: config loading (flags/env/file), instantiate ZFS+gVisor managers and SandboxHostService, expose RPC services, and graceful shutdown semantics under SIGTERM with in-flight drain + pause behavior.",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-zvy",
@@ -19,6 +19,15 @@
     "batch=4",
     "plan-doc=11-sandbox-host-service"
   ],
+  "assignee": "Danny Cosson",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implemented cmd/sandbox-host wiring: added config loading (flags/env), CLI manager + gVisor manager instantiation, SandboxHostService + RPC server initialization, Connect transport handler registration, auth hook support, and graceful SIGTERM shutdown with HTTP drain + service shutdown. Added config parser tests and transport/server tests; all relevant tests pass with -race.",
+      "created_at": "2026-03-14T08:19:01.329983-07:00"
+    }
+  ],
   "created_at": "2026-03-14T08:05:45.695961-07:00",
-  "updated_at": "2026-03-14T08:05:45.695961-07:00"
+  "updated_at": "2026-03-14T08:19:01.330261-07:00"
 }
