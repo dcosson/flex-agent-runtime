@@ -43,15 +43,26 @@ Chat completions and embeddings are structurally different operations:
 | Task types | N/A | Query vs document vs classification |
 | Dimension control | N/A | Configurable output dimensions |
 
-Forcing embeddings into the `Provider` interface would bloat it with unused methods and require callers to downcast. Go's interface composition idiom handles this cleanly: providers that support both can implement both interfaces.
+Forcing embeddings into the `Provider` interface would bloat it with unused methods and require callers to downcast. Go's interface composition idiom handles this cleanly.
+
+**Important:** Both `Provider` and `EmbeddingProvider` define `API() string`, and the chat and embedding registries use different API identifiers (e.g., `"openai-completions"` vs `"openai-embeddings"`). A single Go struct can only have one `API()` method, so providers that support both chat and embeddings must use **separate structs** — one per interface:
 
 ```go
-// A provider that supports both chat and embeddings:
-type openaiProvider struct { ... }
+// Provider packages use separate structs for chat and embeddings.
+// Each struct has its own API() return value for registry lookup.
 
-var _ ai.Provider = (*openaiProvider)(nil)
-var _ ai.EmbeddingProvider = (*openaiProvider)(nil)
+// Chat provider — implements ai.Provider
+type openaiChatProvider struct { client *http.Client; ... }
+func (p *openaiChatProvider) API() string { return "openai-completions" }
+var _ ai.Provider = (*openaiChatProvider)(nil)
+
+// Embedding provider — implements ai.EmbeddingProvider
+type openaiEmbeddingProvider struct { client *http.Client; ... }
+func (p *openaiEmbeddingProvider) API() string { return "openai-embeddings" }
+var _ ai.EmbeddingProvider = (*openaiEmbeddingProvider)(nil)
 ```
+
+The two structs can share an HTTP client or other configuration via a common unexported struct or constructor. This follows Go's small-interface idiom — each struct satisfies exactly one interface with no ambiguity.
 
 ---
 
@@ -288,9 +299,9 @@ type EmbeddingProvider interface {
     // The returned Embeddings slice has the same length as req.Texts,
     // with each Embedding.Index matching its position.
     //
-    // Providers handle batching internally if len(req.Texts) exceeds
-    // the model's max batch size — they split into multiple API calls
-    // and merge results transparently.
+    // Providers should use BatchEmbed(ctx, p.embedSingle, model, req) to
+    // handle batch splitting transparently. The provider's embedSingle
+    // method performs the actual single-batch HTTP call.
     Embed(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error)
 }
 ```
@@ -416,22 +427,28 @@ func ClearEmbeddingModels() {
 
 ### 5.4 Shared Batch Splitting Utility
 
-Batch splitting is a cross-cutting concern — every provider needs to split large input batches, merge results, maintain index ordering, and report progress. Rather than each provider implementing this independently (with risk of subtle ordering bugs), the core provides a shared `BatchEmbed` utility:
+Batch splitting is a cross-cutting concern — every provider needs to split large input batches, merge results, maintain index ordering, and report progress. Rather than each provider implementing this independently (with risk of subtle ordering bugs), the core provides a shared `BatchEmbed` utility.
+
+**Important:** `BatchEmbed` accepts an `EmbedFunc` (the single-batch HTTP call function) rather than calling `provider.Embed()`. This avoids infinite recursion — providers call `BatchEmbed` from their `Embed()` method, passing their internal single-batch function:
 
 ```go
 // embedding_batch.go (in internal/ai)
 
+// EmbedFunc performs a single-batch embedding API call.
+// This is the actual HTTP call to the provider, NOT the provider's Embed() method.
+type EmbedFunc func(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error)
+
 // BatchEmbed splits a large embedding request into sub-batches of at most
-// model.MaxBatchSize texts, calls the provider for each sub-batch, merges
+// model.MaxBatchSize texts, calls embedFn for each sub-batch, merges
 // results maintaining original index ordering, and reports progress.
 func BatchEmbed(
     ctx context.Context,
-    provider EmbeddingProvider,
+    embedFn EmbedFunc,
     model EmbeddingModel,
     req EmbeddingRequest,
 ) (*EmbeddingResponse, error) {
     if len(req.Texts) <= model.MaxBatchSize {
-        return provider.Embed(ctx, model, req)
+        return embedFn(ctx, model, req)
     }
 
     var allEmbeddings []Embedding
@@ -447,7 +464,7 @@ func BatchEmbed(
         batchReq.Texts = req.Texts[start:end]
         batchReq.OnProgress = nil // don't double-report
 
-        resp, err := provider.Embed(ctx, model, batchReq)
+        resp, err := embedFn(ctx, model, batchReq)
         if err != nil {
             return nil, err // preserve ProviderError type
         }
@@ -473,7 +490,20 @@ func BatchEmbed(
 }
 ```
 
-Provider adapters call `BatchEmbed` from their `Embed()` implementation rather than implementing splitting themselves. This ensures consistent behavior for P1 (batch splitting preserves ordering) and F2 (partial batch failure) across all providers.
+**Provider usage pattern** (no recursion):
+
+```go
+func (p *openaiEmbeddingProvider) Embed(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+    return ai.BatchEmbed(ctx, p.embedSingle, model, req)
+}
+
+// embedSingle makes one HTTP call to the OpenAI embeddings endpoint.
+func (p *openaiEmbeddingProvider) embedSingle(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+    // actual HTTP POST to {baseUrl}/embeddings
+}
+```
+
+This ensures consistent behavior for P1 (batch splitting preserves ordering) and F2 (partial batch failure) across all providers.
 
 ### 5.5 Top-level Entry Point
 
@@ -822,6 +852,7 @@ type (
     EmbeddingEncoding  = ai.EmbeddingEncoding
     EmbeddingProvider  = ai.EmbeddingProvider
     EmbeddingModel     = ai.EmbeddingModel
+    EmbedFunc          = ai.EmbedFunc
 )
 
 const (
@@ -1005,7 +1036,7 @@ No new external dependencies. Uses only stdlib (`context`, `fmt`, `sync`) and th
 
 ---
 
-## Review Disposition
+## Round 1 Review Disposition
 
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
@@ -1021,3 +1052,13 @@ No new external dependencies. Uses only stdlib (`context`, `fmt`, `sync`) and th
 | 10 | reviewer-sea | P3 | AC1 missing ctx parameter | Incorporated | §15 AC1 fixed to `ai.Embed(ctx, ...)` |
 | 11 | reviewer-sea | P3 | No Clear* functions for test teardown | Incorporated | §5.2/§5.3 added `ClearEmbeddingProviders()` and `ClearEmbeddingModels()` |
 | 12 | reviewer-sea | P3 | Batch splitting tested in core but deferred to providers | Incorporated | §5.4 added shared `BatchEmbed` utility in core, P1/F2 tests apply to it |
+
+## Round 2 Review Disposition (Seam Review)
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P1 | API() method collision prevents single struct from implementing both Provider and EmbeddingProvider | Incorporated | §2 rewritten: separate provider structs per interface, removed single-struct example |
+| 2 | reviewer-sea | P1 | BatchEmbed infinite recursion when called from provider Embed() | Incorporated | §5.4 changed to accept `EmbedFunc` parameter instead of `EmbeddingProvider` |
+| 3 | reviewer-sea | P2 | Provider plans 03/04 don't document embedding support | Not Incorporated | Out of scope for this addendum; tracked as future addenda for plans 03/04 |
+| 4 | reviewer-sea | P3 | Embed() takes modelID string vs chat's Stream() taking Model struct | Not Incorporated | Deliberate design choice; flat registry enables simpler lookup |
+| 5 | reviewer-sea | P3 | Error classification pattern differs between chat and embedding | Not Incorporated | Inherent to streaming vs synchronous API surface |

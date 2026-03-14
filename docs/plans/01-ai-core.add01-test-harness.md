@@ -12,13 +12,13 @@
 
 ```
 Property: forall texts []string, batchSize int (1..100):
-    resp := BatchEmbed(ctx, mockProvider, model{maxBatch: batchSize}, EmbeddingRequest{Texts: texts})
+    resp := BatchEmbed(ctx, mockEmbedFn, model{maxBatch: batchSize}, EmbeddingRequest{Texts: texts})
     assert len(resp.Embeddings) == len(texts)
     for i, e := range resp.Embeddings:
         assert e.Index == i
 ```
 
-Use a mock `EmbeddingProvider` that records call count and returns deterministic vectors. This tests the shared `BatchEmbed` utility in the core, not provider-specific code.
+Use a mock `EmbedFunc` that records call count and returns deterministic vectors. This tests the shared `BatchEmbed` utility in the core, not provider-specific code.
 
 ### P2. Dimension Bound
 
