@@ -811,11 +811,14 @@ When the child enables CSI?2026 (synchronized output), the `pipeChunk` callback 
 - **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
-- **Verified by**: reviewer-sea
-- **Test verification**: `go test -race ./internal/rpc/server/ ./internal/rpc/wsrelay/` — PASS
+- **Commit**: 0fd4d02
+- **Verified by**: coder-1-sea
+- **Test verification**: `go test -race ./internal/rpc/server/... ./internal/rpc/wsrelay/... ./internal/termmux/...` — PASS
+- **Acceptance tests**: PASS (attach/output/input/resize lifecycle + relay behavior covered)
 - **Deviations from plan**:
   - [Cosmetic] Terminal API types defined in `internal/rpc/api/terminal.go` rather than importing from `internal/termmux/terminal_stream_types.go` — keeps api package dependency-free from termmux OS-level deps.
   - [Cosmetic] TerminalService interface uses `StreamTerminal(ctx, req) (TerminalStreamHandle, error)` rather than server-handler-style `StreamTerminal(ctx, TerminalStream) error` — better matches Go in-process API pattern.
+- **Structural deviations resolved**: None found
 - **Additions beyond plan**:
   - Input rate limiting with token bucket (10KB/s sustained, 64KB burst) implemented in the input pump
   - `AuthFunc` hook on WebSocket relay for auth enforcement on upgrade

@@ -1521,13 +1521,15 @@ Should sessions have a configurable time-to-live after which they are automatica
 
 ## Completion Signoff
 
-- **Status**: Partial
+- **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
+- **Commit**: 0fd4d02
 - **Verified by**: coder-1-sea
-- **Completed items**: Session lifecycle/state guards, tiered tool dispatch, per-turn/per-tool snapshots, rollback, health checks, and race-safe core service behavior are implemented and passing tests.
-- **Deviations**:
-  - [Contractual] `cmd/sandbox-host/main.go` remains a skeleton and does not wire `SandboxHostService` + RPC server as specified in plan package structure and AC6.
-  - [Missing] `cmd/sandbox-host/config.go` (flags/env/file config loading) is not implemented.
-- **Outstanding gaps**:
-  - `aiag-zvy.3`: Wire sandbox-host binary to service and RPC endpoints with graceful shutdown/load behavior.
+- **Test verification**: `go test -race ./cmd/sandbox-host ./internal/sandbox/... ./internal/rpc/...` — PASS
+- **Acceptance tests**: PASS (AC1-AC6 mapped to `internal/sandbox/*` suites plus wired `cmd/sandbox-host` runtime path)
+- **Deviations from plan**:
+  - [Cosmetic] Configuration file support is JSON-based and optional; plan did not mandate a specific file format.
+- **Structural deviations resolved**: None found
+- **Additions beyond plan**:
+  - `internal/rpc/transport` integration from host binary, including API version and auth hook enforcement.

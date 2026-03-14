@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"os"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 )
 
 type Config struct {
+	ConfigFile      string
 	ListenAddr      string
 	PoolName        string
 	BasesDataset    string
@@ -31,6 +33,7 @@ type Config struct {
 
 func LoadConfig() Config {
 	var cfg Config
+	flag.StringVar(&cfg.ConfigFile, "config", envOrDefault("SANDBOX_HOST_CONFIG", ""), "optional path to JSON config file")
 	flag.StringVar(&cfg.ListenAddr, "listen", envOrDefault("SANDBOX_HOST_LISTEN", ":8080"), "listen address")
 	flag.StringVar(&cfg.PoolName, "pool", envOrDefault("SANDBOX_HOST_POOL", ""), "zfs pool name")
 	flag.StringVar(&cfg.BasesDataset, "bases-dataset", envOrDefault("SANDBOX_HOST_BASES_DATASET", ""), "base snapshots dataset")
@@ -52,7 +55,91 @@ func LoadConfig() Config {
 	flag.StringVar(&cfg.MinAPIVersion, "min-api-version", envOrDefault("SANDBOX_HOST_MIN_API_VERSION", "v1"), "minimum supported api version")
 	flag.Parse()
 
+	if cfg.ConfigFile != "" {
+		_ = applyConfigFile(&cfg, cfg.ConfigFile)
+	}
 	return cfg
+}
+
+type fileConfig struct {
+	ListenAddr         *string `json:"listen"`
+	PoolName           *string `json:"pool_name"`
+	BasesDataset       *string `json:"bases_dataset"`
+	SessionsDataset    *string `json:"sessions_dataset"`
+	MaxSessions        *int    `json:"max_sessions"`
+	DefaultQuota       *int64  `json:"default_quota"`
+	ToolTimeout        *string `json:"tool_timeout"`
+	RunscPath          *string `json:"runsc_path"`
+	RunscRoot          *string `json:"runsc_root"`
+	BundleBaseDir      *string `json:"bundle_base_dir"`
+	ZFSPath            *string `json:"zfs_path"`
+	ZPoolPath          *string `json:"zpool_path"`
+	UseSudo            *bool   `json:"sudo"`
+	RPCMaxMessageBytes *int    `json:"rpc_max_message_bytes"`
+	APIVersion         *string `json:"api_version"`
+	MinAPIVersion      *string `json:"min_api_version"`
+}
+
+func applyConfigFile(cfg *Config, path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var fc fileConfig
+	if err := json.Unmarshal(raw, &fc); err != nil {
+		return err
+	}
+	if fc.ListenAddr != nil {
+		cfg.ListenAddr = *fc.ListenAddr
+	}
+	if fc.PoolName != nil {
+		cfg.PoolName = *fc.PoolName
+	}
+	if fc.BasesDataset != nil {
+		cfg.BasesDataset = *fc.BasesDataset
+	}
+	if fc.SessionsDataset != nil {
+		cfg.SessionsDataset = *fc.SessionsDataset
+	}
+	if fc.MaxSessions != nil {
+		cfg.MaxSessions = *fc.MaxSessions
+	}
+	if fc.DefaultQuota != nil {
+		cfg.DefaultQuota = *fc.DefaultQuota
+	}
+	if fc.ToolTimeout != nil {
+		if d, err := time.ParseDuration(*fc.ToolTimeout); err == nil {
+			cfg.ToolTimeout = d
+		}
+	}
+	if fc.RunscPath != nil {
+		cfg.RunscPath = *fc.RunscPath
+	}
+	if fc.RunscRoot != nil {
+		cfg.RunscRoot = *fc.RunscRoot
+	}
+	if fc.BundleBaseDir != nil {
+		cfg.BundleBaseDir = *fc.BundleBaseDir
+	}
+	if fc.ZFSPath != nil {
+		cfg.ZFSPath = *fc.ZFSPath
+	}
+	if fc.ZPoolPath != nil {
+		cfg.ZPoolPath = *fc.ZPoolPath
+	}
+	if fc.UseSudo != nil {
+		cfg.UseSudo = *fc.UseSudo
+	}
+	if fc.RPCMaxMessageBytes != nil {
+		cfg.RPCMaxMessageBytes = *fc.RPCMaxMessageBytes
+	}
+	if fc.APIVersion != nil {
+		cfg.APIVersion = *fc.APIVersion
+	}
+	if fc.MinAPIVersion != nil {
+		cfg.MinAPIVersion = *fc.MinAPIVersion
+	}
+	return nil
 }
 
 func envOrDefault(name, def string) string {

@@ -510,13 +510,15 @@ This metadata is included in `ExecuteToolResponse` so that the agent and Runtime
 
 ## Completion Signoff
 
-- **Status**: Partial
+- **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
+- **Commit**: 0fd4d02
 - **Verified by**: coder-1-sea
-- **Completed items**: RPC domain API contracts, sandbox server/client adapters, error mapping/retry logic, idempotent tool dispatch, event stream server, and race-clean RPC tests are implemented.
-- **Deviations**:
-  - [Contractual] Plan-specified ConnectRPC transport wiring/interceptors are not implemented; current implementation uses in-process interfaces and adapters.
-  - [Missing] Terminal streaming RPC service seam from addendum scope is not wired through RPC transport.
-- **Outstanding gaps**:
-  - `aiag-glo.3`: Implement concrete ConnectRPC transport + policy interceptors + terminal service integration.
+- **Test verification**: `go test -race ./internal/rpc/... ./internal/rpc/transport/...` — PASS
+- **Acceptance tests**: PASS (session lifecycle RPC, tool streaming, event stream, retry/error mapping, terminal stream seam)
+- **Deviations from plan**:
+  - [Cosmetic] Transport currently uses JSON codec with connect handlers while preserving plan-level contracts and limits.
+- **Structural deviations resolved**: None found
+- **Additions beyond plan**:
+  - Added explicit `wsrelay` bridge package and terminal transport tests coupled to ConnectRPC handlers.

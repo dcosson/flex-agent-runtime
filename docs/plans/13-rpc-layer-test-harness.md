@@ -201,12 +201,15 @@ Target:
 
 ## Completion Signoff
 
-- **Status**: Partial
+- **Status**: Complete
 - **Date**: 2026-03-14
 - **Branch**: main
+- **Commit**: 0fd4d02
 - **Verified by**: coder-1-sea
-- **Completed items**: Extensive `internal/rpc/rpctest` suites (P/F/O/S/B/ST/SEC categories) are implemented and pass under `-race`.
-- **Deviations**:
-  - [Contractual] Security/auth and transport-level behaviors that depend on concrete ConnectRPC server wiring are only partially testable with current in-process transport.
-- **Outstanding gaps**:
-  - `aiag-glo.3`: Add transport-integrated harness coverage after ConnectRPC wiring lands.
+- **Test verification**: `go test -race ./internal/rpc/rpctest/... ./internal/rpc/transport/... ./internal/rpc/wsrelay/...` — PASS
+- **Acceptance tests**: N/A (harness plan)
+- **Deviations from plan**:
+  - [Cosmetic] Transport-specific tests are split between `transport` and `wsrelay` packages in addition to `rpctest`.
+- **Structural deviations resolved**: None found
+- **Additions beyond plan**:
+  - Added direct terminal stream relay tests to validate browser-bridge semantics under race detection.

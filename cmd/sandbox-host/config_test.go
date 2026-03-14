@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -47,5 +48,42 @@ func TestEnvParsersFallback(t *testing.T) {
 	}
 	if got := envOrDefault(missing, "x"); got != "x" {
 		t.Fatalf("fallback string = %q, want x", got)
+	}
+}
+
+func TestApplyConfigFile(t *testing.T) {
+	cfg := Config{
+		ListenAddr:      ":8080",
+		PoolName:        "tank",
+		BasesDataset:    "tank/bases",
+		SessionsDataset: "tank/sessions",
+	}
+	p := filepath.Join(t.TempDir(), "sandbox-host.json")
+	if err := os.WriteFile(p, []byte(`{
+  "listen": ":9090",
+  "pool_name": "poolA",
+  "bases_dataset": "poolA/bases",
+  "sessions_dataset": "poolA/sessions",
+  "max_sessions": 77,
+  "default_quota": 9999,
+  "tool_timeout": "45s",
+  "sudo": true,
+  "rpc_max_message_bytes": 12345,
+  "api_version": "v7",
+  "min_api_version": "v3"
+}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := applyConfigFile(&cfg, p); err != nil {
+		t.Fatalf("applyConfigFile error: %v", err)
+	}
+	if cfg.ListenAddr != ":9090" || cfg.PoolName != "poolA" || cfg.BasesDataset != "poolA/bases" || cfg.SessionsDataset != "poolA/sessions" {
+		t.Fatalf("basic fields not applied: %+v", cfg)
+	}
+	if cfg.MaxSessions != 77 || cfg.DefaultQuota != 9999 || cfg.ToolTimeout != 45*time.Second {
+		t.Fatalf("numeric/duration fields not applied: %+v", cfg)
+	}
+	if !cfg.UseSudo || cfg.RPCMaxMessageBytes != 12345 || cfg.APIVersion != "v7" || cfg.MinAPIVersion != "v3" {
+		t.Fatalf("remaining fields not applied: %+v", cfg)
 	}
 }
