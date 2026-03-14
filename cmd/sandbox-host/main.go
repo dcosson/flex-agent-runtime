@@ -15,11 +15,16 @@ import (
 	"h2-agent-runtime/internal/sandbox"
 	"h2-agent-runtime/internal/sandbox/gvisor"
 	"h2-agent-runtime/internal/sandbox/zfs"
+	"h2-agent-runtime/internal/termmux"
 )
 
 func main() {
 	cfg := LoadConfig()
 	logger := slog.Default()
+	if err := cfg.Validate(); err != nil {
+		logger.Error("invalid configuration", "error", err)
+		os.Exit(1)
+	}
 
 	zm, err := zfs.NewCLIManager(
 		zfs.WithZFSPath(cfg.ZFSPath),
@@ -69,17 +74,23 @@ func main() {
 	defer sandboxRPC.Close()
 	eventRPC := rpcserver.NewAgentEventServer()
 
+	authToken := cfg.AuthToken
 	authHook := func(_ context.Context, _ string, headers http.Header) error {
-		required := os.Getenv("SANDBOX_HOST_AUTH_TOKEN")
-		if required == "" {
+		if authToken == "" {
 			return nil
 		}
-		if got := headers.Get("authorization"); got == "Bearer "+required {
+		if got := headers.Get("authorization"); got == "Bearer "+authToken {
 			return nil
 		}
 		return fmt.Errorf("missing or invalid authorization token")
 	}
-	rpcTransport := transport.NewServer(sandboxRPC, eventRPC, nil, transport.ServerConfig{
+
+	var termSessions *termmux.SessionManager
+	if cfg.EnableTerminal {
+		termSessions = termmux.NewSessionManager()
+	}
+
+	rpcTransport := transport.NewServer(sandboxRPC, eventRPC, termSessions, transport.ServerConfig{
 		MaxMessageBytes: cfg.RPCMaxMessageBytes,
 		APIVersion:      cfg.APIVersion,
 		MinAPIVersion:   cfg.MinAPIVersion,
@@ -92,7 +103,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	logger.Info("sandbox-host starting", "listen", cfg.ListenAddr, "api_version", cfg.APIVersion)
+	logger.Info("sandbox-host starting", "listen", cfg.ListenAddr, "api_version", cfg.APIVersion, "terminal_enabled", cfg.EnableTerminal)
 	go func() {
 		if serveErr := httpServer.ListenAndServe(); serveErr != nil && serveErr != http.ErrServerClosed {
 			logger.Error("sandbox-host listen failed", "error", serveErr)

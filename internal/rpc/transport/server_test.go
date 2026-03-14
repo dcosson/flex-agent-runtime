@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
+	"h2-agent-runtime/internal/agent"
 	"h2-agent-runtime/internal/rpc/api"
 	rpcserver "h2-agent-runtime/internal/rpc/server"
 	"h2-agent-runtime/internal/sandbox"
@@ -63,8 +65,8 @@ func TestTransportUnaryVersionAndAuth(t *testing.T) {
 	defer ts.Close()
 
 	client := NewSandboxClient(ts.Client(), ts.URL, ClientConfig{
-		APIVersion: "v2",
-		AuthHook:   HeaderTokenAuth("authorization", "Bearer good"),
+		APIVersion:     "v2",
+		HeaderInjector: HeaderTokenAuth("authorization", "Bearer good"),
 	})
 	resp, err := client.HealthCheck.CallUnary(context.Background(), connect.NewRequest(&api.HealthCheckRequest{}))
 	if err != nil {
@@ -75,6 +77,32 @@ func TestTransportUnaryVersionAndAuth(t *testing.T) {
 	}
 	if got := resp.Header().Get("x-api-version"); got != "v2" {
 		t.Fatalf("x-api-version = %q, want v2", got)
+	}
+}
+
+func TestTransportAuthRejected(t *testing.T) {
+	sandboxRPC := newSandboxRPCForTransport(t)
+	t.Cleanup(func() { _ = sandboxRPC.Close() })
+	srv := NewServer(sandboxRPC, rpcserver.NewAgentEventServer(), nil, ServerConfig{
+		APIVersion:    "v1",
+		MinAPIVersion: "v1",
+		AuthHook: func(_ context.Context, _ string, headers http.Header) error {
+			if headers.Get("authorization") != "Bearer expected" {
+				return errors.New("unauthenticated")
+			}
+			return nil
+		},
+	})
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	client := NewSandboxClient(ts.Client(), ts.URL, ClientConfig{APIVersion: "v1"})
+	_, err := client.HealthCheck.CallUnary(context.Background(), connect.NewRequest(&api.HealthCheckRequest{}))
+	if err == nil {
+		t.Fatalf("expected auth error")
+	}
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("code = %v, want unauthenticated", connect.CodeOf(err))
 	}
 }
 
@@ -95,6 +123,120 @@ func TestTransportVersionRejected(t *testing.T) {
 	}
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("code = %v, want failed_precondition", connect.CodeOf(err))
+	}
+}
+
+func TestTransportExecuteToolStream(t *testing.T) {
+	sandboxRPC := newSandboxRPCForTransport(t)
+	t.Cleanup(func() { _ = sandboxRPC.Close() })
+	srv := NewServer(sandboxRPC, rpcserver.NewAgentEventServer(), nil, ServerConfig{})
+	ts := httptest.NewUnstartedServer(srv.Handler())
+	ts.EnableHTTP2 = true
+	ts.StartTLS()
+	defer ts.Close()
+
+	client := NewSandboxClient(ts.Client(), ts.URL, ClientConfig{APIVersion: "v1"})
+
+	_, err := client.CreateSession.CallUnary(context.Background(), connect.NewRequest(&api.CreateSessionRequest{
+		SessionID:    "s1",
+		BaseSnapshot: "tank/bases/repo@initial",
+	}))
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	stream, err := client.ExecuteStream.CallServerStream(context.Background(), connect.NewRequest(&api.ExecuteToolRequest{
+		SessionID:  "s1",
+		ToolCallID: "tc1",
+		ToolName:   "bash",
+		Params:     map[string]any{"cmd": "echo ok"},
+	}))
+	if err != nil {
+		t.Fatalf("CallServerStream failed: %v", err)
+	}
+
+	if !stream.Receive() {
+		t.Fatalf("ExecuteToolStream recv failed: %v", stream.Err())
+	}
+	msg := stream.Msg()
+	if msg.Response == nil {
+		t.Fatalf("expected final response message")
+	}
+	if msg.Response.ToolCallID != "tc1" {
+		t.Fatalf("tool_call_id = %q, want tc1", msg.Response.ToolCallID)
+	}
+
+	if stream.Receive() {
+		t.Fatalf("expected stream to finish")
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("unexpected stream error: %v", err)
+	}
+}
+
+func TestTransportAgentEventStream(t *testing.T) {
+	sandboxRPC := newSandboxRPCForTransport(t)
+	t.Cleanup(func() { _ = sandboxRPC.Close() })
+	eventRPC := rpcserver.NewAgentEventServer()
+	srv := NewServer(sandboxRPC, eventRPC, nil, ServerConfig{})
+	ts := httptest.NewUnstartedServer(srv.Handler())
+	ts.EnableHTTP2 = true
+	ts.StartTLS()
+	defer ts.Close()
+
+	client := NewEventClient(ts.Client(), ts.URL, ClientConfig{APIVersion: "v1"})
+	want := agent.AgentEvent{Type: agent.EventTurnStarted, SessionID: "s1"}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	type result struct {
+		msg *api.AgentEventEnvelope
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		stream, err := client.Stream.CallServerStream(ctx, connect.NewRequest(&api.StreamAgentEventsRequest{SessionID: "s1"}))
+		if err != nil {
+			ch <- result{err: err}
+			return
+		}
+		if !stream.Receive() {
+			ch <- result{err: stream.Err()}
+			return
+		}
+		ch <- result{msg: stream.Msg()}
+	}()
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	select {
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for event")
+	case <-ticker.C:
+		eventRPC.Publish("s1", want)
+		for {
+			select {
+			case <-ctx.Done():
+				t.Fatalf("timed out waiting for event")
+			case got := <-ch:
+				if got.err != nil {
+					t.Fatalf("receive event failed: %v", got.err)
+				}
+				if got.msg == nil || got.msg.Event.Type != want.Type {
+					t.Fatalf("unexpected event: %#v", got.msg)
+				}
+				return
+			case <-ticker.C:
+				eventRPC.Publish("s1", want)
+			}
+		}
+	case got := <-ch:
+		if got.err != nil {
+			t.Fatalf("receive event failed: %v", got.err)
+		}
+		if got.msg == nil || got.msg.Event.Type != want.Type {
+			t.Fatalf("unexpected event: %#v", got.msg)
+		}
 	}
 }
 

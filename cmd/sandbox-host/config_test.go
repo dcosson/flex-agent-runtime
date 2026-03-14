@@ -2,7 +2,7 @@ package main
 
 import (
 	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -51,39 +51,39 @@ func TestEnvParsersFallback(t *testing.T) {
 	}
 }
 
-func TestApplyConfigFile(t *testing.T) {
+func TestConfigValidate(t *testing.T) {
 	cfg := Config{
-		ListenAddr:      ":8080",
-		PoolName:        "tank",
-		BasesDataset:    "tank/bases",
-		SessionsDataset: "tank/sessions",
+		PoolName:           "tank",
+		BasesDataset:       "tank/bases",
+		SessionsDataset:    "tank/sessions",
+		BundleBaseDir:      "/tmp/sandbox-host-bundles",
+		RPCMaxMessageBytes: 1024,
+		APIVersion:         "v1",
+		MinAPIVersion:      "v1",
 	}
-	p := filepath.Join(t.TempDir(), "sandbox-host.json")
-	if err := os.WriteFile(p, []byte(`{
-  "listen": ":9090",
-  "pool_name": "poolA",
-  "bases_dataset": "poolA/bases",
-  "sessions_dataset": "poolA/sessions",
-  "max_sessions": 77,
-  "default_quota": 9999,
-  "tool_timeout": "45s",
-  "sudo": true,
-  "rpc_max_message_bytes": 12345,
-  "api_version": "v7",
-  "min_api_version": "v3"
-}`), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
 	}
-	if err := applyConfigFile(&cfg, p); err != nil {
-		t.Fatalf("applyConfigFile error: %v", err)
+}
+
+func TestConfigValidateMissingRequired(t *testing.T) {
+	cfg := Config{}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatalf("Validate() expected error")
 	}
-	if cfg.ListenAddr != ":9090" || cfg.PoolName != "poolA" || cfg.BasesDataset != "poolA/bases" || cfg.SessionsDataset != "poolA/sessions" {
-		t.Fatalf("basic fields not applied: %+v", cfg)
+	checks := []string{
+		"pool is required",
+		"bases-dataset is required",
+		"sessions-dataset is required",
+		"bundle-base-dir is required",
+		"rpc-max-message-bytes must be > 0",
+		"api-version is required",
+		"min-api-version is required",
 	}
-	if cfg.MaxSessions != 77 || cfg.DefaultQuota != 9999 || cfg.ToolTimeout != 45*time.Second {
-		t.Fatalf("numeric/duration fields not applied: %+v", cfg)
-	}
-	if !cfg.UseSudo || cfg.RPCMaxMessageBytes != 12345 || cfg.APIVersion != "v7" || cfg.MinAPIVersion != "v3" {
-		t.Fatalf("remaining fields not applied: %+v", cfg)
+	for _, want := range checks {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Validate() error missing %q: %v", want, err)
+		}
 	}
 }
