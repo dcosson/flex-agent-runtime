@@ -119,6 +119,8 @@ func newTerminalSubscribers() *terminalSubscribers {
 }
 
 // Subscribe creates a new terminal subscription.
+// If a subscription with the same ID already exists, the old one is
+// closed (Done channel signaled) before being replaced.
 func (ts *terminalSubscribers) Subscribe(id string, scrollback []byte, rows, cols int) *TerminalSubscription {
 	sub := &TerminalSubscription{
 		ID:         id,
@@ -130,6 +132,9 @@ func (ts *terminalSubscribers) Subscribe(id string, scrollback []byte, rows, col
 	}
 
 	ts.mu.Lock()
+	if old, ok := ts.subs[id]; ok {
+		close(old.Done)
+	}
 	ts.subs[id] = sub
 	ts.mu.Unlock()
 

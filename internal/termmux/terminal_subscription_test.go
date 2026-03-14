@@ -270,6 +270,45 @@ func TestTerminalSubscribers_UnsubscribeNonexistent(t *testing.T) {
 	ts.Unsubscribe("nonexistent") // should not panic
 }
 
+func TestTerminalSubscribers_ResubscribeClosesOld(t *testing.T) {
+	ts := newTerminalSubscribers()
+
+	old := ts.Subscribe("c1", []byte("old"), 24, 80)
+	newSub := ts.Subscribe("c1", []byte("new"), 30, 100)
+
+	// Old subscription's Done channel should be closed
+	select {
+	case <-old.Done:
+		// OK — old was closed on re-subscribe
+	default:
+		t.Error("expected old subscription Done channel to be closed after re-subscribe")
+	}
+
+	// New subscription should be the active one
+	if ts.Count() != 1 {
+		t.Errorf("expected 1 subscriber after re-subscribe, got %d", ts.Count())
+	}
+
+	// New subscription should receive fan-out data
+	ts.FanOut([]byte("hello"))
+	select {
+	case data := <-newSub.Chunks:
+		if string(data) != "hello" {
+			t.Errorf("expected 'hello', got %q", string(data))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for chunk on new subscription")
+	}
+
+	// New subscription should have the updated scrollback and dimensions
+	if string(newSub.Scrollback) != "new" {
+		t.Errorf("expected scrollback 'new', got %q", string(newSub.Scrollback))
+	}
+	if newSub.Rows != 30 || newSub.Cols != 100 {
+		t.Errorf("expected 30x100, got %dx%d", newSub.Rows, newSub.Cols)
+	}
+}
+
 func TestTerminalSubscribers_FanOutDataIsolation(t *testing.T) {
 	ts := newTerminalSubscribers()
 	sub := ts.Subscribe("c1", nil, 24, 80)
