@@ -6,8 +6,8 @@ func TestIsRetryableMethod(t *testing.T) {
 	if !IsRetryableMethod("GetSession") {
 		t.Fatalf("expected GetSession retryable")
 	}
-	if IsRetryableMethod("ExecuteTool") {
-		t.Fatalf("expected ExecuteTool non-retryable")
+	if !IsRetryableMethod("ExecuteTool") {
+		t.Fatalf("expected ExecuteTool retryable")
 	}
 }
 

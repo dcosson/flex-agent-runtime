@@ -6,20 +6,23 @@ import (
 	"fmt"
 
 	"h2-agent-runtime/internal/sandbox"
+	"h2-agent-runtime/internal/sandbox/zfs"
 )
 
 type Code string
 
 const (
-	CodeOK                Code = "ok"
-	CodeInvalidArgument   Code = "invalid_argument"
-	CodeNotFound          Code = "not_found"
-	CodeAlreadyExists     Code = "already_exists"
-	CodeFailedPreconditon Code = "failed_precondition"
-	CodeUnavailable       Code = "unavailable"
-	CodeDeadlineExceeded  Code = "deadline_exceeded"
-	CodeCanceled          Code = "canceled"
-	CodeInternal          Code = "internal"
+	CodeOK                 Code = "ok"
+	CodeInvalidArgument    Code = "invalid_argument"
+	CodeNotFound           Code = "not_found"
+	CodeAlreadyExists      Code = "already_exists"
+	CodeFailedPrecondition Code = "failed_precondition"
+	CodePermissionDenied   Code = "permission_denied"
+	CodeResourceExhausted  Code = "resource_exhausted"
+	CodeUnavailable        Code = "unavailable"
+	CodeDeadlineExceeded   Code = "deadline_exceeded"
+	CodeCanceled           Code = "canceled"
+	CodeInternal           Code = "internal"
 )
 
 type RPCError struct {
@@ -45,9 +48,13 @@ func NewRPCError(code Code, msg string, cause error) *RPCError {
 	return &RPCError{Code: code, Message: msg, Cause: cause}
 }
 
-func mapError(err error) error {
+func MapError(err error) error {
 	if err == nil {
 		return nil
+	}
+	var rpcErr *RPCError
+	if errors.As(err, &rpcErr) {
+		return rpcErr
 	}
 	switch {
 	case errors.Is(err, sandbox.ErrSessionNotFound):
@@ -60,7 +67,9 @@ func mapError(err error) error {
 		errors.Is(err, sandbox.ErrRollbackInProgress),
 		errors.Is(err, sandbox.ErrToolsInFlight),
 		errors.Is(err, sandbox.ErrMaxSessionsReached):
-		return NewRPCError(CodeFailedPreconditon, err.Error(), err)
+		return NewRPCError(CodeFailedPrecondition, err.Error(), err)
+	case errors.Is(err, zfs.ErrPoolFull):
+		return NewRPCError(CodeResourceExhausted, err.Error(), err)
 	case errors.Is(err, context.Canceled):
 		return NewRPCError(CodeCanceled, err.Error(), err)
 	case errors.Is(err, context.DeadlineExceeded):
@@ -70,7 +79,7 @@ func mapError(err error) error {
 	}
 }
 
-func wrapRPCError(err error, sessionID, toolName string) error {
+func WrapRPCError(err error, sessionID, toolName string) error {
 	if err == nil {
 		return nil
 	}

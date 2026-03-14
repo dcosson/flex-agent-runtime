@@ -1,12 +1,16 @@
 package rpc
 
 import (
+	"context"
 	"errors"
 	"testing"
+
+	"h2-agent-runtime/internal/sandbox"
+	"h2-agent-runtime/internal/sandbox/zfs"
 )
 
 func TestWrapRPCErrorAddsContext(t *testing.T) {
-	err := wrapRPCError(&RPCError{Code: CodeInternal, Message: "boom"}, "s1", "bash")
+	err := WrapRPCError(&RPCError{Code: CodeInternal, Message: "boom"}, "s1", "bash")
 	rpcErr, ok := err.(*RPCError)
 	if !ok {
 		t.Fatalf("expected RPCError")
@@ -21,5 +25,32 @@ func TestRPCErrorUnwrap(t *testing.T) {
 	err := &RPCError{Code: CodeInternal, Cause: base}
 	if !errors.Is(err, base) {
 		t.Fatalf("unwrap failed")
+	}
+}
+
+func TestMapError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code Code
+	}{
+		{name: "not found", err: sandbox.ErrSessionNotFound, code: CodeNotFound},
+		{name: "already exists", err: sandbox.ErrSessionExists, code: CodeAlreadyExists},
+		{name: "failed precondition", err: sandbox.ErrSessionPaused, code: CodeFailedPrecondition},
+		{name: "resource exhausted", err: zfs.ErrPoolFull, code: CodeResourceExhausted},
+		{name: "canceled", err: context.Canceled, code: CodeCanceled},
+		{name: "deadline", err: context.DeadlineExceeded, code: CodeDeadlineExceeded},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mapped := MapError(tc.err)
+			rpcErr, ok := mapped.(*RPCError)
+			if !ok {
+				t.Fatalf("expected RPCError, got %T", mapped)
+			}
+			if rpcErr.Code != tc.code {
+				t.Fatalf("code = %s, want %s", rpcErr.Code, tc.code)
+			}
+		})
 	}
 }

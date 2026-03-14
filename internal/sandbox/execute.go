@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"time"
@@ -39,13 +40,13 @@ func (svc *SandboxHostService) ExecuteTool(ctx context.Context, req ExecuteToolR
 		defer cancel()
 	}
 
-	tier := ClassifyTool(req.ToolName)
+	tier := tools.ClassifyTool(req.ToolName)
 	start := time.Now()
 	var resp *ExecuteToolResponse
 	switch tier {
-	case Tier1:
+	case tools.Tier1:
 		resp, err = svc.executeTier1(ctx, mountpoint, req)
-	case Tier2:
+	case tools.Tier2:
 		resp, err = svc.executeTier2(ctx, mountpoint, req)
 	default:
 		err = fmt.Errorf("unknown tier")
@@ -74,11 +75,20 @@ func (svc *SandboxHostService) executeTier1(ctx context.Context, mountpoint stri
 		return nil, err
 	}
 	backend := tools.NewLocalBackend(mountpoint)
-	resp, err := backend.ExecuteTool(ctx, tools.ToolRequest{ToolName: req.ToolName, ToolCallID: req.ToolCallID, Params: req.Params}, nil)
+	resp, err := backend.ExecuteTool(ctx, tools.ToolRequest{ToolName: req.ToolName, ToolCallID: req.ToolCallID, Params: req.Params}, func(progress tools.ToolProgress) {
+		if req.OnProgress != nil {
+			req.OnProgress(progress.Content, progress.IsError)
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &ExecuteToolResponse{Content: blocksToText(resp.Content), ExitCode: resp.ExitCode, SnapshotID: resp.SnapshotID}, nil
+	return &ExecuteToolResponse{
+		Content:       blocksToText(resp.Content),
+		ContentBlocks: append([]ai.ContentBlock(nil), resp.Content...),
+		ExitCode:      resp.ExitCode,
+		SnapshotID:    resp.SnapshotID,
+	}, nil
 }
 
 func (svc *SandboxHostService) executeTier2(ctx context.Context, mountpoint string, req ExecuteToolRequest) (*ExecuteToolResponse, error) {
@@ -90,13 +100,19 @@ func (svc *SandboxHostService) executeTier2(ctx context.Context, mountpoint stri
 	if err != nil {
 		return nil, err
 	}
-	result, err := svc.gvisor.Run(ctx, gvisor.ContainerOptions{
+	opts := gvisor.ContainerOptions{
 		Command:   cmd,
 		WorkDir:   "/workspace",
 		RootFS:    mountpoint,
 		Resources: resources,
 		Network:   gvisor.NetworkNone,
-	})
+	}
+	if req.OnProgress != nil {
+		opts.StdoutWriter = &progressWriter{onChunk: func(chunk string) { req.OnProgress(chunk, false) }}
+		opts.StderrWriter = &progressWriter{onChunk: func(chunk string) { req.OnProgress(chunk, true) }}
+	}
+
+	result, err := svc.gvisor.Run(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +124,11 @@ func (svc *SandboxHostService) executeTier2(ctx context.Context, mountpoint stri
 		}
 		content += stderr
 	}
-	return &ExecuteToolResponse{Content: content, ExitCode: &exitCode}, nil
+	return &ExecuteToolResponse{
+		Content:       content,
+		ContentBlocks: []ai.ContentBlock{&ai.TextContent{Text: content}},
+		ExitCode:      &exitCode,
+	}, nil
 }
 
 func buildTier2Command(toolName string, params map[string]any) ([]string, error) {
@@ -203,3 +223,17 @@ func blocksToText(blocks []ai.ContentBlock) string {
 	}
 	return strings.Join(parts, "\n")
 }
+
+type progressWriter struct {
+	onChunk func(chunk string)
+}
+
+func (w *progressWriter) Write(p []byte) (int, error) {
+	if w.onChunk == nil || len(p) == 0 {
+		return len(p), nil
+	}
+	w.onChunk(string(p))
+	return len(p), nil
+}
+
+var _ io.Writer = (*progressWriter)(nil)

@@ -6,8 +6,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"path/filepath"
+	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,8 +45,16 @@ func (m *Manager) runContainer(
 	stdoutCapture := newLimitedBuffer(maxOutput)
 	stderrCapture := newLimitedBuffer(maxOutput)
 
-	cmd.Stdout = stdoutCapture
-	cmd.Stderr = stderrCapture
+	if opts.StdoutWriter != nil {
+		cmd.Stdout = io.MultiWriter(stdoutCapture, opts.StdoutWriter)
+	} else {
+		cmd.Stdout = stdoutCapture
+	}
+	if opts.StderrWriter != nil {
+		cmd.Stderr = io.MultiWriter(stderrCapture, opts.StderrWriter)
+	} else {
+		cmd.Stderr = stderrCapture
+	}
 
 	if opts.Stdin != nil {
 		cmd.Stdin = opts.Stdin

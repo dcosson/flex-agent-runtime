@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	"h2-agent-runtime/internal/agent"
 	"h2-agent-runtime/internal/rpc"
@@ -33,18 +35,21 @@ func (s *AgentEventServer) StreamAgentEvents(ctx context.Context, req *api.Strea
 	s.streams[req.SessionID][id] = ch
 	s.mu.Unlock()
 
+	var closeOnce sync.Once
 	closeFn := func() error {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if streams := s.streams[req.SessionID]; streams != nil {
-			if c, ok := streams[id]; ok {
-				close(c)
-				delete(streams, id)
+		closeOnce.Do(func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if streams := s.streams[req.SessionID]; streams != nil {
+				if c, ok := streams[id]; ok {
+					close(c)
+					delete(streams, id)
+				}
+				if len(streams) == 0 {
+					delete(s.streams, req.SessionID)
+				}
 			}
-			if len(streams) == 0 {
-				delete(s.streams, req.SessionID)
-			}
-		}
+		})
 		return nil
 	}
 
@@ -58,15 +63,20 @@ func (s *AgentEventServer) StreamAgentEvents(ctx context.Context, req *api.Strea
 
 func (s *AgentEventServer) Publish(sessionID string, evt agent.AgentEvent) {
 	envelope := &api.AgentEventEnvelope{SessionID: sessionID, Event: evt}
+	var dropped atomic.Int32
 	s.mu.RLock()
 	streams := s.streams[sessionID]
 	for _, ch := range streams {
 		select {
 		case ch <- envelope:
 		default:
+			dropped.Add(1)
 		}
 	}
 	s.mu.RUnlock()
+	if dropped.Load() > 0 {
+		slog.Default().Warn("rpc event dropped on slow consumer", "session_id", sessionID, "dropped_count", dropped.Load())
+	}
 }
 
 func (s *AgentEventServer) Sender(sessionID string) api.AgentEventSender {

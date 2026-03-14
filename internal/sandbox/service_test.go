@@ -15,6 +15,7 @@ import (
 	"h2-agent-runtime/internal/ai"
 	"h2-agent-runtime/internal/sandbox/gvisor"
 	"h2-agent-runtime/internal/sandbox/zfs"
+	"h2-agent-runtime/internal/tools"
 )
 
 type fakeGVisor struct {
@@ -166,7 +167,7 @@ func TestTierRouting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp1.Tier != int(Tier1) || resp1.Content == "" {
+	if resp1.Tier != int(tools.Tier1) || resp1.Content == "" {
 		t.Fatalf("unexpected tier1 response: %+v", resp1)
 	}
 
@@ -174,7 +175,7 @@ func TestTierRouting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp2.Tier != int(Tier2) {
+	if resp2.Tier != int(tools.Tier2) {
 		t.Fatalf("unexpected tier2 response: %+v", resp2)
 	}
 	if gm.calls == 0 {

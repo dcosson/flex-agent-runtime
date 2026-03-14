@@ -65,14 +65,24 @@ func (c *SandboxClient) ExecuteTool(ctx context.Context, sessionID string, req t
 		)
 	}
 	return &tools.ToolResponse{
-		Content:    []ai.ContentBlock{&ai.TextContent{Text: final.Content}},
+		Content:    decodeResponseContent(final),
 		SnapshotID: final.SnapshotID,
 		ExitCode:   final.ExitCode,
 	}, nil
 }
 
 func wrapClientError(err error, sessionID, toolName string) error {
-	return rpc.NewRPCError(rpc.CodeInternal, err.Error(), err)
+	return rpc.WrapRPCError(err, sessionID, toolName)
 }
 
 var _ tools.SandboxToolClient = (*SandboxClient)(nil)
+
+func decodeResponseContent(resp *api.ExecuteToolResponse) []ai.ContentBlock {
+	if resp == nil {
+		return nil
+	}
+	if len(resp.ContentBlocks) > 0 {
+		return codec.FromAPIContentBlocks(resp.ContentBlocks)
+	}
+	return []ai.ContentBlock{&ai.TextContent{Text: resp.Content}}
+}

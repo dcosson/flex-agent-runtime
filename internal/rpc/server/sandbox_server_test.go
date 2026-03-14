@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
+	"h2-agent-runtime/internal/rpc"
 	"h2-agent-runtime/internal/rpc/api"
 	"h2-agent-runtime/internal/sandbox"
 	"h2-agent-runtime/internal/sandbox/gvisor"
@@ -14,7 +16,10 @@ import (
 
 type testGVisor struct{}
 
-func (g *testGVisor) Run(context.Context, gvisor.ContainerOptions) (*gvisor.ContainerResult, error) {
+func (g *testGVisor) Run(_ context.Context, opts gvisor.ContainerOptions) (*gvisor.ContainerResult, error) {
+	if opts.StdoutWriter != nil {
+		_, _ = opts.StdoutWriter.Write([]byte("ok"))
+	}
 	exit := 0
 	return &gvisor.ContainerResult{ExitCode: exit, Stdout: []byte("ok")}, nil
 }
@@ -44,6 +49,7 @@ func newHostForRPC(t *testing.T) (*sandbox.SandboxHostService, *zfs.MockManager)
 func TestSandboxServerSessionCRUDAndTool(t *testing.T) {
 	host, _ := newHostForRPC(t)
 	srv := NewSandboxServer(host)
+	t.Cleanup(func() { _ = srv.Close() })
 	ctx := context.Background()
 
 	create, err := srv.CreateSession(ctx, &api.CreateSessionRequest{SessionID: "s1", BaseSnapshot: "tank/bases/repo@initial"})
@@ -63,6 +69,7 @@ func TestSandboxServerSessionCRUDAndTool(t *testing.T) {
 		t.Fatalf("ExecuteToolStream error = %v", err)
 	}
 	seenResp := false
+	seenProgress := false
 	for {
 		msg, recvErr := stream.Recv()
 		if errors.Is(recvErr, io.EOF) {
@@ -77,9 +84,15 @@ func TestSandboxServerSessionCRUDAndTool(t *testing.T) {
 				t.Fatalf("unexpected response: %+v", msg.Response)
 			}
 		}
+		if msg.Progress != nil && msg.Progress.Content != "" {
+			seenProgress = true
+		}
 	}
 	if !seenResp {
 		t.Fatalf("expected final response message")
+	}
+	if !seenProgress {
+		t.Fatalf("expected streamed progress")
 	}
 
 	if _, err := srv.DestroySession(ctx, &api.DestroySessionRequest{SessionID: "s1"}); err != nil {
@@ -90,6 +103,7 @@ func TestSandboxServerSessionCRUDAndTool(t *testing.T) {
 func TestSandboxServerExecuteToolIdempotency(t *testing.T) {
 	host, _ := newHostForRPC(t)
 	srv := NewSandboxServer(host)
+	t.Cleanup(func() { _ = srv.Close() })
 	ctx := context.Background()
 	_, _ = srv.CreateSession(ctx, &api.CreateSessionRequest{SessionID: "s1", BaseSnapshot: "tank/bases/repo@initial"})
 
@@ -103,5 +117,38 @@ func TestSandboxServerExecuteToolIdempotency(t *testing.T) {
 	}
 	if first.Content != second.Content || first.ToolCallID != second.ToolCallID {
 		t.Fatalf("idempotent mismatch: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestSandboxServerMapsErrors(t *testing.T) {
+	host, _ := newHostForRPC(t)
+	srv := NewSandboxServer(host)
+	t.Cleanup(func() { _ = srv.Close() })
+	_, err := srv.GetSession(context.Background(), &api.GetSessionRequest{SessionID: "missing"})
+	var rpcErr *rpc.RPCError
+	if !errors.As(err, &rpcErr) {
+		t.Fatalf("expected rpc error, got %T", err)
+	}
+	if rpcErr.Code != rpc.CodeNotFound {
+		t.Fatalf("code = %s, want %s", rpcErr.Code, rpc.CodeNotFound)
+	}
+}
+
+func TestSandboxServerIdempotencySweepEvictsExpired(t *testing.T) {
+	host, _ := newHostForRPC(t)
+	srv := NewSandboxServer(host)
+	t.Cleanup(func() { _ = srv.Close() })
+	srv.mu.Lock()
+	srv.idempotency["s1:tc1"] = idempotencyEntry{
+		response: &api.ExecuteToolResponse{ToolCallID: "tc1"},
+		expires:  time.Now().Add(-time.Second),
+	}
+	srv.mu.Unlock()
+	srv.evictExpired()
+	srv.mu.Lock()
+	size := len(srv.idempotency)
+	srv.mu.Unlock()
+	if size != 0 {
+		t.Fatalf("expected idempotency cache to be empty after sweep, size=%d", size)
 	}
 }

@@ -5,6 +5,7 @@ import "context"
 type ctxKey string
 
 const apiVersionHeader = "x-api-version"
+const minSupportedAPIVersion = "v1"
 
 const (
 	ctxKeyAPIVersion ctxKey = "rpc_api_version"
@@ -26,4 +27,10 @@ func APIVersionFromContext(ctx context.Context) string {
 
 func APIVersionHeaderName() string {
 	return apiVersionHeader
+}
+
+// MinSupportedAPIVersion defines the server's minimum accepted API version.
+// Transport interceptors should enforce this once the ConnectRPC binding lands.
+func MinSupportedAPIVersion() string {
+	return minSupportedAPIVersion
 }

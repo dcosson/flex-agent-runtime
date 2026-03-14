@@ -61,6 +61,14 @@ type ContainerOptions struct {
 	// If nil, stdin is /dev/null.
 	Stdin io.Reader
 
+	// StdoutWriter receives stdout chunks while the command is running.
+	// Optional; captured output is still returned in ContainerResult.Stdout.
+	StdoutWriter io.Writer
+
+	// StderrWriter receives stderr chunks while the command is running.
+	// Optional; captured output is still returned in ContainerResult.Stderr.
+	StderrWriter io.Writer
+
 	// User specifies the UID:GID to run the process as inside the container.
 	// Default: 0:0 (root).
 	User *UserSpec

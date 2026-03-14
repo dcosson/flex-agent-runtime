@@ -14,10 +14,29 @@ type bufferedExecuteToolStream struct {
 	closed bool
 }
 
+type chanExecuteToolStream struct {
+	ch     <-chan *ExecuteToolStreamMessage
+	errCh  <-chan error
+	close  func() error
+	closed bool
+	mu     sync.Mutex
+}
+
 func NewExecuteToolStream(messages ...*ExecuteToolStreamMessage) ExecuteToolStreamReceiver {
 	cp := make([]*ExecuteToolStreamMessage, 0, len(messages))
 	cp = append(cp, messages...)
 	return &bufferedExecuteToolStream{msgs: cp}
+}
+
+func NewExecuteToolStreamChannel(ch <-chan *ExecuteToolStreamMessage, closeFn func() error) ExecuteToolStreamReceiver {
+	return NewExecuteToolStreamChannelWithErr(ch, nil, closeFn)
+}
+
+func NewExecuteToolStreamChannelWithErr(ch <-chan *ExecuteToolStreamMessage, errCh <-chan error, closeFn func() error) ExecuteToolStreamReceiver {
+	if closeFn == nil {
+		closeFn = func() error { return nil }
+	}
+	return &chanExecuteToolStream{ch: ch, errCh: errCh, close: closeFn}
 }
 
 func (s *bufferedExecuteToolStream) Recv() (*ExecuteToolStreamMessage, error) {
@@ -39,6 +58,39 @@ func (s *bufferedExecuteToolStream) Close() error {
 	defer s.mu.Unlock()
 	s.closed = true
 	return nil
+}
+
+func (s *chanExecuteToolStream) Recv() (*ExecuteToolStreamMessage, error) {
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return nil, ErrStreamClosed
+	}
+	msg, ok := <-s.ch
+	if !ok {
+		if s.errCh != nil {
+			select {
+			case err := <-s.errCh:
+				if err != nil {
+					return nil, err
+				}
+			default:
+			}
+		}
+		return nil, io.EOF
+	}
+	return msg, nil
+}
+
+func (s *chanExecuteToolStream) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	return s.close()
 }
 
 type chanEventReceiver struct {

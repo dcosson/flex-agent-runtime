@@ -14,9 +14,9 @@ func DefaultRetryPolicy() RetryPolicy {
 
 func IsRetryableMethod(method string) bool {
 	switch method {
-	case "GetSession", "ListSnapshots", "RollbackSession", "DestroySession":
+	case "GetSession", "ListSnapshots", "RollbackSession", "DestroySession", "ExecuteTool":
 		return true
-	case "ExecuteTool", "CreateSession", "PauseSession", "ResumeSession", "CreateSnapshot", "TurnComplete":
+	case "CreateSession", "PauseSession", "ResumeSession", "CreateSnapshot", "TurnComplete":
 		return false
 	default:
 		return false

@@ -89,14 +89,15 @@ type ExecuteToolRequest struct {
 }
 
 type ExecuteToolResponse struct {
-	SessionID  string
-	ToolCallID string
-	ToolName   string
-	Content    string
-	SnapshotID string
-	ExitCode   *int
-	Tier       int
-	Duration   time.Duration
+	SessionID     string
+	ToolCallID    string
+	ToolName      string
+	Content       string
+	ContentBlocks []ContentBlock
+	SnapshotID    string
+	ExitCode      *int
+	Tier          int
+	Duration      time.Duration
 }
 
 type ToolProgress struct {
@@ -110,8 +111,23 @@ type ExecuteToolStreamMessage struct {
 }
 
 type ResourceSpec struct {
-	CPUs  int
+	CPUs  float64
 	MemMB int
+}
+
+type ContentBlock struct {
+	Type              string
+	Text              string
+	TextSignature     string
+	Thinking          string
+	ThinkingSignature string
+	Redacted          bool
+	ImageData         string
+	ImageMimeType     string
+	ToolCallID        string
+	ToolCallName      string
+	ToolCallArguments map[string]any
+	ThoughtSignature  string
 }
 
 type Session struct {

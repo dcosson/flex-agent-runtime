@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"h2-agent-runtime/internal/ai"
 	"h2-agent-runtime/internal/sandbox/gvisor"
 	"h2-agent-runtime/internal/sandbox/zfs"
 )
@@ -57,14 +58,16 @@ type ExecuteToolRequest struct {
 	ToolCallID string
 	Params     map[string]any
 	Resources  *gvisor.ResourceSpec
+	OnProgress func(content string, isError bool)
 }
 
 type ExecuteToolResponse struct {
-	Content    string
-	ExitCode   *int
-	SnapshotID string
-	Duration   time.Duration
-	Tier       int
+	Content       string
+	ContentBlocks []ai.ContentBlock
+	ExitCode      *int
+	SnapshotID    string
+	Duration      time.Duration
+	Tier          int
 }
 
 type SnapshotResult struct {

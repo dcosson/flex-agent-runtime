@@ -6,6 +6,8 @@ import (
 	"io"
 	"testing"
 
+	"h2-agent-runtime/internal/ai"
+	"h2-agent-runtime/internal/rpc"
 	"h2-agent-runtime/internal/rpc/api"
 	"h2-agent-runtime/internal/tools"
 )
@@ -78,7 +80,13 @@ func TestSandboxClientExecuteToolStream(t *testing.T) {
 	exitCode := 0
 	service := &fakeSandboxService{stream: &fakeStream{msgs: []*api.ExecuteToolStreamMessage{
 		{Progress: &api.ToolProgress{Content: "partial", IsError: false}},
-		{Response: &api.ExecuteToolResponse{ToolCallID: "tc1", Content: "final", SnapshotID: "snap-1", ExitCode: &exitCode}},
+		{Response: &api.ExecuteToolResponse{
+			ToolCallID:    "tc1",
+			Content:       "final",
+			ContentBlocks: []api.ContentBlock{{Type: "text", Text: "final"}},
+			SnapshotID:    "snap-1",
+			ExitCode:      &exitCode,
+		}},
 	}}}
 	client := NewSandboxClient(service)
 
@@ -101,6 +109,13 @@ func TestSandboxClientExecuteToolStream(t *testing.T) {
 	if resp.SnapshotID != "snap-1" || resp.ExitCode == nil || *resp.ExitCode != 0 {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
+	if len(resp.Content) != 1 {
+		t.Fatalf("expected one content block, got %d", len(resp.Content))
+	}
+	text, ok := resp.Content[0].(*ai.TextContent)
+	if !ok || text.Text != "final" {
+		t.Fatalf("expected text content block, got %#v", resp.Content[0])
+	}
 }
 
 func TestSandboxClientToolCallIDMismatch(t *testing.T) {
@@ -111,5 +126,21 @@ func TestSandboxClientToolCallIDMismatch(t *testing.T) {
 	_, err := client.ExecuteTool(context.Background(), "sess-1", tools.ToolRequest{ToolCallID: "tc1", ToolName: "bash"}, nil)
 	if err == nil {
 		t.Fatalf("expected mismatch error")
+	}
+}
+
+func TestSandboxClientWrapsRPCErrorWithContext(t *testing.T) {
+	service := &fakeSandboxService{err: rpc.NewRPCError(rpc.CodeUnavailable, "host down", nil)}
+	client := NewSandboxClient(service)
+	_, err := client.ExecuteTool(context.Background(), "sess-1", tools.ToolRequest{ToolCallID: "tc1", ToolName: "bash"}, nil)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	var rpcErr *rpc.RPCError
+	if !errors.As(err, &rpcErr) {
+		t.Fatalf("expected rpc error, got %T", err)
+	}
+	if rpcErr.Details["session_id"] != "sess-1" || rpcErr.Details["tool_name"] != "bash" {
+		t.Fatalf("missing details in wrapped error: %+v", rpcErr.Details)
 	}
 }
