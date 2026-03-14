@@ -14,6 +14,7 @@ var (
 	ErrSessionExists      = errors.New("sandbox: session already exists")
 	ErrSessionPaused      = errors.New("sandbox: session is paused")
 	ErrSessionDestroying  = errors.New("sandbox: session is destroying")
+	ErrRollbackInProgress = errors.New("sandbox: rollback in progress")
 	ErrInvalidState       = errors.New("sandbox: invalid session state")
 	ErrMaxSessionsReached = errors.New("sandbox: max sessions reached")
 	ErrToolsInFlight      = errors.New("sandbox: tools in flight")

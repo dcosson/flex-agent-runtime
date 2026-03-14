@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"h2-agent-runtime/internal/sandbox/gvisor"
@@ -19,6 +20,17 @@ type SandboxHostService struct {
 	sessionsMu sync.Mutex
 	logger     *slog.Logger
 	started    time.Time
+	metrics    *serviceMetrics
+}
+
+type serviceMetrics struct {
+	sessionsCreated   atomic.Int64
+	sessionsPaused    atomic.Int64
+	sessionsResumed   atomic.Int64
+	sessionsDestroyed atomic.Int64
+	toolExecutions    atomic.Int64
+	snapshotsTaken    atomic.Int64
+	rollbacks         atomic.Int64
 }
 
 type CreateSessionRequest struct {
@@ -78,7 +90,7 @@ func NewSandboxHostService(cfg ServiceConfig, z zfs.ZFSManager, g gvisor.GVisorM
 	if cfg.SnapshotPrefix == "" {
 		cfg = mergeDefaultConfig(cfg)
 	}
-	return &SandboxHostService{config: cfg, zfs: z, gvisor: g, logger: logger, started: time.Now()}
+	return &SandboxHostService{config: cfg, zfs: z, gvisor: g, logger: logger, started: time.Now(), metrics: &serviceMetrics{}}
 }
 
 func mergeDefaultConfig(cfg ServiceConfig) ServiceConfig {
@@ -142,6 +154,18 @@ func (svc *SandboxHostService) CreateSession(ctx context.Context, req CreateSess
 		svc.sessions.Delete(sessionID)
 		return nil, fmt.Errorf("clone base snapshot: %w", err)
 	}
+
+	quota := req.Quota
+	if quota == 0 {
+		quota = svc.config.DefaultSessionQuota
+	}
+	if quota > 0 {
+		if err := svc.zfs.SetProperty(ctx, dataset, "quota", fmt.Sprintf("%d", quota)); err != nil {
+			_ = svc.zfs.DestroyDataset(ctx, dataset, zfs.DestroyOptions{Recursive: true, Force: true})
+			svc.sessions.Delete(sessionID)
+			return nil, fmt.Errorf("set quota: %w", err)
+		}
+	}
 	mountpoint, err := svc.zfs.GetMountpoint(ctx, dataset)
 	if err != nil {
 		_ = svc.zfs.DestroyDataset(ctx, dataset, zfs.DestroyOptions{Recursive: true, Force: true})
@@ -158,6 +182,7 @@ func (svc *SandboxHostService) CreateSession(ctx context.Context, req CreateSess
 		labels:     copyLabels(req.Labels),
 	}
 	svc.sessions.Store(sessionID, sess)
+	svc.metrics.sessionsCreated.Add(1)
 	info := sess.Info()
 	return &info, nil
 }
@@ -219,7 +244,7 @@ func (svc *SandboxHostService) getActiveSession(sessionID string) (*Session, err
 }
 
 func (svc *SandboxHostService) PauseSession(ctx context.Context, sessionID string) error {
-	sess, err := svc.getSession(sessionID)
+	sess, err := svc.getActiveSession(sessionID)
 	if err != nil {
 		return err
 	}
@@ -244,6 +269,7 @@ func (svc *SandboxHostService) PauseSession(ctx context.Context, sessionID strin
 		return fmt.Errorf("%w: session is %s, not active", ErrInvalidState, sess.state)
 	}
 	sess.state = SessionPaused
+	svc.metrics.sessionsPaused.Add(1)
 	return nil
 }
 
@@ -258,6 +284,7 @@ func (svc *SandboxHostService) ResumeSession(_ context.Context, sessionID string
 		return fmt.Errorf("%w: session is %s, not paused", ErrInvalidState, sess.state)
 	}
 	sess.state = SessionActive
+	svc.metrics.sessionsResumed.Add(1)
 	return nil
 }
 
@@ -289,6 +316,7 @@ func (svc *SandboxHostService) DestroySession(ctx context.Context, sessionID str
 destroy:
 	_ = svc.zfs.DestroyDataset(ctx, sess.dataset, zfs.DestroyOptions{Recursive: true, Force: true})
 	svc.sessions.Delete(sessionID)
+	svc.metrics.sessionsDestroyed.Add(1)
 	return nil
 }
 
@@ -315,11 +343,24 @@ func (svc *SandboxHostService) ListSessions(_ context.Context) ([]SessionInfo, e
 func (svc *SandboxHostService) HealthCheck(ctx context.Context) (*HealthStatus, error) {
 	ps, err := svc.zfs.PoolSpace(ctx, svc.config.PoolName)
 	if err != nil {
-		return nil, err
+		return &HealthStatus{
+			Status:       "unhealthy",
+			SessionCount: svc.sessionCount(),
+			ActiveTools:  svc.totalActiveTools(),
+			Uptime:       time.Since(svc.started),
+			Errors:       []string{err.Error()},
+		}, nil
 	}
 	st, err := svc.zfs.PoolStatus(ctx, svc.config.PoolName)
 	if err != nil {
-		return nil, err
+		return &HealthStatus{
+			Status:       "unhealthy",
+			PoolSpace:    *ps,
+			SessionCount: svc.sessionCount(),
+			ActiveTools:  svc.totalActiveTools(),
+			Uptime:       time.Since(svc.started),
+			Errors:       []string{err.Error()},
+		}, nil
 	}
 	status := "healthy"
 	if ps.Capacity >= svc.config.PoolSpaceCritThreshold || st.State == zfs.PoolFaulted {
@@ -335,6 +376,37 @@ func (svc *SandboxHostService) HealthCheck(ctx context.Context) (*HealthStatus, 
 		ActiveTools:  svc.totalActiveTools(),
 		Uptime:       time.Since(svc.started),
 	}, nil
+}
+
+func (svc *SandboxHostService) Start(ctx context.Context) {
+	interval := svc.config.HealthCheckInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				health, err := svc.HealthCheck(ctx)
+				if err != nil {
+					svc.logger.WarnContext(ctx, "health check failed", "error", err)
+					continue
+				}
+				if health.Status != "healthy" {
+					svc.logger.WarnContext(ctx, "sandbox health degraded",
+						"status", health.Status,
+						"pool_state", health.PoolState,
+						"capacity", health.PoolSpace.Capacity,
+						"errors", health.Errors,
+					)
+				}
+			}
+		}
+	}()
 }
 
 func (svc *SandboxHostService) totalActiveTools() int {

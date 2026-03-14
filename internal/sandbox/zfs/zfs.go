@@ -15,6 +15,7 @@ type ZFSManager interface {
 	DestroyDataset(ctx context.Context, name string, opts DestroyOptions) error
 	GetMountpoint(ctx context.Context, dataset string) (string, error)
 	SetMountpoint(ctx context.Context, dataset, mountpoint string) error
+	SetProperty(ctx context.Context, dataset, property, value string) error
 	GetDatasetInfo(ctx context.Context, name string) (*DatasetInfo, error)
 	ListDatasets(ctx context.Context, parent string) ([]DatasetInfo, error)
 	DatasetExists(ctx context.Context, name string) (bool, error)

@@ -2,14 +2,17 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"h2-agent-runtime/internal/ai"
 	"h2-agent-runtime/internal/sandbox/gvisor"
 	"h2-agent-runtime/internal/sandbox/zfs"
 )
@@ -97,6 +100,23 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 	if _, err := svc.GetSession(ctx, "s1"); !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("expected ErrSessionNotFound, got %v", err)
+	}
+}
+
+func TestCreateSessionQuotaApplied(t *testing.T) {
+	svc, zm, _ := newServiceForTest(t)
+	base := seedBase(t, zm)
+	ctx := context.Background()
+	_, err := svc.CreateSession(ctx, CreateSessionRequest{BaseSnapshot: base, SessionID: "s1", Quota: 4096})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := zm.GetDatasetInfo(ctx, "tank/sessions/s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Available != 4096 {
+		t.Fatalf("quota not applied: available=%d", info.Available)
 	}
 }
 
@@ -198,6 +218,108 @@ func TestTurnCompleteProspectivePatternAndRollbackGuard(t *testing.T) {
 	info, _ := svc.GetSession(ctx, "s1")
 	if info.TurnCount != 1 {
 		t.Fatalf("turnCount = %d, want 1", info.TurnCount)
+	}
+}
+
+func TestRollbackFailureMarksSessionFailed(t *testing.T) {
+	svc, zm, _ := newServiceForTest(t)
+	base := seedBase(t, zm)
+	ctx := context.Background()
+	_, err := svc.CreateSession(ctx, CreateSessionRequest{BaseSnapshot: base, SessionID: "s1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = svc.TurnComplete(ctx, "s1")
+	zm.SetError("Rollback", errors.New("boom"))
+	if err := svc.RollbackSession(ctx, "s1", "turn-0001"); err == nil {
+		t.Fatalf("expected rollback error")
+	}
+	info, err := svc.GetSession(ctx, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.State != SessionFailed {
+		t.Fatalf("expected failed state, got %s", info.State)
+	}
+}
+
+func TestExecuteToolRollbackInProgress(t *testing.T) {
+	svc, zm, _ := newServiceForTest(t)
+	base := seedBase(t, zm)
+	ctx := context.Background()
+	_, err := svc.CreateSession(ctx, CreateSessionRequest{BaseSnapshot: base, SessionID: "s1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := svc.getSession("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.rollingBack = true
+	s.mu.Unlock()
+	_, err = svc.ExecuteTool(ctx, ExecuteToolRequest{SessionID: "s1", ToolName: "bash", Params: map[string]any{"cmd": "echo x"}})
+	if !errors.Is(err, ErrRollbackInProgress) {
+		t.Fatalf("expected ErrRollbackInProgress, got %v", err)
+	}
+}
+
+func TestHealthCheckReturnsUnhealthyStatusOnPoolErrors(t *testing.T) {
+	svc, zm, _ := newServiceForTest(t)
+	ctx := context.Background()
+	zm.SetError("PoolSpace", errors.New("pool unavailable"))
+	health, err := svc.HealthCheck(ctx)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if health.Status != "unhealthy" || len(health.Errors) == 0 {
+		t.Fatalf("unexpected health response: %+v", health)
+	}
+}
+
+func TestValidatePathBlocksEscapes(t *testing.T) {
+	root := t.TempDir()
+	if err := validatePath(root, "../escape"); err == nil {
+		t.Fatalf("expected traversal error")
+	}
+	if err := validatePath(root, "ok/file.txt"); err != nil {
+		t.Fatalf("expected valid relative path, got %v", err)
+	}
+	if err := validatePath(root, filepath.Join(root, "sub", "file.txt")); err != nil {
+		t.Fatalf("expected valid absolute path in root, got %v", err)
+	}
+	if err := validatePath(root, "/tmp/outside-root"); err == nil {
+		t.Fatalf("expected absolute outside path to fail")
+	}
+}
+
+func TestBlocksToTextIncludesNonTextContent(t *testing.T) {
+	out := blocksToText([]ai.ContentBlock{
+		&ai.TextContent{Text: "hello"},
+		&ai.ThinkingContent{Thinking: "thinking"},
+		&ai.ToolCall{Name: "grep", Arguments: map[string]any{"path": "x"}},
+		&ai.ImageContent{MimeType: "image/png", Data: "abc"},
+	})
+	if out == "" {
+		t.Fatalf("expected non-empty output")
+	}
+	if !strings.Contains(out, "hello") || !strings.Contains(out, "thinking") || !strings.Contains(out, "tool_call:grep") || !strings.Contains(out, "image:image/png") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	// Ensure JSON encoding of tool args is valid content.
+	lines := strings.Split(out, "\n")
+	for _, ln := range lines {
+		if !strings.HasPrefix(ln, "tool_call:") {
+			continue
+		}
+		idx := strings.IndexByte(ln, ' ')
+		if idx <= 0 || idx+1 >= len(ln) {
+			t.Fatalf("unexpected tool_call format: %q", ln)
+		}
+		var tmp map[string]any
+		if err := json.Unmarshal([]byte(ln[idx+1:]), &tmp); err != nil {
+			t.Fatalf("tool_call args not valid json: %v", err)
+		}
 	}
 }
 

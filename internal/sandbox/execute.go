@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -13,23 +14,19 @@ import (
 )
 
 func (svc *SandboxHostService) ExecuteTool(ctx context.Context, req ExecuteToolRequest) (*ExecuteToolResponse, error) {
-	sess, err := svc.getSession(req.SessionID)
+	sess, err := svc.getActiveSession(req.SessionID)
 	if err != nil {
 		return nil, err
 	}
 
 	sess.mu.Lock()
-	if sess.state == SessionPaused {
-		sess.mu.Unlock()
-		return nil, ErrSessionPaused
-	}
 	if sess.state != SessionActive {
 		sess.mu.Unlock()
 		return nil, fmt.Errorf("%w: session is %s", ErrInvalidState, sess.state)
 	}
 	if sess.rollingBack {
 		sess.mu.Unlock()
-		return nil, ErrToolsInFlight
+		return nil, ErrRollbackInProgress
 	}
 	sess.activeTools.Add(1)
 	mountpoint := sess.mountpoint
@@ -56,6 +53,7 @@ func (svc *SandboxHostService) ExecuteTool(ctx context.Context, req ExecuteToolR
 	if err != nil {
 		return nil, err
 	}
+	svc.metrics.toolExecutions.Add(1)
 	resp.Duration = time.Since(start)
 	resp.Tier = int(tier)
 
@@ -190,6 +188,17 @@ func blocksToText(blocks []ai.ContentBlock) string {
 			if b.Text != "" {
 				parts = append(parts, b.Text)
 			}
+		case *ai.ThinkingContent:
+			if b.Thinking != "" {
+				parts = append(parts, b.Thinking)
+			}
+		case *ai.ToolCall:
+			encoded, _ := json.Marshal(b.Arguments)
+			parts = append(parts, fmt.Sprintf("tool_call:%s %s", b.Name, string(encoded)))
+		case *ai.ImageContent:
+			parts = append(parts, fmt.Sprintf("image:%s bytes=%d", b.MimeType, len(b.Data)))
+		default:
+			parts = append(parts, fmt.Sprintf("%T", b))
 		}
 	}
 	return strings.Join(parts, "\n")

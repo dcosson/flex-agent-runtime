@@ -32,6 +32,7 @@ func (svc *SandboxHostService) TurnComplete(ctx context.Context, sessionID strin
 	sess.turnCount = prospectiveTurn
 	sess.snapshots = append(sess.snapshots, SnapshotEntry{Name: snapName, IsTurnSnapshot: true})
 	sess.mu.Unlock()
+	svc.metrics.snapshotsTaken.Add(1)
 
 	if svc.config.MaxSnapshotsPerSession > 0 {
 		svc.cleanupOldSnapshots(ctx, sess)
@@ -83,6 +84,7 @@ func (svc *SandboxHostService) RollbackSession(ctx context.Context, sessionID st
 	defer sess.mu.Unlock()
 	sess.rollingBack = false
 	if rollbackErr != nil {
+		sess.state = SessionFailed
 		return fmt.Errorf("rollback to %s: %w", snapshotID, rollbackErr)
 	}
 	targetIdx := -1
@@ -102,6 +104,7 @@ func (svc *SandboxHostService) RollbackSession(ctx context.Context, sessionID st
 		}
 		sess.turnCount = turnCount
 	}
+	svc.metrics.rollbacks.Add(1)
 	return nil
 }
 

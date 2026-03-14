@@ -184,6 +184,34 @@ func (m *MockManager) SetMountpoint(_ context.Context, dataset, mountpoint strin
 	return nil
 }
 
+func (m *MockManager) SetProperty(_ context.Context, dataset, property, value string) error {
+	if err := m.injected("SetProperty"); err != nil {
+		return err
+	}
+	if err := ValidateName(dataset); err != nil {
+		return err
+	}
+	if err := ValidatePropertyName(property); err != nil {
+		return err
+	}
+	if strings.ContainsAny(value, "\n\r") {
+		return fmt.Errorf("%w: property value contains newline", ErrInvalidName)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ds, ok := m.datasets[dataset]
+	if !ok {
+		return errors.Join(ErrNotFound, ErrDatasetNotFound)
+	}
+	if ds.info.Available == 0 && property == "quota" {
+		quota, err := parseSize(value)
+		if err == nil {
+			ds.info.Available = quota
+		}
+	}
+	return nil
+}
+
 func (m *MockManager) GetDatasetInfo(_ context.Context, name string) (*DatasetInfo, error) {
 	if err := m.injected("GetDatasetInfo"); err != nil {
 		return nil, err
