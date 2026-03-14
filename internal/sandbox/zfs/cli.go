@@ -18,9 +18,8 @@ const (
 	transferCommandTimeout = 10 * time.Minute
 )
 
-var errNotImplemented = fmt.Errorf("zfs: operation not implemented")
-
 type commandRunner func(ctx context.Context, binary string, args ...string) ([]byte, []byte, int, error)
+type streamRunner func(ctx context.Context, binary string, args []string, stdin io.Reader, stdout io.Writer) ([]byte, int, error)
 
 // CLIManager implements ZFSManager by shelling out to zfs/zpool commands.
 type CLIManager struct {
@@ -34,7 +33,8 @@ type CLIManager struct {
 	metadataTimeout time.Duration
 	transferTimeout time.Duration
 
-	run commandRunner
+	run       commandRunner
+	runStream streamRunner
 }
 
 type CLIOption func(*CLIManager)
@@ -96,6 +96,7 @@ func NewCLIManager(opts ...CLIOption) (*CLIManager, error) {
 		metadataTimeout: metadataCommandTimeout,
 		transferTimeout: transferCommandTimeout,
 		run:             defaultRunner,
+		runStream:       defaultStreamRunner,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -122,6 +123,24 @@ func defaultRunner(ctx context.Context, binary string, args ...string) ([]byte, 
 	return stdout.Bytes(), stderr.Bytes(), exitCode, err
 }
 
+func defaultStreamRunner(ctx context.Context, binary string, args []string, stdin io.Reader, stdout io.Writer) ([]byte, int, error) {
+	cmd := exec.CommandContext(ctx, binary, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if stdin != nil {
+		cmd.Stdin = stdin
+	}
+	if stdout != nil {
+		cmd.Stdout = stdout
+	}
+	err := cmd.Run()
+	exitCode := 0
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+	}
+	return stderr.Bytes(), exitCode, err
+}
+
 func (m *CLIManager) timeoutFor(op string) time.Duration {
 	switch op {
 	case "EstimateSendSize", "Send", "Receive":
@@ -129,6 +148,13 @@ func (m *CLIManager) timeoutFor(op string) time.Duration {
 	default:
 		return m.metadataTimeout
 	}
+}
+
+func (m *CLIManager) command(binary string, args []string) (string, []string) {
+	if m.sudo {
+		return "sudo", append([]string{binary}, args...)
+	}
+	return binary, args
 }
 
 func (m *CLIManager) exec(ctx context.Context, op string, args ...string) ([]byte, error) {
@@ -141,10 +167,7 @@ func (m *CLIManager) exec(ctx context.Context, op string, args ...string) ([]byt
 		binary = m.zpoolPath
 		cmdArgs = args[1:]
 	}
-	if m.sudo {
-		cmdArgs = append([]string{binary}, cmdArgs...)
-		binary = "sudo"
-	}
+	binary, cmdArgs = m.command(binary, cmdArgs)
 
 	execCtx := ctx
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
@@ -166,7 +189,10 @@ func (m *CLIManager) exec(ctx context.Context, op string, args ...string) ([]byt
 		"stderr", stderrStr,
 	)
 	if err != nil {
-		wrapped := classifyError(stderrStr, exitCode)
+		wrapped := classifyError(op, stderrStr, exitCode)
+		if wrapped == nil {
+			return stdout, nil
+		}
 		if ctxErr := execCtx.Err(); ctxErr != nil {
 			wrapped = ctxErr
 		}
@@ -179,6 +205,56 @@ func (m *CLIManager) exec(ctx context.Context, op string, args ...string) ([]byt
 		}
 	}
 	return stdout, nil
+}
+
+func (m *CLIManager) execStream(ctx context.Context, op string, args []string, stdin io.Reader, stdout io.Writer) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, &ZFSError{Op: op, Err: fmt.Errorf("missing command args")}
+	}
+	binary := m.zfsPath
+	cmdArgs := args
+	if args[0] == "zpool" {
+		binary = m.zpoolPath
+		cmdArgs = args[1:]
+	}
+	binary, cmdArgs = m.command(binary, cmdArgs)
+
+	execCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		execCtx, cancel = context.WithTimeout(ctx, m.timeoutFor(op))
+		defer cancel()
+	}
+
+	start := time.Now()
+	stderr, exitCode, err := m.runStream(execCtx, binary, cmdArgs, stdin, stdout)
+	dur := time.Since(start)
+	stderrStr := strings.TrimSpace(string(stderr))
+	m.logger.DebugContext(execCtx, "zfs stream command",
+		"op", op,
+		"binary", binary,
+		"args", strings.Join(cmdArgs, " "),
+		"duration", dur,
+		"exit_code", exitCode,
+		"stderr", stderrStr,
+	)
+	if err != nil {
+		wrapped := classifyError(op, stderrStr, exitCode)
+		if wrapped == nil {
+			return stderr, nil
+		}
+		if ctxErr := execCtx.Err(); ctxErr != nil {
+			wrapped = ctxErr
+		}
+		return stderr, &ZFSError{
+			Op:       op,
+			Command:  binary + " " + strings.Join(cmdArgs, " "),
+			ExitCode: exitCode,
+			Stderr:   stderrStr,
+			Err:      wrapped,
+		}
+	}
+	return stderr, nil
 }
 
 func parseTabular(output []byte, expectedCols int) ([][]string, error) {
@@ -216,58 +292,70 @@ func parseTimestamp(s string) (time.Time, error) {
 	return time.Unix(v, 0).UTC(), nil
 }
 
-func (m *CLIManager) CreateSnapshot(context.Context, string, string) (*SnapshotInfo, error) {
-	return nil, errNotImplemented
+func parseRatio(s string) (float64, error) {
+	raw := strings.TrimSpace(strings.TrimSuffix(s, "%"))
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse ratio %q: %w", s, err)
+	}
+	// zpool list -p emits integer percentages (0..100).
+	return v / 100, nil
 }
 
-func (m *CLIManager) Rollback(context.Context, string, string, RollbackOptions) error {
-	return errNotImplemented
+func parsePoolStatus(pool string, out []byte) (*PoolStatus, error) {
+	status := &PoolStatus{Name: pool}
+	for _, line := range strings.Split(string(out), "\n") {
+		trim := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trim, "state:"):
+			status.State = PoolState(strings.TrimSpace(strings.TrimPrefix(trim, "state:")))
+		case strings.HasPrefix(trim, "scan:"):
+			status.Scan = strings.TrimSpace(strings.TrimPrefix(trim, "scan:"))
+		case strings.HasPrefix(trim, "errors:"):
+			status.Errors = strings.TrimSpace(strings.TrimPrefix(trim, "errors:"))
+		}
+	}
+	if status.State == "" {
+		return nil, fmt.Errorf("pool status parse: missing state")
+	}
+	return status, nil
 }
 
-func (m *CLIManager) ListSnapshots(context.Context, string) ([]SnapshotInfo, error) {
-	return nil, errNotImplemented
-}
-
-func (m *CLIManager) DestroySnapshot(context.Context, string, string) error {
-	return errNotImplemented
-}
-
-func (m *CLIManager) HoldSnapshot(context.Context, string, string, string) error {
-	return errNotImplemented
-}
-
-func (m *CLIManager) ReleaseSnapshot(context.Context, string, string, string) error {
-	return errNotImplemented
-}
-
-func (m *CLIManager) SnapshotExists(context.Context, string, string) (bool, error) {
-	return false, errNotImplemented
-}
-
-func (m *CLIManager) PoolStatus(context.Context, string) (*PoolStatus, error) {
-	return nil, errNotImplemented
-}
-
-func (m *CLIManager) PoolSpace(context.Context, string) (*PoolSpace, error) {
-	return nil, errNotImplemented
-}
-
-func (m *CLIManager) ImportPool(context.Context, string, string) error {
-	return errNotImplemented
-}
-
-func (m *CLIManager) ExportPool(context.Context, string) error {
-	return errNotImplemented
-}
-
-func (m *CLIManager) EstimateSendSize(context.Context, string, SendOptions) (int64, error) {
-	return 0, errNotImplemented
-}
-
-func (m *CLIManager) Send(context.Context, string, SendOptions, io.Writer) error {
-	return errNotImplemented
-}
-
-func (m *CLIManager) Receive(context.Context, string, io.Reader) error {
-	return errNotImplemented
+func parsePoolSpace(out []byte) (*PoolSpace, error) {
+	rows, err := parseTabular(out, 6)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) != 1 {
+		return nil, fmt.Errorf("expected exactly one pool row, got %d", len(rows))
+	}
+	row := rows[0]
+	sz, err := parseSize(row[1])
+	if err != nil {
+		return nil, err
+	}
+	alloc, err := parseSize(row[2])
+	if err != nil {
+		return nil, err
+	}
+	free, err := parseSize(row[3])
+	if err != nil {
+		return nil, err
+	}
+	capRatio, err := parseRatio(row[4])
+	if err != nil {
+		return nil, err
+	}
+	fragRatio, err := parseRatio(row[5])
+	if err != nil {
+		return nil, err
+	}
+	return &PoolSpace{
+		Pool:          row[0],
+		Size:          sz,
+		Allocated:     alloc,
+		Free:          free,
+		Capacity:      capRatio,
+		Fragmentation: fragRatio,
+	}, nil
 }
