@@ -304,6 +304,9 @@ func TestF5_EventStreamInterruption(t *testing.T) {
 // F6. Connection reset during ExecuteTool response transfer
 func TestF6_ConnectionResetDuringResponseTransfer(t *testing.T) {
 	requireTier(t, "nightly", "weekly")
+	// Note: this currently uses application-level chaos injection (failing stream)
+	// to validate typed error handling. A toxiproxy-backed network fault lane can
+	// be layered in when a real remote host lane is available.
 	base, sessionID := newTestMemoryService(t)
 	chaos := &chaosSandboxService{base: base, streamErrAfterProgress: rpc.NewRPCError(rpc.CodeUnavailable, "connection reset by peer", nil)}
 	client := apiToolClient{svc: chaos}
@@ -320,6 +323,8 @@ func TestF6_ConnectionResetDuringResponseTransfer(t *testing.T) {
 // F7. TLS certificate rotation/expiry during active session
 func TestF7_TLSCertificateRotationExpiry(t *testing.T) {
 	requireTier(t, "nightly", "weekly")
+	// Note: this currently injects TLS-style failures at the RPC boundary rather
+	// than via live certificate rotation behind a TCP proxy.
 	base, sessionID := newTestMemoryService(t)
 	chaos := &chaosSandboxService{base: base, failStreamOnce: rpc.NewRPCError(rpc.CodeUnavailable, "tls: bad certificate", nil)}
 	client := apiToolClient{svc: chaos}
@@ -336,6 +341,9 @@ func TestF7_TLSCertificateRotationExpiry(t *testing.T) {
 // F8. Network partition between request send and response receive
 func TestF8_NetworkPartitionBetweenSendAndReceive(t *testing.T) {
 	requireTier(t, "nightly", "weekly")
+	// Note: this currently validates timeout/propagation semantics with
+	// application-level stream interruption; network-layer partition injection
+	// (toxiproxy) is a follow-up for real-host lanes.
 	base, sessionID := newTestMemoryService(t)
 	chaos := &chaosSandboxService{base: base, streamErrAfterProgress: rpc.NewRPCError(rpc.CodeDeadlineExceeded, "network partition timeout", context.DeadlineExceeded)}
 	client := apiToolClient{svc: chaos}
@@ -359,12 +367,14 @@ func TestO1_Mode1VsMode3SemanticParityOracle(t *testing.T) {
 		{ToolCallID: "o1-l3", ToolName: "read_file", Params: map[string]any{"path": "state.txt"}},
 	}
 	localOut := make([]string, 0, len(localSeq))
+	localExit := make([]*int, 0, len(localSeq))
 	for _, req := range localSeq {
 		resp, err := local.ExecuteTool(context.Background(), req, nil)
 		if err != nil {
 			t.Fatalf("local execute %s: %v", req.ToolName, err)
 		}
 		localOut = append(localOut, firstText(resp.Content))
+		localExit = append(localExit, cloneExitCode(resp.ExitCode))
 	}
 
 	svc, sessionID := newTestMemoryService(t)
@@ -375,19 +385,32 @@ func TestO1_Mode1VsMode3SemanticParityOracle(t *testing.T) {
 		{ToolCallID: "o1-r3", ToolName: "read_file", Params: map[string]any{"path": "state.txt"}},
 	}
 	remoteOut := make([]string, 0, len(remoteSeq))
+	remoteExit := make([]*int, 0, len(remoteSeq))
 	for _, req := range remoteSeq {
 		resp, err := remoteClient.ExecuteTool(context.Background(), sessionID, req, nil)
 		if err != nil {
 			t.Fatalf("remote execute %s: %v", req.ToolName, err)
 		}
 		remoteOut = append(remoteOut, firstText(resp.Content))
+		remoteExit = append(remoteExit, cloneExitCode(resp.ExitCode))
 	}
 
 	if !strings.Contains(localOut[1], "wrote") || !strings.Contains(remoteOut[1], "wrote") {
-		t.Fatalf("write semantic mismatch local=%v remote=%v", localOut[1], remoteOut[1])
+		t.Fatalf("write semantic mismatch local=%q remote=%q", localOut[1], remoteOut[1])
 	}
-	if !strings.Contains(localOut[2], "changed") || !strings.Contains(remoteOut[2], "changed") {
-		t.Fatalf("final content semantic mismatch local=%v remote=%v", localOut[2], remoteOut[2])
+	if !equalExitCodes(localExit, remoteExit) {
+		t.Fatalf("exit code mismatch local=%v remote=%v", localExit, remoteExit)
+	}
+	localBytes, err := os.ReadFile(filepath.Join(root, "state.txt"))
+	if err != nil {
+		t.Fatalf("read local final file: %v", err)
+	}
+	remoteText, ok := svc.ReadSessionFile(sessionID, "state.txt")
+	if !ok {
+		t.Fatal("read remote final file: missing state.txt")
+	}
+	if string(localBytes) != remoteText {
+		t.Fatalf("byte-for-byte final file mismatch local=%q remote=%q", string(localBytes), remoteText)
 	}
 }
 
@@ -545,14 +568,14 @@ func TestST2_LongRunningMode3Soak(t *testing.T) {
 	if os.Getenv("MODE3_ENABLE_SOAK") != "1" {
 		t.Skip("set MODE3_ENABLE_SOAK=1 to run soak lane")
 	}
-	d := 12 * time.Hour
+	d := 30 * time.Minute
 	if v := strings.TrimSpace(os.Getenv("MODE3_SOAK_DURATION")); v != "" {
 		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
 			d = parsed
 		}
 	}
-	if d > 2*time.Minute {
-		t.Skipf("configured duration %s exceeds interactive runtime; run in scheduled CI", d)
+	if testing.Short() && d > 2*time.Minute {
+		t.Skipf("short mode: configured duration %s too long", d)
 	}
 	end := time.Now().Add(d)
 	svc, sid := newTestMemoryService(t)
@@ -840,4 +863,30 @@ func firstText(blocks []ai.ContentBlock) string {
 		}
 	}
 	return ""
+}
+
+func cloneExitCode(in *int) *int {
+	if in == nil {
+		return nil
+	}
+	v := *in
+	return &v
+}
+
+func equalExitCodes(a, b []*int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] == nil && b[i] == nil {
+			continue
+		}
+		if a[i] == nil || b[i] == nil {
+			return false
+		}
+		if *a[i] != *b[i] {
+			return false
+		}
+	}
+	return true
 }

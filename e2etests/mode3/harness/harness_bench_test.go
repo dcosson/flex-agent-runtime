@@ -18,6 +18,9 @@ import (
 
 // B1. End-to-end tool dispatch latency (Mode3 overhead p95 target <=10ms over local baseline).
 func BenchmarkB1_EndToEndToolDispatchLatency(b *testing.B) {
+	// Overhead comparison is most meaningful against a real remote host.
+	// With the in-memory fake service, remote can appear faster than local
+	// filesystem-backed execution, yielding a negative overhead delta.
 	root := b.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "state.txt"), []byte("base"), 0o644); err != nil {
 		b.Fatalf("seed file: %v", err)
