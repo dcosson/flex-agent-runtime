@@ -1,0 +1,9 @@
+{"ts":"2026-03-12T10:00:00.000Z","source":"otel","data":{"span":"session_started","attrs":{"session_id":"test-session-1","model":"claude-sonnet-4-20250514"}}}
+{"ts":"2026-03-12T10:00:00.100Z","source":"pty","data":"V2VsY29tZSB0byBDbGF1ZGUgQ29kZQo="}
+{"ts":"2026-03-12T10:00:00.500Z","source":"otel","data":{"span":"tool_started","attrs":{"tool_name":"read","call_id":"call-001"}}}
+{"ts":"2026-03-12T10:00:00.600Z","source":"hook","data":{"event":"tool_started","tool_name":"read","call_id":"call-001"}}
+{"ts":"2026-03-12T10:00:01.000Z","source":"otel","data":{"span":"tool_completed","attrs":{"tool_name":"read","call_id":"call-001"}}}
+{"ts":"2026-03-12T10:00:01.100Z","source":"hook","data":{"event":"tool_completed","tool_name":"read","call_id":"call-001"}}
+{"ts":"2026-03-12T10:00:02.000Z","source":"otel","data":{"span":"turn_completed","attrs":{"input_tokens":1500,"output_tokens":500,"cost_usd":0.012}}}
+{"ts":"2026-03-12T10:00:02.500Z","source":"hook","data":{"event":"idle","session_id":"test-session-1"}}
+{"ts":"2026-03-12T10:00:05.000Z","source":"otel","data":{"span":"session_ended","attrs":{"reason":"completed"}}}
