@@ -1,0 +1,62 @@
+[
+  {
+    "id": "text-embedding-3-small",
+    "name": "Text Embedding 3 Small",
+    "api": "openai-embeddings",
+    "provider": "openai",
+    "baseUrl": "https://api.openai.com/v1",
+    "maxInputTokens": 8192,
+    "defaultDims": 1536,
+    "maxDims": 1536,
+    "minDims": 256,
+    "maxBatchSize": 2048,
+    "supportsDimCtrl": true,
+    "supportsTaskType": false,
+    "cost": { "perMTok": 0.02 }
+  },
+  {
+    "id": "text-embedding-3-large",
+    "name": "Text Embedding 3 Large",
+    "api": "openai-embeddings",
+    "provider": "openai",
+    "baseUrl": "https://api.openai.com/v1",
+    "maxInputTokens": 8192,
+    "defaultDims": 3072,
+    "maxDims": 3072,
+    "minDims": 256,
+    "maxBatchSize": 2048,
+    "supportsDimCtrl": true,
+    "supportsTaskType": false,
+    "cost": { "perMTok": 0.13 }
+  },
+  {
+    "id": "gemini-embedding-001",
+    "name": "Gemini Embedding 001",
+    "api": "google-embeddings",
+    "provider": "google",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+    "maxInputTokens": 2048,
+    "defaultDims": 3072,
+    "maxDims": 3072,
+    "minDims": 128,
+    "maxBatchSize": 100,
+    "supportsDimCtrl": true,
+    "supportsTaskType": true,
+    "cost": { "perMTok": 0.0 }
+  },
+  {
+    "id": "embed-v4.0",
+    "name": "Cohere Embed v4",
+    "api": "cohere-embeddings",
+    "provider": "cohere",
+    "baseUrl": "https://api.cohere.com/v2",
+    "maxInputTokens": 512,
+    "defaultDims": 1536,
+    "maxDims": 1536,
+    "minDims": 256,
+    "maxBatchSize": 96,
+    "supportsDimCtrl": true,
+    "supportsTaskType": true,
+    "cost": { "perMTok": 0.12 }
+  }
+]
