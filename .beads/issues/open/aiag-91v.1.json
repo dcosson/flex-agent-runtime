@@ -2,7 +2,7 @@
   "id": "aiag-91v.1",
   "title": "Mode 2: DeterministicDriverSimulator, harness, 6 E2E scenarios",
   "description": "Implement Mode 2 E2E core from docs/plans/15-mode2-e2e.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: §3 (test suite structure), §4 (6 scenarios), §7 (testing strategy — DeterministicDriverSimulator)\n\nKey deliverables:\n- DeterministicDriverSimulator: replays PTY output, OTEL spans, hook events from JSON-lines format. Supports real-time and fast-forward modes.\n- TermmuxEnv harness: PTY launch/attach/detach/stop helpers\n- SandboxEnv harness: session lifecycle + workspace fixtures\n- ConfigInjection harness: credential/config directory setup\n- Event normalization assertions: three-source fusion (OTEL \u003e hooks \u003e session-log), confidence flags\n- 6 E2E scenario tests in e2etests/mode2/:\n  - S1: Driver launch with credential injection\n  - S2: Event normalization correctness (3-source fusion)\n  - S3: Attach/detach lifecycle (no event loss)\n  - S4: Pause/resume with idle snapshot\n  - S5: Config directory persistence (path stability)\n  - S6: Recovery from driver exit/crash\n- Config path scheme: \u003csandbox-data-dir\u003e/configs/\u003csession-id\u003e/ (outside ZFS, survives rollback)\n\nAC: Driver launches with creds, events normalized from mixed sources, lifecycle controls work, idle snapshots captured, config paths stable across restart, crash recovery clean.",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-91v",
@@ -29,6 +29,7 @@
     "batch=5",
     "plan-doc=15-mode2-e2e"
   ],
+  "assignee": "coder-2-sea",
   "created_at": "2026-03-14T14:15:59.92328-07:00",
-  "updated_at": "2026-03-14T14:15:59.92328-07:00"
+  "updated_at": "2026-03-14T14:18:18.336169-07:00"
 }
