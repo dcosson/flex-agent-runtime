@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -169,35 +169,65 @@ func TestP3_CostMonotonicity(t *testing.T) {
 // =============================================================================
 
 func TestP4_RegistryIsolation(t *testing.T) {
-	withIsolatedEmbeddingProviders(t)
-	withIsolatedEmbeddingModels(t)
+	t.Run("embedding_ops_dont_affect_chat", func(t *testing.T) {
+		withIsolatedEmbeddingProviders(t)
+		withIsolatedEmbeddingModels(t)
 
-	rapid.Check(t, func(rt *rapid.T) {
-		// Snapshot the chat registry state.
-		chatProvidersBefore := GetProviders()
+		rapid.Check(t, func(rt *rapid.T) {
+			chatProvidersBefore := GetProviders()
 
-		// Perform random embedding registry operations.
-		ops := rapid.IntRange(5, 30).Draw(rt, "ops")
-		for i := 0; i < ops; i++ {
-			op := rapid.IntRange(0, 3).Draw(rt, fmt.Sprintf("op-%d", i))
-			switch op {
-			case 0:
-				api := fmt.Sprintf("embed-api-%d", i)
-				RegisterEmbeddingProvider(&mockEmbeddingProvider{api: api}, "iso-test")
-			case 1:
-				_, _ = GetEmbeddingProvider(fmt.Sprintf("embed-api-%d", i%5))
-			case 2:
-				RegisterEmbeddingModel(EmbeddingModel{ID: fmt.Sprintf("em-%d", i), Provider: "p"})
-			case 3:
-				UnregisterEmbeddingProviders("iso-test")
+			ops := rapid.IntRange(5, 30).Draw(rt, "ops")
+			for i := 0; i < ops; i++ {
+				op := rapid.IntRange(0, 3).Draw(rt, fmt.Sprintf("op-%d", i))
+				switch op {
+				case 0:
+					RegisterEmbeddingProvider(&mockEmbeddingProvider{api: fmt.Sprintf("embed-api-%d", i)}, "iso-test")
+				case 1:
+					_, _ = GetEmbeddingProvider(fmt.Sprintf("embed-api-%d", i%5))
+				case 2:
+					RegisterEmbeddingModel(EmbeddingModel{ID: fmt.Sprintf("em-%d", i), Provider: "p"})
+				case 3:
+					UnregisterEmbeddingProviders("iso-test")
+				}
 			}
-		}
 
-		// Verify chat registry unchanged.
-		chatProvidersAfter := GetProviders()
-		if len(chatProvidersBefore) != len(chatProvidersAfter) {
-			rt.Fatalf("chat providers changed: %d → %d", len(chatProvidersBefore), len(chatProvidersAfter))
-		}
+			chatProvidersAfter := GetProviders()
+			if len(chatProvidersBefore) != len(chatProvidersAfter) {
+				rt.Fatalf("chat providers changed: %d → %d", len(chatProvidersBefore), len(chatProvidersAfter))
+			}
+		})
+	})
+
+	t.Run("chat_ops_dont_affect_embedding", func(t *testing.T) {
+		withIsolatedEmbeddingProviders(t)
+		withIsolatedEmbeddingModels(t)
+
+		// Seed the embedding registry with known entries.
+		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "embed-sentinel"}, "sentinel")
+		RegisterEmbeddingModel(EmbeddingModel{ID: "em-sentinel", Provider: "p"})
+
+		rapid.Check(t, func(rt *rapid.T) {
+			ops := rapid.IntRange(5, 30).Draw(rt, "ops")
+			for i := 0; i < ops; i++ {
+				op := rapid.IntRange(0, 2).Draw(rt, fmt.Sprintf("op-%d", i))
+				switch op {
+				case 0:
+					RegisterProvider(&mockProvider{api: fmt.Sprintf("chat-api-%d", i)}, "iso-test")
+				case 1:
+					_, _ = GetProvider(fmt.Sprintf("chat-api-%d", i%5))
+				case 2:
+					UnregisterProviders("iso-test")
+				}
+			}
+
+			// Embedding sentinel must still exist.
+			if _, err := GetEmbeddingProvider("embed-sentinel"); err != nil {
+				rt.Fatalf("embedding provider lost after chat ops: %v", err)
+			}
+			if _, ok := GetEmbeddingModel("em-sentinel"); !ok {
+				rt.Fatalf("embedding model lost after chat ops")
+			}
+		})
 	})
 }
 
@@ -385,50 +415,75 @@ func TestF3_MalformedResponseHandling(t *testing.T) {
 	model := EmbeddingModel{ID: "f3", API: "mock-f3", Provider: "mock", MaxBatchSize: 100}
 	RegisterEmbeddingModel(model)
 
-	cases := []struct {
-		name string
-		fn   func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error)
-	}{
-		{
-			name: "nil_response",
-			fn: func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
-				return nil, nil
-			},
-		},
-		{
-			name: "nan_values",
-			fn: func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
-				return &EmbeddingResponse{
-					Embeddings: []Embedding{{Index: 0, Values: []float32{float32(math.NaN()), 1.0, float32(math.Inf(1))}}},
-				}, nil
-			},
-		},
-		{
-			name: "negative_index",
-			fn: func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
-				return &EmbeddingResponse{
-					Embeddings: []Embedding{{Index: -1, Values: []float32{1.0}}},
-				}, nil
-			},
-		},
-	}
+	t.Run("nil_response", func(t *testing.T) {
+		ClearEmbeddingProviders()
+		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+			return nil, nil
+		}}, "src")
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ClearEmbeddingProviders()
-			RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: tc.fn}, "src")
+		resp, err := Embed(context.Background(), "f3", EmbeddingRequest{Texts: []string{"x"}})
+		// Embed() should return an error for nil provider response.
+		if err == nil {
+			t.Fatal("expected error for nil provider response")
+		}
+		if resp != nil {
+			t.Fatalf("expected nil response, got %v", resp)
+		}
+	})
 
-			// Should not panic regardless of malformed response
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						t.Fatalf("panic on malformed response: %v", r)
-					}
-				}()
-				_, _ = Embed(context.Background(), "f3", EmbeddingRequest{Texts: []string{"x"}})
+	t.Run("nan_values", func(t *testing.T) {
+		ClearEmbeddingProviders()
+		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+			return &EmbeddingResponse{
+				Embeddings: []Embedding{{Index: 0, Values: []float32{float32(math.NaN()), 1.0, float32(math.Inf(1))}}},
+			}, nil
+		}}, "src")
+
+		// Should not panic. Core layer passes through without validation (URP §11.2 deferred).
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("panic on NaN values: %v", r)
+				}
 			}()
-		})
-	}
+			resp, err := Embed(context.Background(), "f3", EmbeddingRequest{Texts: []string{"x"}})
+			// Currently passes through without error — provider response is trusted.
+			if err != nil {
+				t.Logf("NaN values returned error (acceptable): %v", err)
+				return
+			}
+			if resp == nil || len(resp.Embeddings) != 1 {
+				t.Fatalf("expected 1 embedding in passthrough, got %v", resp)
+			}
+		}()
+	})
+
+	t.Run("negative_index", func(t *testing.T) {
+		ClearEmbeddingProviders()
+		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+			return &EmbeddingResponse{
+				Embeddings: []Embedding{{Index: -1, Values: []float32{1.0}}},
+			}, nil
+		}}, "src")
+
+		// Should not panic.
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("panic on negative index: %v", r)
+				}
+			}()
+			resp, err := Embed(context.Background(), "f3", EmbeddingRequest{Texts: []string{"x"}})
+			// Currently passes through without error — provider response is trusted.
+			if err != nil {
+				t.Logf("negative index returned error (acceptable): %v", err)
+				return
+			}
+			if resp == nil || len(resp.Embeddings) != 1 {
+				t.Fatalf("expected 1 embedding in passthrough, got %v", resp)
+			}
+		}()
+	})
 }
 
 // =============================================================================
@@ -637,6 +692,10 @@ func BenchmarkB3_VectorValidation(b *testing.B) {
 }
 
 // validateEmbeddingVector checks for NaN/Inf values.
+// NOTE: This is a reference implementation for benchmarking. Production code
+// currently passes vectors through unvalidated. When URP §11.2 vector
+// validation is added to Embed()/BatchEmbed(), this benchmark will measure
+// the production code path instead.
 func validateEmbeddingVector(v []float32) (hasNaN, hasInf bool) {
 	for _, f := range v {
 		if math.IsNaN(float64(f)) {
@@ -958,7 +1017,7 @@ func TestSEC2_APIKeyHandling(t *testing.T) {
 	}
 
 	errMsg := err.Error()
-	if contains(errMsg, apiKey) {
+	if strings.Contains(errMsg, apiKey) {
 		t.Fatalf("error message contains API key: %s", errMsg)
 	}
 
@@ -972,18 +1031,6 @@ func TestSEC2_APIKeyHandling(t *testing.T) {
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(substr) > 0 && len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
 
 // =============================================================================
 // Additional: Embed() validation for dimension bounds via Embed() (not just batch)
@@ -1026,6 +1073,3 @@ func TestP2_EmbedRejectsOutOfBoundDimensions(t *testing.T) {
 		t.Fatalf("embeddings=%d want=1", len(resp.Embeddings))
 	}
 }
-
-// Suppress unused import warnings by using rand.
-var _ = rand.Int
