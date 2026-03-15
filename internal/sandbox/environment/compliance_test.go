@@ -29,6 +29,9 @@ func runEnvironmentComplianceSuite(t *testing.T, mkEnv envFactory, config enviro
 		if err := env.Create(ctx, config); err != nil {
 			t.Fatalf("Create() error: %v", err)
 		}
+		if got := env.State(); got != environment.StateActive {
+			t.Fatalf("State() after Create = %q, want %q", got, environment.StateActive)
+		}
 		resp, err := env.ExecuteTool(ctx, readReq, nil)
 		if err != nil {
 			t.Fatalf("ExecuteTool() error: %v", err)
@@ -38,6 +41,9 @@ func runEnvironmentComplianceSuite(t *testing.T, mkEnv envFactory, config enviro
 		}
 		if err := env.Destroy(ctx); err != nil {
 			t.Fatalf("Destroy() error: %v", err)
+		}
+		if got := env.State(); got == environment.StateCreating || got == environment.StateActive || got == environment.StatePaused {
+			t.Fatalf("State() after Destroy = %q, want terminal state", got)
 		}
 	})
 
@@ -58,8 +64,14 @@ func runEnvironmentComplianceSuite(t *testing.T, mkEnv envFactory, config enviro
 		if err := env.Pause(ctx); err != nil {
 			t.Fatalf("Pause() error: %v", err)
 		}
+		if got := env.State(); got != environment.StatePaused && got != environment.StateActive {
+			t.Fatalf("State() after Pause = %q, want paused/active", got)
+		}
 		if err := env.Resume(ctx); err != nil {
 			t.Fatalf("Resume() error: %v", err)
+		}
+		if got := env.State(); got != environment.StateActive {
+			t.Fatalf("State() after Resume = %q, want %q", got, environment.StateActive)
 		}
 	})
 
@@ -105,12 +117,11 @@ func runEnvironmentComplianceSuite(t *testing.T, mkEnv envFactory, config enviro
 }
 
 func TestLocalEnvironmentComplianceSuite(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "input.txt"), []byte("hello\n"), 0o644); err != nil {
-		t.Fatalf("seed file: %v", err)
-	}
-
-	factory := func(_ *testing.T) environment.ExecutionEnvironment {
+	factory := func(t *testing.T) environment.ExecutionEnvironment {
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "input.txt"), []byte("hello\n"), 0o644); err != nil {
+			t.Fatalf("seed file: %v", err)
+		}
 		return local.NewLocalEnvironment(root, slog.Default())
 	}
 	config := environment.SessionConfig{SessionID: "local-compliance"}

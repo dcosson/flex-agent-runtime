@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 
 	"h2-agent-runtime/internal/sandbox/environment"
-	"h2-agent-runtime/internal/tools"
 )
 
 // LocalEnvironment executes tools directly on the local filesystem/processes.
@@ -16,7 +15,7 @@ import (
 type LocalEnvironment struct {
 	workDir   string
 	logger    *slog.Logger
-	backend   *tools.LocalBackend
+	execute   func(context.Context, string, environment.ToolRequest, func(environment.ToolProgress)) (*environment.ToolResponse, error)
 	destroyed atomic.Bool
 }
 
@@ -24,7 +23,7 @@ func NewLocalEnvironment(workDir string, logger *slog.Logger) *LocalEnvironment 
 	return &LocalEnvironment{
 		workDir: workDir,
 		logger:  logger,
-		backend: tools.NewLocalBackend(workDir),
+		execute: executeLocalTool,
 	}
 }
 
@@ -55,7 +54,7 @@ func (e *LocalEnvironment) ExecuteTool(ctx context.Context, req environment.Tool
 	if e.destroyed.Load() {
 		return nil, environment.ErrNotActive
 	}
-	return e.backend.ExecuteTool(ctx, req, onProgress)
+	return e.execute(ctx, e.workDir, req, onProgress)
 }
 
 func (e *LocalEnvironment) State() environment.SessionState {
