@@ -2,7 +2,7 @@
   "id": "aiag-83o.1",
   "title": "ExecutionEnvironment: Interface, types, capabilities, LocalEnvironment",
   "description": "Implement ExecutionEnvironment foundation from docs/plans/11-sandbox-host-service.add01.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: §3 (interface), §4 (capabilities), §5.1 (LocalEnvironment), §3.2 (shared types)\n\nKey deliverables:\n- ExecutionEnvironment interface in internal/sandbox/environment/\n- Shared types: SessionConfig, SnapshotInfo, SessionState (6 constants), ToolRequest, ToolResponse, ToolProgress\n- Error sentinels: ErrCapabilityNotSupported, ErrSessionNotFound, ErrNotActive, ErrProviderUnavailable\n- Capabilities struct + static capability constants (Local, NativeSandbox, E2B, Daytona, Fly)\n- LocalEnvironment implementation in internal/sandbox/environment/local/:\n  - No-op lifecycle (Create/Pause/Resume succeed, Destroy marks destroyed)\n  - Direct local tool execution (port from current LocalBackend logic)\n  - State tracking with atomic.Bool for destroyed\n  - Capabilities() returns LocalCapabilities\n- Unit tests for LocalEnvironment (lifecycle, tool execution, destroyed state, capabilities)\n- Contract compliance tests that any ExecutionEnvironment must pass\n\nAC: Interface compiles, LocalEnvironment passes contract compliance suite, existing LocalBackend functionality preserved.",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-83o",
@@ -29,6 +29,7 @@
     "batch=4b",
     "plan-doc=11-sandbox-host-service.add01"
   ],
+  "assignee": "coder-1-sea",
   "created_at": "2026-03-15T06:38:08.334378-07:00",
-  "updated_at": "2026-03-15T06:38:08.334378-07:00"
+  "updated_at": "2026-03-15T06:38:52.735238-07:00"
 }
