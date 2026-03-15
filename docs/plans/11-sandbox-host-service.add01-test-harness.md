@@ -78,9 +78,9 @@ Property: forall provider SandboxProvider, ops []Operation:
     assert caps1 == caps2
 ```
 
-### P5. LocalSandboxProvider Parity
+### P5. NativeSandboxProvider Parity
 
-**Invariant:** For any tool request, `LocalSandboxProvider.ExecuteTool()` produces the same `ToolResponse` as the old `SandboxClient.ExecuteTool()` path (modulo timing/metadata fields).
+**Invariant:** For any tool request, `NativeSandboxProvider.ExecuteTool()` produces the same `ToolResponse` as the old `SandboxClient.ExecuteTool()` path (modulo timing/metadata fields).
 
 ```
 Property: forall req ToolRequest:
@@ -131,7 +131,7 @@ During `ExecuteTool`:
 
 ### F4. Local Provider RPC Failure
 
-For `LocalSandboxProvider`, inject ConnectRPC transport failures:
+For `NativeSandboxProvider`, inject ConnectRPC transport failures:
 
 - **Server unavailable** → `ErrProviderUnavailable`
 - **Stream interrupted mid-progress** → partial progress delivered, final error returned
@@ -277,7 +277,7 @@ func RunProviderComplianceSuite(t *testing.T, p provider.SandboxProvider, backen
 }
 ```
 
-Run against: `LocalSandboxProvider` (with `MemorySandboxService`), `E2BSandboxProvider` (with HTTP mock), `DaytonaSandboxProvider` (with HTTP mock), `FlyMachineSandboxProvider` (with HTTP + SSH mock).
+Run against: `NativeSandboxProvider` (with `MemorySandboxService`), `E2BSandboxProvider` (with HTTP mock), `DaytonaSandboxProvider` (with HTTP mock), `FlyMachineSandboxProvider` (with HTTP + SSH mock).
 
 ### C2. SandboxBackend + Provider Integration Contract
 
@@ -322,9 +322,9 @@ func BenchmarkProviderSelection(b *testing.B) {
 }
 ```
 
-### B2. LocalSandboxProvider Overhead vs Direct SandboxClient
+### B2. NativeSandboxProvider Overhead vs Direct SandboxClient
 
-Compare the latency of `LocalSandboxProvider.ExecuteTool()` vs direct `SandboxClient.ExecuteTool()` to measure the adapter overhead. The provider abstraction should add < 1us of overhead per call.
+Compare the latency of `NativeSandboxProvider.ExecuteTool()` vs direct `SandboxClient.ExecuteTool()` to measure the adapter overhead. The provider abstraction should add < 1us of overhead per call.
 
 ```go
 func BenchmarkLocalProviderOverhead(b *testing.B) {
@@ -340,7 +340,7 @@ Benchmark `Capabilities()` calls. Target: < 10ns (it returns a static struct).
 
 ### B4. Type Conversion Overhead
 
-Benchmark the type conversion between provider types and RPC API types in `LocalSandboxProvider`. Target: < 100ns per conversion.
+Benchmark the type conversion between provider types and RPC API types in `NativeSandboxProvider`. Target: < 100ns per conversion.
 
 ---
 
@@ -480,5 +480,5 @@ Verify that the agent loop sees identical behavior regardless of provider:
 5. Benchmarks confirm < 1us overhead for local provider adapter
 6. Stress tests pass with `-race` — no races in any provider
 7. E2E tests verify full lifecycle for local and mocked remote providers
-8. Backward compatibility: `LocalSandboxProvider` produces identical results to direct `SandboxClient` path
+8. Backward compatibility: `NativeSandboxProvider` produces identical results to direct `SandboxClient` path
 9. 85%+ code coverage on `internal/sandbox/provider/**` files

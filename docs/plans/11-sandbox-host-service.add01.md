@@ -16,7 +16,7 @@ The current sandbox architecture assumes a single execution model: our ZFS + gVi
 **What changes:**
 - New `SandboxProvider` interface in `internal/sandbox/provider` — the unified client-side contract
 - Capability detection system so the orchestrator knows what each provider supports
-- `LocalSandboxProvider` wraps the existing ConnectRPC path (`SandboxClient` → `SandboxHostService`)
+- `NativeSandboxProvider` wraps the existing ConnectRPC path (`SandboxClient` → `SandboxHostService`)
 - `E2BSandboxProvider`, `DaytonaSandboxProvider`, `FlyMachineSandboxProvider` implement the same interface against their respective APIs
 - `SandboxBackend` updated to accept `SandboxProvider` instead of `SandboxToolClient`
 - Per-tool snapshots become an optional capability, not a core contract requirement
@@ -25,8 +25,8 @@ The current sandbox architecture assumes a single execution model: our ZFS + gVi
 - `SandboxHostService` and all ZFS/gVisor internals (plan 11 core)
 - `ToolBackend` interface (plan 06)
 - Agent loop tool dispatch — still calls `ToolBackend.ExecuteTool()`
-- `LocalBackend` (Mode 1 / Mode 2) — unchanged
-- RPC layer (plan 13) — unchanged, becomes an implementation detail of `LocalSandboxProvider`
+- `LocalBackend` (All Local / Agent in Sandbox) — unchanged
+- RPC layer (plan 13) — unchanged, becomes an implementation detail of `NativeSandboxProvider`
 
 ---
 
@@ -42,8 +42,8 @@ graph TB
 
     subgraph "Tools Layer (internal/tools)"
         tb[ToolBackend interface]
-        lb[LocalBackend<br/>Mode 1 / Mode 2]
-        sb[SandboxBackend<br/>Mode 3 / Mode 4]
+        lb[LocalBackend<br/>All Local / Agent in Sandbox]
+        sb[SandboxBackend<br/>Agent outside Sandbox]
     end
 
     subgraph "Sandbox Provider (internal/sandbox/provider)"
@@ -51,7 +51,7 @@ graph TB
         caps[Capabilities struct]
 
         subgraph "Implementations"
-            local[LocalSandboxProvider<br/>ConnectRPC → SandboxHostService]
+            local[NativeSandboxProvider<br/>ConnectRPC → SandboxHostService]
             e2b[E2BSandboxProvider<br/>E2B REST API]
             daytona[DaytonaSandboxProvider<br/>Daytona API]
             fly[FlyMachineSandboxProvider<br/>Fly Machines API]
@@ -150,7 +150,7 @@ No circular imports. The provider interface package is minimal (types + interfac
 // behind the ToolBackend interface.
 //
 // Implementations:
-//   - LocalSandboxProvider: ConnectRPC to our SandboxHostService (ZFS + gVisor)
+//   - NativeSandboxProvider: ConnectRPC to our SandboxHostService (ZFS + gVisor)
 //   - E2BSandboxProvider: E2B sandbox API
 //   - DaytonaSandboxProvider: Daytona workspace API
 //   - FlyMachineSandboxProvider: Fly.io Machines API
@@ -439,7 +439,7 @@ var FlyMachineCapabilities = Capabilities{
 
 ## 5. Provider Implementations
 
-### 5.1 LocalSandboxProvider
+### 5.1 NativeSandboxProvider
 
 The local provider wraps the existing `SandboxClient` (ConnectRPC client) and delegates all calls to the remote `SandboxHostService`. This is a thin adapter — the real work happens in plan 11's `SandboxHostService`.
 
@@ -447,27 +447,27 @@ The local provider wraps the existing `SandboxClient` (ConnectRPC client) and de
 // Package: internal/sandbox/provider/local
 // File: local.go
 
-// LocalSandboxProvider adapts the existing ConnectRPC SandboxClient to the
-// SandboxProvider interface. This is the provider used in Modes 3 and 4.
+// NativeSandboxProvider adapts the existing ConnectRPC SandboxClient to the
+// SandboxProvider interface. This is the provider used in Agent outside Sandbox mode.
 //
 // It wraps api.SandboxService (the RPC client interface) and translates
 // between provider-level types and RPC-level types.
-type LocalSandboxProvider struct {
+type NativeSandboxProvider struct {
     service api.SandboxService
     logger  *slog.Logger
 }
 
-func NewLocalSandboxProvider(service api.SandboxService, logger *slog.Logger) *LocalSandboxProvider {
-    return &LocalSandboxProvider{service: service, logger: logger}
+func NewNativeSandboxProvider(service api.SandboxService, logger *slog.Logger) *NativeSandboxProvider {
+    return &NativeSandboxProvider{service: service, logger: logger}
 }
 
-func (p *LocalSandboxProvider) Name() string { return "local" }
+func (p *NativeSandboxProvider) Name() string { return "local" }
 
-func (p *LocalSandboxProvider) Capabilities() provider.Capabilities {
+func (p *NativeSandboxProvider) Capabilities() provider.Capabilities {
     return provider.LocalCapabilities
 }
 
-func (p *LocalSandboxProvider) CreateSession(ctx context.Context, req provider.CreateSessionRequest) (*provider.SessionInfo, error) {
+func (p *NativeSandboxProvider) CreateSession(ctx context.Context, req provider.CreateSessionRequest) (*provider.SessionInfo, error) {
     rpcResp, err := p.service.CreateSession(ctx, &api.CreateSessionRequest{
         BaseSnapshot: req.BaseImage,
         SessionID:    req.SessionID,
@@ -479,7 +479,7 @@ func (p *LocalSandboxProvider) CreateSession(ctx context.Context, req provider.C
     return apiSessionToProviderSession(rpcResp.Session), nil
 }
 
-func (p *LocalSandboxProvider) ExecuteTool(ctx context.Context, sessionID string, req provider.ToolRequest, onProgress func(provider.ToolProgress)) (*provider.ToolResponse, error) {
+func (p *NativeSandboxProvider) ExecuteTool(ctx context.Context, sessionID string, req provider.ToolRequest, onProgress func(provider.ToolProgress)) (*provider.ToolResponse, error) {
     // Delegate to the existing SandboxClient RPC path (ExecuteToolStream).
     // This reuses internal/rpc/client.SandboxClient.ExecuteTool exactly.
     rpcReq := &api.ExecuteToolRequest{
@@ -532,7 +532,7 @@ func (p *LocalSandboxProvider) ExecuteTool(ctx context.Context, sessionID string
     }, nil
 }
 
-func (p *LocalSandboxProvider) TurnComplete(ctx context.Context, sessionID string) (*provider.SnapshotResult, error) {
+func (p *NativeSandboxProvider) TurnComplete(ctx context.Context, sessionID string) (*provider.SnapshotResult, error) {
     resp, err := p.service.TurnComplete(ctx, &api.TurnCompleteRequest{SessionID: sessionID})
     if err != nil {
         return nil, fmt.Errorf("local provider: turn complete: %w", err)
@@ -544,7 +544,7 @@ func (p *LocalSandboxProvider) TurnComplete(ctx context.Context, sessionID strin
     }, nil
 }
 
-func (p *LocalSandboxProvider) CreateSnapshot(ctx context.Context, sessionID string, name string) (*provider.SnapshotResult, error) {
+func (p *NativeSandboxProvider) CreateSnapshot(ctx context.Context, sessionID string, name string) (*provider.SnapshotResult, error) {
     resp, err := p.service.CreateSnapshot(ctx, &api.CreateSnapshotRequest{
         SessionID: sessionID,
         Name:      name,
@@ -559,7 +559,7 @@ func (p *LocalSandboxProvider) CreateSnapshot(ctx context.Context, sessionID str
     }, nil
 }
 
-func (p *LocalSandboxProvider) RollbackSession(ctx context.Context, sessionID string, snapshotID string) error {
+func (p *NativeSandboxProvider) RollbackSession(ctx context.Context, sessionID string, snapshotID string) error {
     _, err := p.service.RollbackSession(ctx, &api.RollbackSessionRequest{
         SessionID:  sessionID,
         SnapshotID: snapshotID,
@@ -940,7 +940,7 @@ Agent Loop
 Agent Loop
   → SandboxBackend.ExecuteTool(ctx, ToolRequest, onProgress)
     → SandboxProvider.ExecuteTool(ctx, sessionID, ToolRequest, onProgress)
-      → LocalSandboxProvider → SandboxClient → SandboxHostService
+      → NativeSandboxProvider → SandboxClient → SandboxHostService
       → E2BSandboxProvider → E2B REST API
       → DaytonaSandboxProvider → Daytona REST API
       → FlyMachineSandboxProvider → Fly Machines API + SSH
@@ -989,7 +989,7 @@ func NewSandboxTools(client SandboxToolClient, sessionID string) []agent.AgentTo
 func NewSandboxTools(p provider.SandboxProvider, sessionID string) []agent.AgentTool
 ```
 
-**`internal/rpc/client/sandbox_client.go`** — `SandboxClient` no longer needs to implement `SandboxToolClient`. It is used internally by `LocalSandboxProvider` through the `api.SandboxService` interface.
+**`internal/rpc/client/sandbox_client.go`** — `SandboxClient` no longer needs to implement `SandboxToolClient`. It is used internally by `NativeSandboxProvider` through the `api.SandboxService` interface.
 
 **Orchestrator / RuntimeController** — Session lifecycle calls migrate from direct `api.SandboxService` RPC calls to `SandboxProvider` method calls. The orchestrator selects the provider at startup based on configuration:
 
@@ -999,7 +999,7 @@ func selectProvider(cfg Config) (provider.SandboxProvider, error) {
     switch cfg.SandboxProvider {
     case "local":
         svc := connectrpc.NewSandboxServiceClient(cfg.SandboxHostURL)
-        return local.NewLocalSandboxProvider(svc, logger), nil
+        return local.NewNativeSandboxProvider(svc, logger), nil
     case "e2b":
         return e2b.NewE2BSandboxProvider(cfg.E2BAPIKey), nil
     case "daytona":
@@ -1094,7 +1094,7 @@ The following sections of `00-implementation-guide.md` need updates:
 
 ### 9.1 Unit Tests (per provider)
 
-**T1: LocalSandboxProvider adapter correctness**
+**T1: NativeSandboxProvider adapter correctness**
 - Mock `api.SandboxService`, verify all methods delegate with correct type conversion
 - Verify `ToolRequest` → `api.ExecuteToolRequest` field mapping
 - Verify `api.Session` → `provider.SessionInfo` field mapping
@@ -1145,7 +1145,7 @@ The following sections of `00-implementation-guide.md` need updates:
 **T9: Local provider parity with direct SandboxClient**
 - Run the same tool execution sequence through:
   1. Direct `SandboxClient` (old path)
-  2. `LocalSandboxProvider` wrapping `SandboxClient` (new path)
+  2. `NativeSandboxProvider` wrapping `SandboxClient` (new path)
 - Verify identical `ToolResponse` values (content, snapshot ID, exit code)
 - Use `MemorySandboxService` from plan 14 as the backend
 
@@ -1166,7 +1166,7 @@ The following sections of `00-implementation-guide.md` need updates:
 
 1. **Phase 1: Interface + Types** — Create `internal/sandbox/provider` package with interface, types, capabilities, errors. No implementations yet.
 
-2. **Phase 2: LocalSandboxProvider** — Implement the local adapter wrapping `api.SandboxService`. Write unit tests. Verify parity with direct `SandboxClient` path.
+2. **Phase 2: NativeSandboxProvider** — Implement the local adapter wrapping `api.SandboxService`. Write unit tests. Verify parity with direct `SandboxClient` path.
 
 3. **Phase 3: SandboxBackend Migration** — Update `SandboxBackend` to accept `SandboxProvider` instead of `SandboxToolClient`. Remove `SandboxToolClient` interface. Update `NewSandboxTools`. Verify all existing tests pass.
 
