@@ -402,7 +402,37 @@ func (svc *SandboxHostService) HealthCheck(ctx context.Context) (*HealthStatus, 
 }
 ```
 
-### 4.7 Shutdown Without gVisor
+### 4.8 Capabilities Method
+
+`SandboxHostService` exposes a public `Capabilities()` method that computes the server's capabilities from its `ServiceConfig`. The RPC handler calls this when constructing `CreateSessionResponse` for capability negotiation (§6.1).
+
+```go
+func (svc *SandboxHostService) Capabilities() Capabilities {
+    return Capabilities{
+        Snapshots:         svc.config.StorageBackend == StorageBackendZFS,
+        Rollback:          svc.config.StorageBackend == StorageBackendZFS,
+        Pause:             true,
+        TierRouting:       svc.config.ContainerRuntime == ContainerRuntimeGVisor,
+        StreamingProgress: true,
+    }
+}
+```
+
+The RPC handler uses this in `CreateSession`:
+
+```go
+// internal/rpc/server/sandbox_server.go
+func (h *SandboxHandler) CreateSession(ctx context.Context, req *api.CreateSessionRequest) (*api.CreateSessionResponse, error) {
+    info, err := h.service.CreateSession(ctx, /* ... */)
+    if err != nil { return nil, err }
+    return &api.CreateSessionResponse{
+        Session:            codec.ToAPISession(info),
+        ServerCapabilities: codec.ToAPICapabilities(h.service.Capabilities()),
+    }, nil
+}
+```
+
+### 4.9 Shutdown Without gVisor
 
 The existing `Shutdown` method already handles `nil` gVisor with a nil check (`if svc.gvisor != nil`). No change needed.
 
@@ -552,17 +582,18 @@ All call sites should be updated in a single commit to avoid compile failures on
 | `NewSandboxHostService` signature | Returns `(*SandboxHostService, error)` instead of `*SandboxHostService` | All callers must handle error (see §8.1 migration checklist) |
 | `NativeSandboxCapabilities` package var | Removed | Compliance tests, property tests, and any code referencing `environment.NativeSandboxCapabilities` must use config-derived capabilities instead |
 | `NewNativeSandboxEnvironment` signature | Gains `NativeSandboxConfig` parameter | All callers must pass config; existing tests updated |
-| `CreateSessionResponse` (RPC API type) | Gains `ServerCapabilities Capabilities` field | Plan 13 RPC layer must add this field (see §9.2) |
+| `SandboxHostService` API | Gains public `Capabilities()` method | RPC handler calls this when building `CreateSessionResponse` (see §4.8) |
+| `CreateSessionResponse` (RPC API type) | Gains `ServerCapabilities api.Capabilities` field | Plan 13 RPC layer must add this field and codec mapping (see §9.2) |
 
 ### 9.2 Cross-Plan Dependency: Plan 13 RPC Layer
 
 Capability negotiation (§6.1) requires adding a `ServerCapabilities` field to the `CreateSessionResponse` API type. This is a plan 13 change.
 
 **Required changes in plan 13:**
-- `api.CreateSessionResponse` gains `ServerCapabilities Capabilities` field
-- `Capabilities` struct: `{Snapshots bool, Rollback bool, Pause bool, TierRouting bool, StreamingProgress bool}`
-- `SandboxHostService.CreateSession` computes capabilities from its `ServiceConfig` and includes them in the response
-- Codec mapping: `codec.ToCreateSessionResponse` includes capabilities serialization
+- `api.CreateSessionResponse` gains `ServerCapabilities api.Capabilities` field
+- New RPC transport type `api.Capabilities` with 5 fields: `{Snapshots bool, Rollback bool, Pause bool, TierRouting bool, StreamingProgress bool}`. This is a separate RPC-level type, not `environment.Capabilities` — following plan 13's existing codec pattern where domain types and API types are kept separate. The `environment.Capabilities` struct may contain additional fields (e.g., `MaxSessionDuration`, `ConcurrentSessions`) not relevant to capability negotiation.
+- Codec mapping: `codec.ToAPICapabilities(sandbox.Capabilities) api.Capabilities` maps from the domain type returned by `SandboxHostService.Capabilities()` (§4.8) to the RPC transport type. `codec.FromAPICapabilities(api.Capabilities) sandbox.Capabilities` maps back for client-side use.
+- The RPC handler calls `h.service.Capabilities()` and includes the result via codec in `CreateSessionResponse` (see §4.8)
 
 **Mixed-version rollout behavior:**
 - **Old client / new server:** Old client ignores the `ServerCapabilities` field (additive field, backward-compatible). No capability negotiation occurs; client operates as before. This is safe — the old client never had negotiation.
@@ -677,3 +708,10 @@ Attempt to create a session with IDs containing `../`, `..\\`, absolute paths, n
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
 | 1 | reviewer-sea | P3 | §7.3 claims negotiation on both connections but §7.2 defers agent-loop validation | Incorporated | §7.3 updated to reference orchestrator-only negotiation and §7.2 deployment-time consistency |
+
+## Seam Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P2 | SandboxHostService lacks Capabilities() method for RPC handler | Incorporated | §4.8 added with public Capabilities() method and RPC handler usage |
+| 2 | reviewer-sea | P3 | Capabilities type at RPC boundary is ambiguous | Incorporated | §9.2 clarified: separate api.Capabilities transport type with codec mapping |
