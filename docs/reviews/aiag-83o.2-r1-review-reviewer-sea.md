@@ -86,3 +86,17 @@ Add a guard: `if e.destroyed.Load() { return nil }` at the top of Destroy. Optio
 5 findings: 0 P0, 1 P1, 2 P2, 2 P3
 
 **Verdict**: Approved with revisions
+
+## R1 Disposition
+
+All findings addressed at 6d6d607. Re-reviewed and verified.
+
+| # | Severity | Summary | Disposition | Notes |
+|---|----------|---------|-------------|-------|
+| 1 | P1 | State() uses context.Background() for RPC | Incorporated | Added 5s timeout via stateQueryTimeout constant. Well-documented comment explaining why. |
+| 2 | P2 | NativeSandboxEnvironment not in compliance suite | Incorporated | TestNativeEnvironmentComplianceSuite added with complianceMockService. All subtests pass. |
+| 3 | P2 | toolSchemas() creates unused execute closures | Incorporated | Explanatory comment added to toolSchemas() documenting why closures exist but are unused. Pragmatic — extracting metadata would be more error-prone. |
+| 4 | P3 | TestO3_SandboxBackendParity stale name | Incorporated | Renamed to TestO3_RPCClientParity. |
+| 5 | P3 | Destroy() no double-destroy guard | Incorporated | Guard added + TestDestroy_DoubleDestroy_Idempotent test verifying no RPC on second call. |
+
+**Final verdict**: Approved
