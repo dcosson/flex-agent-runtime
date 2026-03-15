@@ -355,7 +355,7 @@ For environments with `ConcurrentSessions > 0`, create environments up to and be
 - Session IDs with path traversal characters (`../`, `..\\`) are rejected
 - Session IDs with null bytes are rejected
 - Very long session IDs (>256 chars) are rejected
-- Empty session ID handled gracefully (auto-generated or error)
+- Empty session ID returns an error (SessionID is required per §3.2)
 
 ### SEC3. Tool Parameter Sanitization
 
@@ -455,7 +455,7 @@ Verify that the agent loop sees consistent behavior regardless of environment:
 
 ---
 
-## Review Disposition
+## Round 1 Review Disposition
 
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
@@ -463,3 +463,9 @@ Verify that the agent loop sees consistent behavior regardless of environment:
 | 2 | coder-1-sea | P1 | Destroy compliance: DestroyedEnvironmentErrors test fails for Local | Incorporated | E2E1 updated: Destroy marks destroyed, ExecuteTool returns ErrNotActive |
 | 3 | reviewer-sea | P1 | Concurrent access: stress tests require sync but plan had none | Incorporated | §3.4 concurrency contract covers sync strategy; ST1/ST2 validate |
 | 4 | reviewer-sea | P1 | LocalEnvironment.Pause violates P1 invariant | Incorporated | P1 property now tests both Pause=true and Pause=false branches |
+
+## Round 2 Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P3 | SEC2 inconsistent with required SessionID | Incorporated | Updated to require error on empty SessionID |

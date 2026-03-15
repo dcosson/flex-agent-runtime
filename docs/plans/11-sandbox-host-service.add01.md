@@ -372,12 +372,13 @@ type Capabilities struct {
     // Only true for NativeSandboxEnvironment (ZFS rollback).
     Rollback bool
 
-    // Pause indicates the environment supports Pause/Resume
-    // with state preservation. The degree of preservation varies:
+    // Pause indicates the environment supports Pause/Resume.
+    // If true, Pause()/Resume() succeed. The degree of state preservation varies:
+    //   - LocalEnvironment: no-op (Pause:true — always succeeds, nothing to preserve)
     //   - NativeSandboxEnvironment: full (ZFS dataset persists, instant resume)
     //   - E2BSandboxEnvironment: full (pause() preserves memory + disk)
     //   - FlySandboxEnvironment: full (suspend() saves memory to disk)
-    //   - DaytonaSandboxEnvironment: partial (auto-stop preserves disk, loses processes)
+    // DaytonaSandboxEnvironment has Pause:false — auto-stop is lossy, not true pause.
     Pause bool
 
     // StreamingProgress indicates the environment supports incremental progress
@@ -472,7 +473,7 @@ var FlyCapabilities = Capabilities{
 type LocalEnvironment struct {
     workDir   string       // working directory for tool execution
     logger    *slog.Logger
-    destroyed bool         // set by Destroy(); guards ExecuteTool
+    destroyed atomic.Bool  // set by Destroy(); guards ExecuteTool (per §3.4)
 }
 
 func NewLocalEnvironment(workDir string, logger *slog.Logger) *LocalEnvironment {
@@ -492,12 +493,12 @@ func (e *LocalEnvironment) Resume(ctx context.Context) error {
 }
 
 func (e *LocalEnvironment) Destroy(ctx context.Context) error {
-    e.destroyed = true
+    e.destroyed.Store(true)
     return nil
 }
 
 func (e *LocalEnvironment) ExecuteTool(ctx context.Context, req environment.ToolRequest, onProgress func(environment.ToolProgress)) (*environment.ToolResponse, error) {
-    if e.destroyed {
+    if e.destroyed.Load() {
         return nil, environment.ErrNotActive
     }
     // Dispatch to the local tool execution engine.
@@ -1213,7 +1214,7 @@ These scenarios prove the ExecutionEnvironment abstraction works end-to-end acro
 
 ## 11. Testing Strategy
 
-### 10.1 Unit Tests (per environment)
+### 11.1 Unit Tests (per environment)
 
 **T1: LocalEnvironment behavior**
 - Verify Create/Pause/Resume return nil (no-ops)
@@ -1251,7 +1252,7 @@ These scenarios prove the ExecutionEnvironment abstraction works end-to-end acro
 - Each environment's `Capabilities()` returns the expected static values
 - Verify capability constants match documented environment limitations
 
-### 10.2 Integration Tests
+### 11.2 Integration Tests
 
 **T7: Agent loop + ExecutionEnvironment integration**
 - Wire agent loop to each environment (mocked APIs)
@@ -1268,7 +1269,7 @@ These scenarios prove the ExecutionEnvironment abstraction works end-to-end acro
 - Verify Rollback skipped when `Rollback` is false
 - Verify Pause returns `ErrCapabilityNotSupported` for Daytona
 
-### 10.3 Backward Compatibility Tests
+### 11.3 Backward Compatibility Tests
 
 **T10: NativeSandboxEnvironment parity with direct SandboxClient**
 - Run the same tool execution sequence through:
@@ -1277,7 +1278,7 @@ These scenarios prove the ExecutionEnvironment abstraction works end-to-end acro
 - Verify identical `ToolResponse` values (content, snapshot ID, exit code)
 - Use `MemorySandboxService` from plan 14 as the backend
 
-### 10.4 Contract Tests
+### 11.4 Contract Tests
 
 **T11: ExecutionEnvironment interface compliance**
 - Write a shared test suite that any `ExecutionEnvironment` must pass
@@ -1334,7 +1335,7 @@ When the RuntimeController process crashes after creating a remote environment b
 
 ---
 
-## Review Disposition
+## Round 1 Review Disposition
 
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
@@ -1352,3 +1353,12 @@ When the RuntimeController process crashes after creating a remote environment b
 | 12 | reviewer-sea | P3 | SessionConfig.Options typed as any | Incorporated | Wrong-type Options test added to T3 in §11.1 |
 | 13 | reviewer-sea | P3 | Dead code in NativeSandboxEnvironment stream loop | Incorporated | Unreachable if-final-nil branch removed in §5.2 |
 | 14 | reviewer-sea | P3 | Orphaned sandbox recovery unspecified | Incorporated | §13 added with label-based GC sweep + provider TTL strategy |
+
+## Round 2 Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P3 | Pause comment lists Daytona alongside Pause:true envs | Incorporated | Daytona moved to separate note in §4.1 Pause comment |
+| 2 | reviewer-sea | P3 | Testing Strategy subsection numbering mismatch | Incorporated | Renumbered §10.x to §11.x |
+| 3 | reviewer-sea | P3 | SEC2 inconsistent with required SessionID | Incorporated | Test harness SEC2 updated to require error on empty SessionID |
+| 4 | reviewer-sea | P3 | LocalEnvironment destroyed field type contradicts §3.4 | Incorporated | Changed to atomic.Bool with Store/Load in §5.1 |
