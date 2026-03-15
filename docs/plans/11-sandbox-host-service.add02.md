@@ -401,11 +401,80 @@ caps := env.Capabilities()
 // caps.Snapshots == true, caps.TierRouting == false
 ```
 
-The config could alternatively be fetched from the sandbox-host via an RPC `GetServerConfig` call, but explicit configuration is simpler and avoids an extra round-trip during initialization. If the client config does not match the server config, operations will fail with clear RPC errors (e.g., calling CreateSnapshot against a local-disk server returns an error from the server side).
+### 6.1 Capability Negotiation at Session Creation
+
+Rather than relying solely on the client's local config being correct, `NativeSandboxEnvironment.Create()` performs capability negotiation when calling the server's `CreateSession` RPC. The server includes its actual capabilities in the response, and the client compares them against its configured expectations. If there is a mismatch, the client fails immediately. This prevents deploying with mismatched configuration and not discovering the problem until hours later when a rollback or tier-routed execution is attempted.
+
+```go
+// Server response includes its capabilities
+type CreateSessionResponse struct {
+    SessionInfo
+    ServerCapabilities Capabilities  // what the server actually supports
+}
+
+// Client-side in NativeSandboxEnvironment.Create():
+resp, err := n.client.CreateSession(ctx, req)
+if err != nil { return err }
+
+// Fail fast if client expects something server can't provide
+if n.config.StorageBackend == StorageBackendZFS && !resp.ServerCapabilities.Snapshots {
+    return fmt.Errorf("client configured for ZFS but server does not support snapshots")
+}
+if n.config.ContainerRuntime == ContainerRuntimeGVisor && !resp.ServerCapabilities.TierRouting {
+    return fmt.Errorf("client configured for gVisor but server does not support tier routing")
+}
+```
+
+This replaces the previous approach of deferring mismatch detection to individual operation failures. The server already knows its own capabilities (section 3.2), so including them in `CreateSessionResponse` is trivial.
+
+Additionally, consider adding periodic health checks that re-validate capabilities have not changed (e.g., if the server is restarted with a different configuration while the client holds an active session). This could be integrated into the existing `HealthCheck` mechanism (section 4.5) by having the client periodically call a `GetCapabilities` or `HealthCheck` RPC and comparing the result against its stored expectations.
 
 ---
 
-## 7. Implementation Notes
+## 7. Separate Connection Model (Agent outside Sandbox)
+
+In the "Agent outside Sandbox" deployment mode, the orchestrator and the agent loop are separate processes, potentially running on different machines. Each process maintains its own RPC connection to the sandbox-host and constructs its own `NativeSandboxEnvironment` instance. There is no shared in-process state between them; the only coordination point is the session ID.
+
+### 7.1 Connection Topology
+
+```
+┌──────────────┐                          ┌─────────────────────┐
+│ Orchestrator │──RPC──┐                  │                     │
+│              │       │                  │  SandboxHostService  │
+│  NativeSandboxEnv    ├────────────────► │                     │
+│  (lifecycle ops)     │                  │  Session "abc-123"  │
+└──────────────┘       │                  │                     │
+                       │                  └─────────────────────┘
+┌──────────────┐       │                          ▲
+│  Agent Loop  │──RPC──┘                          │
+│              │                                  │
+│  NativeSandboxEnv ──────────────────────────────┘
+│  (tool execution)
+└──────────────┘
+```
+
+**Orchestrator process** creates its own `NativeSandboxEnvironment` and uses it for lifecycle operations: `Create`, `Pause`, `Resume`, `Destroy`, `CreateSnapshot`, `Rollback`.
+
+**Agent loop process** creates its own `NativeSandboxEnvironment` and uses it for tool execution: `ExecuteTool`.
+
+Both processes construct their environments with the same `NativeSandboxConfig` and reference the same session ID. The orchestrator creates the session and passes the session ID to the agent loop (via whatever mechanism launches the agent process).
+
+### 7.2 Capability Negotiation on Both Connections
+
+Capability negotiation (section 6.1) happens independently on both connections. When the orchestrator calls `Create()`, it validates server capabilities against its config. When the agent loop connects and begins executing tools, it should also validate capabilities -- either by calling a `GetCapabilities` RPC on its first interaction, or by receiving capabilities in the response to its first `ExecuteTool` call.
+
+This independent validation ensures that both processes detect misconfigurations, even if they were started at different times or against different server instances.
+
+### 7.3 Implications
+
+- **No shared state:** The orchestrator and agent loop do not share memory, caches, or connection pools. Each `NativeSandboxEnvironment` is fully independent.
+- **Session ID is the contract:** The session ID is the sole coordination mechanism. The server is the source of truth for session state.
+- **Independent failure:** Either process can crash and restart independently. The orchestrator can `Pause` or `Destroy` a session even if the agent loop has disconnected. The agent loop can reconnect and resume `ExecuteTool` calls against an existing session.
+- **Config consistency:** Both processes must be configured with the same `NativeSandboxConfig` (same `StorageBackend`, same `ContainerRuntime`). Capability negotiation on both connections guards against drift, but operators should ensure config consistency at deployment time.
+
+---
+
+## 8. Implementation Notes
 
 1. **Constructor signature change:** `NewSandboxHostService` returns `(*SandboxHostService, error)` instead of `*SandboxHostService`. All callers (tests, `cmd/sandbox-host`, RPC server setup) must be updated.
 
