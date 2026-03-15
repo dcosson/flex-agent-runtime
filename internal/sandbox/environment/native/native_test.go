@@ -331,6 +331,26 @@ func TestDestroy_Success(t *testing.T) {
 	}
 }
 
+func TestDestroy_DoubleDestroy_Idempotent(t *testing.T) {
+	svc := newMockService()
+	env := createTestEnv(t, svc, "sess-1")
+
+	if err := env.Destroy(context.Background()); err != nil {
+		t.Fatalf("first Destroy() error: %v", err)
+	}
+	if svc.destroyCalls != 1 {
+		t.Fatalf("destroyCalls after first = %d, want 1", svc.destroyCalls)
+	}
+
+	// Second destroy should be a no-op — no RPC call.
+	if err := env.Destroy(context.Background()); err != nil {
+		t.Fatalf("second Destroy() error: %v", err)
+	}
+	if svc.destroyCalls != 1 {
+		t.Fatalf("destroyCalls after second = %d, want 1 (no-op)", svc.destroyCalls)
+	}
+}
+
 func TestDestroy_RPCError(t *testing.T) {
 	svc := newMockService()
 	env := createTestEnv(t, svc, "sess-1")

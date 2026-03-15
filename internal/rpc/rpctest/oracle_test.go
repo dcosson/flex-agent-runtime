@@ -232,7 +232,7 @@ func TestO2_APIVersionPropagation(t *testing.T) {
 }
 
 // O3. RPC client parity oracle — compare direct host results vs RPC-mediated.
-func TestO3_SandboxBackendParity(t *testing.T) {
+func TestO3_RPCClientParity(t *testing.T) {
 	stack := newTestStack(t)
 	ctx := context.Background()
 

@@ -3,13 +3,16 @@ package environment_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"h2-agent-runtime/internal/rpc/api"
 	"h2-agent-runtime/internal/sandbox/environment"
 	"h2-agent-runtime/internal/sandbox/environment/local"
+	"h2-agent-runtime/internal/sandbox/environment/native"
 )
 
 type envFactory func(t *testing.T) environment.ExecutionEnvironment
@@ -125,6 +128,120 @@ func TestLocalEnvironmentComplianceSuite(t *testing.T) {
 		return local.NewLocalEnvironment(root, slog.Default())
 	}
 	config := environment.SessionConfig{SessionID: "local-compliance"}
+	readReq := environment.ToolRequest{
+		ToolName: "read_file",
+		Params:   map[string]any{"path": "input.txt"},
+	}
+	writeReq := environment.ToolRequest{
+		ToolName: "write_file",
+		Params:   map[string]any{"path": "written.txt", "content": "hi"},
+	}
+
+	runEnvironmentComplianceSuite(t, factory, config, readReq, writeReq)
+}
+
+// complianceMockService is a minimal api.SandboxService mock for compliance testing.
+type complianceMockService struct {
+	sessions map[string]string // id -> state
+}
+
+func newComplianceMockService() *complianceMockService {
+	return &complianceMockService{sessions: make(map[string]string)}
+}
+
+func (m *complianceMockService) CreateSession(_ context.Context, req *api.CreateSessionRequest) (*api.CreateSessionResponse, error) {
+	m.sessions[req.SessionID] = "active"
+	return &api.CreateSessionResponse{Session: &api.Session{ID: req.SessionID, State: "active"}}, nil
+}
+
+func (m *complianceMockService) GetSession(_ context.Context, req *api.GetSessionRequest) (*api.GetSessionResponse, error) {
+	state, ok := m.sessions[req.SessionID]
+	if !ok {
+		return nil, fmt.Errorf("session not found: %s", req.SessionID)
+	}
+	return &api.GetSessionResponse{Session: &api.Session{ID: req.SessionID, State: state}}, nil
+}
+
+func (m *complianceMockService) PauseSession(_ context.Context, req *api.PauseSessionRequest) (*api.PauseSessionResponse, error) {
+	m.sessions[req.SessionID] = "paused"
+	return &api.PauseSessionResponse{}, nil
+}
+
+func (m *complianceMockService) ResumeSession(_ context.Context, req *api.ResumeSessionRequest) (*api.ResumeSessionResponse, error) {
+	m.sessions[req.SessionID] = "active"
+	return &api.ResumeSessionResponse{}, nil
+}
+
+func (m *complianceMockService) DestroySession(_ context.Context, req *api.DestroySessionRequest) (*api.DestroySessionResponse, error) {
+	delete(m.sessions, req.SessionID)
+	return &api.DestroySessionResponse{}, nil
+}
+
+func (m *complianceMockService) ExecuteTool(_ context.Context, req *api.ExecuteToolRequest) (*api.ExecuteToolResponse, error) {
+	return &api.ExecuteToolResponse{
+		SessionID:  req.SessionID,
+		ToolCallID: req.ToolCallID,
+		ToolName:   req.ToolName,
+		Content:    "mock result",
+	}, nil
+}
+
+func (m *complianceMockService) ExecuteToolStream(_ context.Context, req *api.ExecuteToolRequest) (api.ExecuteToolStreamReceiver, error) {
+	if _, ok := m.sessions[req.SessionID]; !ok {
+		return nil, fmt.Errorf("session not found: %s", req.SessionID)
+	}
+	return &complianceMockStream{response: &api.ExecuteToolResponse{
+		SessionID:  req.SessionID,
+		ToolCallID: req.ToolCallID,
+		ToolName:   req.ToolName,
+		Content:    "mock result",
+	}}, nil
+}
+
+func (m *complianceMockService) TurnComplete(_ context.Context, _ *api.TurnCompleteRequest) (*api.TurnCompleteResponse, error) {
+	return &api.TurnCompleteResponse{}, nil
+}
+
+func (m *complianceMockService) CreateSnapshot(_ context.Context, req *api.CreateSnapshotRequest) (*api.CreateSnapshotResponse, error) {
+	return &api.CreateSnapshotResponse{
+		SnapshotID: fmt.Sprintf("snap-%s-%s", req.SessionID, req.Name),
+		SpaceUsed:  4096,
+	}, nil
+}
+
+func (m *complianceMockService) RollbackSession(_ context.Context, _ *api.RollbackSessionRequest) (*api.RollbackSessionResponse, error) {
+	return &api.RollbackSessionResponse{}, nil
+}
+
+func (m *complianceMockService) ListSnapshots(_ context.Context, _ *api.ListSnapshotsRequest) (*api.ListSnapshotsResponse, error) {
+	return &api.ListSnapshotsResponse{}, nil
+}
+
+func (m *complianceMockService) HealthCheck(_ context.Context, _ *api.HealthCheckRequest) (*api.HealthCheckResponse, error) {
+	return &api.HealthCheckResponse{Status: "healthy"}, nil
+}
+
+// complianceMockStream implements api.ExecuteToolStreamReceiver for compliance testing.
+type complianceMockStream struct {
+	response *api.ExecuteToolResponse
+	sent     bool
+}
+
+func (s *complianceMockStream) Recv() (*api.ExecuteToolStreamMessage, error) {
+	if s.sent {
+		return nil, fmt.Errorf("stream exhausted")
+	}
+	s.sent = true
+	return &api.ExecuteToolStreamMessage{Response: s.response}, nil
+}
+
+func (s *complianceMockStream) Close() error { return nil }
+
+func TestNativeEnvironmentComplianceSuite(t *testing.T) {
+	factory := func(t *testing.T) environment.ExecutionEnvironment {
+		return native.NewNativeSandboxEnvironment(newComplianceMockService(), slog.Default())
+	}
+	config := environment.SessionConfig{SessionID: "native-compliance"}
 	readReq := environment.ToolRequest{
 		ToolName: "read_file",
 		Params:   map[string]any{"path": "input.txt"},

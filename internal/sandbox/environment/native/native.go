@@ -66,6 +66,9 @@ func (e *NativeSandboxEnvironment) Resume(ctx context.Context) error {
 }
 
 func (e *NativeSandboxEnvironment) Destroy(ctx context.Context) error {
+	if e.destroyed.Load() {
+		return nil
+	}
 	_, err := e.service.DestroySession(ctx, &api.DestroySessionRequest{SessionID: e.sessionID})
 	if err != nil {
 		return fmt.Errorf("native sandbox: destroy: %w", err)
@@ -122,6 +125,12 @@ func (e *NativeSandboxEnvironment) ExecuteTool(ctx context.Context, req environm
 	}, nil
 }
 
+// stateQueryTimeout bounds the RPC call in State() to prevent indefinite
+// blocking on network issues. State() uses context.Background() because the
+// interface signature has no context parameter (plan §3.4); this timeout
+// ensures we fail fast rather than hanging the agent loop.
+const stateQueryTimeout = 5 * time.Second
+
 // State queries the server for the current session state. After Destroy(),
 // returns StateDestroyed without querying (the session is deleted server-side).
 func (e *NativeSandboxEnvironment) State() environment.SessionState {
@@ -131,7 +140,9 @@ func (e *NativeSandboxEnvironment) State() environment.SessionState {
 	if e.sessionID == "" {
 		return environment.StateCreating
 	}
-	resp, err := e.service.GetSession(context.Background(), &api.GetSessionRequest{SessionID: e.sessionID})
+	ctx, cancel := context.WithTimeout(context.Background(), stateQueryTimeout)
+	defer cancel()
+	resp, err := e.service.GetSession(ctx, &api.GetSessionRequest{SessionID: e.sessionID})
 	if err != nil {
 		e.logger.Warn("native sandbox: state query failed", "session_id", e.sessionID, "error", err)
 		return environment.StateFailed

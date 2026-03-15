@@ -84,8 +84,13 @@ func NewEnvironmentTools(executeFn func(ctx context.Context, req ToolRequest, on
 	return result
 }
 
-// toolSchemas returns the standard tool schema definitions without execution
-// logic. Used by NewEnvironmentTools to create tool definitions.
+// toolSchemas returns tool metadata (name, description, JSON schema) for building
+// AgentTool definitions. It instantiates toolImpl structs via the tool constructors
+// with a dummy root — only the name, description, and schema fields are used; the
+// execute closures are never called and exist only because the constructors produce
+// complete toolImpl values. This is intentional: extracting metadata-only structs
+// would require duplicating every tool's name/description/schema outside its
+// constructor, which is more error-prone than discarding unused closures.
 func toolSchemas() []toolImpl {
 	dummyRoot := "/"
 	return []toolImpl{
