@@ -20,7 +20,7 @@ func TestST1_ConcurrentEnvironmentLifecycle(t *testing.T) {
 	}
 	ctx := context.Background()
 	var wg sync.WaitGroup
-	for i := 0; i < 25; i++ {
+	for i := 0; i < 50; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -56,7 +56,7 @@ func TestST2_ConcurrentToolExecution(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -76,7 +76,10 @@ func TestST3_RapidEnvironmentSwitching(t *testing.T) {
 		t.Skip("stress test")
 	}
 	ctx := context.Background()
-	for i := 0; i < 20; i++ {
+	const perType = 10
+	envs := make([]environment.ExecutionEnvironment, 0, perType*2)
+
+	for i := 0; i < perType; i++ {
 		root := t.TempDir()
 		if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("x"), 0o644); err != nil {
 			t.Fatalf("seed file: %v", err)
@@ -85,22 +88,35 @@ func TestST3_RapidEnvironmentSwitching(t *testing.T) {
 		if err := localEnv.Create(ctx, environment.SessionConfig{SessionID: fmt.Sprintf("local-%d", i)}); err != nil {
 			t.Fatalf("local create: %v", err)
 		}
-		if _, err := localEnv.ExecuteTool(ctx, environment.ToolRequest{ToolName: "read_file", Params: map[string]any{"path": "f.txt"}}, nil); err != nil {
-			t.Fatalf("local execute: %v", err)
-		}
-		if err := localEnv.Destroy(ctx); err != nil {
-			t.Fatalf("local destroy: %v", err)
-		}
-
+		envs = append(envs, localEnv)
+	}
+	for i := 0; i < perType; i++ {
 		nativeEnv := native.NewNativeSandboxEnvironment(newComplianceMockService(), slog.Default())
 		if err := nativeEnv.Create(ctx, environment.SessionConfig{SessionID: fmt.Sprintf("native-%d", i)}); err != nil {
 			t.Fatalf("native create: %v", err)
 		}
-		if _, err := nativeEnv.ExecuteTool(ctx, environment.ToolRequest{ToolName: "read_file", ToolCallID: fmt.Sprintf("tc-%d", i)}, nil); err != nil {
-			t.Fatalf("native execute: %v", err)
-		}
-		if err := nativeEnv.Destroy(ctx); err != nil {
-			t.Fatalf("native destroy: %v", err)
+		envs = append(envs, nativeEnv)
+	}
+
+	var wg sync.WaitGroup
+	for i, env := range envs {
+		wg.Add(1)
+		go func(i int, env environment.ExecutionEnvironment) {
+			defer wg.Done()
+			req := environment.ToolRequest{ToolName: "read_file", ToolCallID: fmt.Sprintf("tc-%d", i)}
+			// local envs need a concrete file path; native mock ignores params.
+			if i < perType {
+				req.Params = map[string]any{"path": "f.txt"}
+			}
+			if _, err := env.ExecuteTool(ctx, req, nil); err != nil {
+				t.Errorf("execute[%d]: %v", i, err)
+			}
+		}(i, env)
+	}
+	wg.Wait()
+	for i, env := range envs {
+		if err := env.Destroy(ctx); err != nil {
+			t.Fatalf("destroy[%d]: %v", i, err)
 		}
 	}
 }

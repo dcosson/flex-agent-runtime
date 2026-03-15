@@ -134,18 +134,31 @@ func TestSEC2_LocalPathTraversalSanitization(t *testing.T) {
 	if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "sec-path"}); err != nil {
 		t.Fatalf("create env: %v", err)
 	}
-	resp, err := env.ExecuteTool(context.Background(), environment.ToolRequest{
-		ToolName: "read_file",
-		Params:   map[string]any{"path": ""},
-	}, nil)
-	if err != nil {
-		t.Fatalf("unexpected execution error: %v", err)
+	tests := []string{
+		"",
+		"../../../etc/passwd",
+		`..\\windows\\system32`,
 	}
-	if len(resp.Content) == 0 {
-		t.Fatal("expected validation error content")
-	}
-	tc, ok := resp.Content[0].(*ai.TextContent)
-	if !ok || !strings.Contains(tc.Text, "missing required parameter") {
-		t.Fatalf("unexpected validation response: %#v", resp.Content[0])
+	for _, p := range tests {
+		resp, err := env.ExecuteTool(context.Background(), environment.ToolRequest{
+			ToolName: "read_file",
+			Params:   map[string]any{"path": p},
+		}, nil)
+		if err != nil {
+			t.Fatalf("unexpected execution error for path %q: %v", p, err)
+		}
+		if len(resp.Content) == 0 {
+			t.Fatalf("expected validation/error content for path %q", p)
+		}
+		tc, ok := resp.Content[0].(*ai.TextContent)
+		if !ok {
+			t.Fatalf("unexpected content type for %q: %T", p, resp.Content[0])
+		}
+		if p == "" && !strings.Contains(tc.Text, "missing required parameter") {
+			t.Fatalf("expected missing param error for empty path, got %q", tc.Text)
+		}
+		if p != "" && !strings.Contains(tc.Text, "escapes workspace root") && !strings.Contains(tc.Text, "file not found") {
+			t.Fatalf("expected traversal-safe rejection for %q, got %q", p, tc.Text)
+		}
 	}
 }

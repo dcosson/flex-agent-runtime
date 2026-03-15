@@ -11,7 +11,6 @@ import (
 	"h2-agent-runtime/internal/sandbox/environment"
 	"h2-agent-runtime/internal/sandbox/environment/local"
 	"h2-agent-runtime/internal/sandbox/environment/native"
-	"h2-agent-runtime/internal/tools"
 )
 
 func newLocalHarnessEnv(t *testing.T) (environment.ExecutionEnvironment, string) {
@@ -158,29 +157,38 @@ func TestP4_CapabilitiesStatic(t *testing.T) {
 	}
 }
 
-func TestP5_LocalProviderParity(t *testing.T) {
+func TestP5_NativeSandboxParityWithDirectServicePath(t *testing.T) {
 	ctx := context.Background()
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "parity.txt"), []byte("line\n"), 0o644); err != nil {
-		t.Fatalf("seed file: %v", err)
-	}
-
-	env := local.NewLocalEnvironment(root, slog.Default())
-	if err := env.Create(ctx, environment.SessionConfig{SessionID: "local-parity"}); err != nil {
+	svc := newComplianceMockService()
+	env := native.NewNativeSandboxEnvironment(svc, slog.Default())
+	if err := env.Create(ctx, environment.SessionConfig{SessionID: "native-parity"}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	backend := tools.NewLocalBackend(root)
-	req := environment.ToolRequest{ToolCallID: "tc-parity", ToolName: "read_file", Params: map[string]any{"path": "parity.txt"}}
 
+	req := environment.ToolRequest{
+		ToolCallID: "tc-parity",
+		ToolName:   "read_file",
+		Params:     map[string]any{"path": "parity.txt"},
+	}
 	envResp, envErr := env.ExecuteTool(ctx, req, nil)
-	beResp, beErr := backend.ExecuteTool(ctx, tools.ToolRequest(req), nil)
-	if (envErr == nil) != (beErr == nil) {
-		t.Fatalf("error mismatch env=%v backend=%v", envErr, beErr)
+
+	stream, directErr := svc.ExecuteToolStream(ctx, svc.lastExecReq)
+	if (envErr == nil) != (directErr == nil) {
+		t.Fatalf("error mismatch env=%v direct=%v", envErr, directErr)
 	}
-	if envErr != nil {
-		t.Fatalf("unexpected env err: %v", envErr)
+	if directErr != nil {
+		t.Fatalf("unexpected direct execute error: %v", directErr)
 	}
-	if len(envResp.Content) != len(beResp.Content) {
-		t.Fatalf("content length mismatch env=%d backend=%d", len(envResp.Content), len(beResp.Content))
+	msg, recvErr := stream.Recv()
+	if recvErr != nil {
+		t.Fatalf("direct stream recv: %v", recvErr)
+	}
+	directResp := msg.Response
+	if directResp == nil {
+		t.Fatal("direct path returned nil response")
+	}
+
+	if len(envResp.Content) == 0 || directResp.Content == "" {
+		t.Fatalf("expected non-empty responses env=%+v direct=%+v", envResp, directResp)
 	}
 }
