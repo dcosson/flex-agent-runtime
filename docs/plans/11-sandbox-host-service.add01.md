@@ -293,8 +293,32 @@ type SnapshotInfo struct {
     SpaceUsed int64 // bytes; 0 if environment doesn't track this
 }
 
+// SessionState represents the lifecycle state of an execution environment.
+// String values match plan 11's SessionState constants for NativeSandboxEnvironment
+// compatibility — the server returns these values and NativeSandboxEnvironment
+// passes them through without mapping.
+type SessionState string
+
+const (
+    StateCreating   SessionState = "creating"   // Create() in progress
+    StateActive     SessionState = "active"      // ready for ExecuteTool
+    StatePaused     SessionState = "paused"      // Pause() called, Resume() to reactivate
+    StateDestroying SessionState = "destroying"  // Destroy() in progress
+    StateDestroyed  SessionState = "destroyed"   // client-side only: Destroy() completed
+    StateFailed     SessionState = "failed"      // unrecoverable error
+)
+
+// Note: StateDestroyed is addendum-specific. Plan 11's server-side sessions
+// transition to "destroying" and then are deleted (no "destroyed" state).
+// Remote environments (E2B, Daytona, Fly) use StateDestroyed to track
+// client-side cleanup completion. NativeSandboxEnvironment never enters
+// StateDestroyed — after Destroy(), the session is gone from the server.
+
 // ToolRequest and ToolResponse are re-exported from internal/tools.
 // This avoids duplicating types. Environments import internal/tools for these.
+// Note: ToolRequest.SessionID is vestigial — ExecutionEnvironment implementations
+// do not read it. Session identity is internal to each environment, set during
+// Create(). This field will be removed as part of the ToolBackend migration (§7.3).
 type ToolRequest = tools.ToolRequest
 type ToolResponse = tools.ToolResponse
 type ToolProgress = tools.ToolProgress
@@ -1057,6 +1081,8 @@ Agent Loop
 
 **`SandboxToolClient` interface** -- Eliminated. `NativeSandboxEnvironment` uses `api.SandboxService` directly.
 
+**`ToolRequest.SessionID` field** -- Vestigial after migration. No `ExecutionEnvironment` implementation reads it — session identity is internal to each environment (set during `Create()`). Remove the field from `ToolRequest` in a follow-up cleanup after all callers are migrated off `ToolBackend`.
+
 ### 7.4 RuntimeController Updates
 
 The RuntimeController selects the right `ExecutionEnvironment` at startup based on configuration:
@@ -1141,7 +1167,7 @@ if env.Capabilities().Rollback {
 | Component A | Component B | Interface | Notes |
 |-------------|-------------|-----------|-------|
 | `internal/agent` | `internal/sandbox/environment` | `ExecutionEnvironment` | Replaces `ToolBackend` |
-| `internal/sandbox/environment/native` | `internal/rpc/client` | `api.SandboxService` | Native environment delegates to existing RPC client |
+| `internal/sandbox/environment/native` | `internal/rpc/client` | `api.SandboxService` | Native environment delegates to existing RPC client. **Plan 13 gap:** `CreateSnapshot` RPC is needed but not yet defined in plan 13's `SandboxService` interface — see §9.5. |
 | `internal/sandbox/environment/native` | `internal/sandbox` | (indirect, via RPC) | Native environment -> RPC -> SandboxHostService |
 | `internal/sandbox/environment/e2b` | E2B REST API | HTTP | External API dependency |
 | `internal/sandbox/environment/daytona` | Daytona REST API | HTTP | External API dependency |
@@ -1166,12 +1192,55 @@ if env.Capabilities().Rollback {
 
 ### 9.4 Implementation Guide Updates
 
-The following sections of `00-implementation-guide.md` need updates:
+The following sections of `00-implementation-guide.md` need updates **(apply during Phase 4: Agent Loop Migration, not deferred)**:
 
 - **Section 1.6** (ToolBackend): Replace with ExecutionEnvironment; document that ToolBackend is removed
 - **Section 2.5** (RPC SandboxBackend Lifecycle): Update to reflect environment abstraction; SandboxBackend is eliminated
 - **Section 5** (Seam Reference Table): Replace ToolBackend seam entries with ExecutionEnvironment entries from section 9.1 above
 - **Section 5.1** (Import Flow): Add `internal/sandbox/environment` and sub-packages
+- **Architecture doc** (`00-architecture.md`): Update Key Terminology (§lines 67-71) to replace `ToolBackend`, `LocalBackend`, `SandboxBackend` with `ExecutionEnvironment` and its implementations
+
+### 9.5 Plan 13 RPC Gap: CreateSnapshot
+
+**Blocker:** `NativeSandboxEnvironment.CreateSnapshot()` calls `e.service.CreateSnapshot(ctx, req)`, but plan 13's `SandboxService` interface does not define a `CreateSnapshot` RPC method. Plan 11's `SandboxHostService` has the server-side implementation (`CreateSnapshot(ctx, sessionID, name)` — §3.1 line 228), but the RPC transport layer is missing.
+
+**Required addition to plan 13's `SandboxService` interface (§4.1):**
+
+```go
+CreateSnapshot(ctx context.Context, req *CreateSnapshotRequest) (*CreateSnapshotResponse, error)
+```
+
+**Request/Response types:**
+
+```go
+type CreateSnapshotRequest struct {
+    SessionID string
+    Name      string
+}
+
+type CreateSnapshotResponse struct {
+    SnapshotID string
+    SpaceUsed  int64 // bytes
+}
+```
+
+This maps directly to plan 11's `SandboxHostService.CreateSnapshot(ctx, sessionID, name)`. The orchestrator synthesizes turn-boundary behavior by calling `CreateSnapshot("turn-N")` — no separate `TurnComplete` RPC is needed.
+
+### 9.6 Native Environment Configuration Gap: Quota and TurnComplete
+
+Plan 11's `CreateSessionRequest` includes a `Quota` field (§3.2 line 247) for per-session ZFS dataset quotas. The addendum's `NativeSandboxEnvironment.Create` does not pass Quota.
+
+**Resolution:** Quota is controlled server-side via `ServiceConfig.DefaultSessionQuota`. If per-session overrides are needed, define a `NativeOptions` struct:
+
+```go
+type NativeOptions struct {
+    Quota int64 // per-session ZFS dataset quota in bytes; 0 = use server default
+}
+```
+
+Pass via `SessionConfig.Options`. This is not blocking for V1 — the server default is sufficient.
+
+**TurnComplete mapping:** Plan 11's `TurnComplete(ctx, sessionID)` creates an auto-named snapshot at turn boundaries. The addendum's `CreateSnapshot(ctx, name)` subsumes this — the orchestrator calls `env.CreateSnapshot(ctx, fmt.Sprintf("turn-%d", turnNum))`. No separate interface method needed.
 
 ---
 
@@ -1362,3 +1431,13 @@ When the RuntimeController process crashes after creating a remote environment b
 | 2 | reviewer-sea | P3 | Testing Strategy subsection numbering mismatch | Incorporated | Renumbered §10.x to §11.x |
 | 3 | reviewer-sea | P3 | SEC2 inconsistent with required SessionID | Incorporated | Test harness SEC2 updated to require error on empty SessionID |
 | 4 | reviewer-sea | P3 | LocalEnvironment destroyed field type contradicts §3.4 | Incorporated | Changed to atomic.Bool with Store/Load in §5.1 |
+
+## Seam Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P1 | CreateSnapshot RPC missing from plan 13 | Incorporated | §9.5 added with exact RPC signature needed; plan 13 update tracked as cross-plan dependency |
+| 2 | reviewer-sea | P2 | SessionState type undefined, constants differ from plan 11 | Incorporated | SessionState type + 6 constants defined in §3.2; string values match plan 11; StateDestroyed documented as client-side only |
+| 3 | reviewer-sea | P2 | ToolRequest.SessionID becomes dead field | Incorporated | Documented as vestigial in §3.2 and §7.3; cleanup deferred to post-migration |
+| 4 | reviewer-sea | P3 | Architecture doc terminology drift | Incorporated | §9.4 updated: apply updates during Phase 4, not deferred |
+| 5 | reviewer-sea | P3 | Quota and TurnComplete not exposed | Incorporated | §9.6 added: Quota via NativeOptions or server default; TurnComplete via CreateSnapshot("turn-N") |
