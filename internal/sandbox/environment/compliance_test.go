@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"h2-agent-runtime/internal/rpc/api"
@@ -142,7 +143,16 @@ func TestLocalEnvironmentComplianceSuite(t *testing.T) {
 
 // complianceMockService is a minimal api.SandboxService mock for compliance testing.
 type complianceMockService struct {
+	mu sync.Mutex
+
 	sessions map[string]string // id -> state
+
+	streamErr          error
+	streamRecvErr      error
+	streamProgressOnly bool
+
+	lastCreateReq *api.CreateSessionRequest
+	lastExecReq   *api.ExecuteToolRequest
 }
 
 func newComplianceMockService() *complianceMockService {
@@ -150,11 +160,16 @@ func newComplianceMockService() *complianceMockService {
 }
 
 func (m *complianceMockService) CreateSession(_ context.Context, req *api.CreateSessionRequest) (*api.CreateSessionResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastCreateReq = req
 	m.sessions[req.SessionID] = "active"
 	return &api.CreateSessionResponse{Session: &api.Session{ID: req.SessionID, State: "active"}}, nil
 }
 
 func (m *complianceMockService) GetSession(_ context.Context, req *api.GetSessionRequest) (*api.GetSessionResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	state, ok := m.sessions[req.SessionID]
 	if !ok {
 		return nil, fmt.Errorf("session not found: %s", req.SessionID)
@@ -163,21 +178,30 @@ func (m *complianceMockService) GetSession(_ context.Context, req *api.GetSessio
 }
 
 func (m *complianceMockService) PauseSession(_ context.Context, req *api.PauseSessionRequest) (*api.PauseSessionResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.sessions[req.SessionID] = "paused"
 	return &api.PauseSessionResponse{}, nil
 }
 
 func (m *complianceMockService) ResumeSession(_ context.Context, req *api.ResumeSessionRequest) (*api.ResumeSessionResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.sessions[req.SessionID] = "active"
 	return &api.ResumeSessionResponse{}, nil
 }
 
 func (m *complianceMockService) DestroySession(_ context.Context, req *api.DestroySessionRequest) (*api.DestroySessionResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.sessions, req.SessionID)
 	return &api.DestroySessionResponse{}, nil
 }
 
 func (m *complianceMockService) ExecuteTool(_ context.Context, req *api.ExecuteToolRequest) (*api.ExecuteToolResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastExecReq = req
 	return &api.ExecuteToolResponse{
 		SessionID:  req.SessionID,
 		ToolCallID: req.ToolCallID,
@@ -187,6 +211,12 @@ func (m *complianceMockService) ExecuteTool(_ context.Context, req *api.ExecuteT
 }
 
 func (m *complianceMockService) ExecuteToolStream(_ context.Context, req *api.ExecuteToolRequest) (api.ExecuteToolStreamReceiver, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.streamErr != nil {
+		return nil, m.streamErr
+	}
+	m.lastExecReq = req
 	if _, ok := m.sessions[req.SessionID]; !ok {
 		return nil, fmt.Errorf("session not found: %s", req.SessionID)
 	}
@@ -195,7 +225,7 @@ func (m *complianceMockService) ExecuteToolStream(_ context.Context, req *api.Ex
 		ToolCallID: req.ToolCallID,
 		ToolName:   req.ToolName,
 		Content:    "mock result",
-	}}, nil
+	}, recvErr: m.streamRecvErr, progressOnly: m.streamProgressOnly}, nil
 }
 
 func (m *complianceMockService) TurnComplete(_ context.Context, _ *api.TurnCompleteRequest) (*api.TurnCompleteResponse, error) {
@@ -223,15 +253,23 @@ func (m *complianceMockService) HealthCheck(_ context.Context, _ *api.HealthChec
 
 // complianceMockStream implements api.ExecuteToolStreamReceiver for compliance testing.
 type complianceMockStream struct {
-	response *api.ExecuteToolResponse
-	sent     bool
+	response     *api.ExecuteToolResponse
+	sent         bool
+	recvErr      error
+	progressOnly bool
 }
 
 func (s *complianceMockStream) Recv() (*api.ExecuteToolStreamMessage, error) {
 	if s.sent {
+		if s.recvErr != nil {
+			return nil, s.recvErr
+		}
 		return nil, fmt.Errorf("stream exhausted")
 	}
 	s.sent = true
+	if s.progressOnly {
+		return &api.ExecuteToolStreamMessage{Progress: &api.ToolProgress{Content: "partial", IsError: false}}, nil
+	}
 	return &api.ExecuteToolStreamMessage{Response: s.response}, nil
 }
 
