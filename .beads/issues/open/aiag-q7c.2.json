@@ -1,0 +1,29 @@
+{
+  "id": "aiag-q7c.2",
+  "title": "External testing: Docker environment, E2E scenarios, CI integration",
+  "description": "Implement external testing infrastructure from docs/plans/17-external-testing.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nKey deliverables:\n- Docker test environment: multi-stage Dockerfile (minimal/gvisor/full targets)\n- Docker Compose with profile-based services (sandbox-host-minimal/gvisor/full)\n- Usage example code: All Local, Agent in Sandbox, Agent outside Sandbox\n- E2E test scenarios across all placement modes\n- Backend config combination tests (C1-C4)\n- CI tier integration (PR-fast mock-based, PR-standard Docker, Nightly dedicated)\n- Test helpers: requireZFS, requireGVisor, sandboxHostConfig\n- Build tag gating (docker, native, provider_integration)\n\nDepends on: T1 (configurable backends must exist first)\n\nAC: Docker-based E2E tests run for minimal config, all placement modes tested, CI tiers defined.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-q7c",
+  "dependencies": [
+    {
+      "id": "aiag-q7c",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-q7c.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4b",
+    "plan-doc=17-external-testing"
+  ],
+  "assignee": "coder-2-sea",
+  "created_at": "2026-03-15T16:43:10.710564-07:00",
+  "updated_at": "2026-03-15T16:43:27.348335-07:00"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "aiag-q7c.1",
+  "title": "Configurable backends: config types, SandboxHostService adaptations, capability negotiation",
+  "description": "Implement configurable infrastructure backends from docs/plans/11-sandbox-host-service.add02.md.\n\nRequired reading: docs/plans/00-implementation-guide.md, docs/plans/11-sandbox-host-service.add01.md\n\nKey deliverables:\n- Config types: StorageBackend enum (zfs/local-disk), ContainerRuntime enum (gvisor/none)\n- Updated ServiceConfig with backend-specific fields, SessionsRootDir for local-disk\n- Constructor validation: fail if ZFS configured but ZFSManager nil, same for gVisor\n- SandboxHostService adaptations for all 4 backend combinations\n- SandboxHostService.Capabilities() public method\n- Dynamic Capabilities() on NativeSandboxEnvironment (derived from config)\n- Remove NativeSandboxCapabilities package var\n- Capability negotiation: CreateSessionResponse includes ServerCapabilities\n- Session-ID path-safety validation for local-disk\n- Unit tests for all 4 config combinations\n\nAC: All 4 backend combinations work, capability negotiation catches mismatches, path-safety prevents traversal, existing tests pass.",
+  "status": "in_progress",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-q7c",
+  "dependencies": [
+    {
+      "id": "aiag-q7c",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-q7c.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4b",
+    "plan-doc=11-sandbox-host-service.add02"
+  ],
+  "assignee": "coder-1-sea",
+  "created_at": "2026-03-15T16:42:59.658236-07:00",
+  "updated_at": "2026-03-15T16:43:27.3318-07:00"
+}
