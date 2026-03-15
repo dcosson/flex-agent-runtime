@@ -154,7 +154,7 @@ sequenceDiagram
 ### 2.4 Import Flow
 
 ```
-internal/sandbox/environment             → (minimal: types + interface only)
+internal/sandbox/environment             → internal/tools (type aliases: ToolRequest, ToolResponse, ToolProgress)
 internal/sandbox/environment/local       → internal/sandbox/environment, internal/tools (tool execution logic)
 internal/sandbox/environment/native      → internal/sandbox/environment, internal/rpc/client
 internal/sandbox/environment/e2b         → internal/sandbox/environment, net/http
@@ -163,7 +163,7 @@ internal/sandbox/environment/fly         → internal/sandbox/environment, net/h
 internal/agent                           → internal/sandbox/environment (calls ExecuteTool)
 ```
 
-No circular imports. The environment interface package is minimal (types + interface). Each implementation imports only the interface package and its own dependencies.
+No circular imports. The environment interface package imports `internal/tools` for type aliases (`ToolRequest`, `ToolResponse`, `ToolProgress`). This is a one-way dependency — `internal/tools` must NOT import `internal/sandbox/environment`. Each implementation imports only the interface package and its own dependencies.
 
 ---
 
@@ -203,16 +203,19 @@ type ExecutionEnvironment interface {
     Create(ctx context.Context, config SessionConfig) error
 
     // Pause suspends the environment with minimal idle compute cost.
-    // For LocalEnvironment: no-op.
+    // For LocalEnvironment: no-op (succeeds immediately).
     // For NativeSandboxEnvironment: transitions session state to paused (ZFS persists).
     // For E2BSandboxEnvironment: sandbox.pause() (full state preserved).
-    // For DaytonaSandboxEnvironment: auto-stop (lossy — disk preserved, processes lost).
+    // For DaytonaSandboxEnvironment: returns ErrCapabilityNotSupported (auto-stop is lossy).
     // For FlySandboxEnvironment: machine.suspend() (memory saved to disk).
-    // Returns ErrCapabilityNotSupported if pause is not meaningful for this environment.
+    //
+    // Capability contract: if Capabilities().Pause is true, Pause()/Resume()
+    // will succeed (even if the implementation is a no-op). If Capabilities().Pause
+    // is false, Pause()/Resume() MUST return ErrCapabilityNotSupported.
     Pause(ctx context.Context) error
 
     // Resume re-activates a previously paused environment.
-    // Returns ErrCapabilityNotSupported if pause/resume is not supported.
+    // Returns ErrCapabilityNotSupported if Capabilities().Pause is false.
     Resume(ctx context.Context) error
 
     // Destroy tears down the environment and all associated resources.
@@ -228,7 +231,13 @@ type ExecutionEnvironment interface {
     // onProgress streams incremental output for long-running tools (e.g., bash).
     ExecuteTool(ctx context.Context, req ToolRequest, onProgress func(ToolProgress)) (*ToolResponse, error)
 
-    // --- Capabilities & Snapshots ---
+    // --- State & Capabilities ---
+
+    // State returns the current lifecycle state of this environment.
+    // Remote environments track state internally (protected by mu).
+    // NativeSandboxEnvironment queries the server via RPC.
+    // LocalEnvironment returns StateActive (or StateDestroyed if Destroy was called).
+    State() SessionState
 
     // Capabilities returns the static capability set for this environment.
     // Callers use this to adapt behavior (e.g., skip snapshot calls if not supported).
@@ -263,8 +272,9 @@ type SessionConfig struct {
     // For LocalEnvironment: ignored (uses local filesystem as-is).
     BaseImage string
 
-    // SessionID is an optional pre-assigned session ID.
-    // If empty, the environment generates one.
+    // SessionID is the caller-assigned session ID. Required — Create() returns
+    // an error if empty. The caller (RuntimeController) owns session identity;
+    // environments do not generate IDs.
     SessionID string
 
     // Labels are arbitrary metadata attached to the session.
@@ -312,6 +322,30 @@ var (
     ErrSessionLimitReached = errors.New("session limit reached")
 )
 ```
+
+### 3.4 Concurrency Contract
+
+All `ExecutionEnvironment` implementations **MUST** be goroutine-safe. The RuntimeController may call lifecycle methods (Pause, Resume, Destroy) from a management goroutine while the Agent Loop concurrently calls `ExecuteTool` from a worker goroutine. The sequence diagram (§2.3) illustrates this concurrent access pattern.
+
+**Required synchronization strategy:**
+
+- Remote environments (E2B, Daytona, Fly) MUST protect mutable state fields (`state`, `sandboxID`/`workspaceID`/`machineID`, `labels`, timestamps) with a `sync.RWMutex`.
+- Lifecycle methods (`Create`, `Pause`, `Resume`, `Destroy`) take a **write lock** since they mutate state.
+- `ExecuteTool` takes a **read lock** for the state check (`if e.state != StateActive`) before proceeding with the API call. The API call itself runs outside the lock.
+- `Capabilities()` is static and requires no lock.
+- `State()` takes a **read lock**.
+- `NativeSandboxEnvironment` delegates all state management to the server-side `SandboxHostService` via RPC, so it does not need internal locking (the server handles concurrency).
+- `LocalEnvironment` requires no mutex because its only mutable field (`destroyed`) transitions monotonically from false to true. If concurrent Destroy + ExecuteTool is needed, a simple `atomic.Bool` suffices.
+
+**Permitted concurrent method pairs:**
+
+| Method A | Method B | Allowed? | Notes |
+|----------|----------|----------|-------|
+| `ExecuteTool` | `ExecuteTool` | Yes | Multiple concurrent tool calls |
+| `ExecuteTool` | `Pause` | Yes | Pause waits for state lock; in-flight ExecuteTool continues |
+| `ExecuteTool` | `Destroy` | Yes | Destroy waits for state lock; in-flight ExecuteTool may see error |
+| `Pause` | `Resume` | No | Serialized by write lock |
+| `Create` | any | No | Create must complete before other calls |
 
 ---
 
@@ -367,10 +401,14 @@ type Capabilities struct {
 
 ```go
 // LocalCapabilities: LocalEnvironment has no sandbox features.
+// Pause is true because calling Pause()/Resume() succeeds (no-op) — callers
+// do not need special handling. Pause:true means "Pause() will succeed,"
+// even if the implementation is a no-op. Pause:false means "Pause() will
+// return ErrCapabilityNotSupported."
 var LocalCapabilities = Capabilities{
     Snapshots:         false,
     Rollback:          false,
-    Pause:             false, // no-op, not a real pause
+    Pause:             true,  // no-op pause/resume always succeeds
     TierRouting:       false,
     StreamingProgress: true,  // local exec can stream output
 }
@@ -426,12 +464,15 @@ var FlyCapabilities = Capabilities{
 // File: local.go
 
 // LocalEnvironment executes tools directly on the local filesystem.
-// All lifecycle methods (Create, Pause, Resume, Destroy) are no-ops.
-// This is used in All Local mode and by agents running inside sandboxes
+// Create and Pause/Resume are no-ops. Destroy marks the environment as
+// destroyed — subsequent ExecuteTool calls return ErrNotActive, matching
+// the compliance suite contract that all environments enforce post-Destroy.
+// Used in All Local mode and by agents running inside sandboxes
 // in Agent in Sandbox mode (from the agent's perspective, tools are local).
 type LocalEnvironment struct {
-    workDir string       // working directory for tool execution
-    logger  *slog.Logger
+    workDir   string       // working directory for tool execution
+    logger    *slog.Logger
+    destroyed bool         // set by Destroy(); guards ExecuteTool
 }
 
 func NewLocalEnvironment(workDir string, logger *slog.Logger) *LocalEnvironment {
@@ -443,18 +484,22 @@ func (e *LocalEnvironment) Create(ctx context.Context, config environment.Sessio
 }
 
 func (e *LocalEnvironment) Pause(ctx context.Context) error {
-    return nil // no-op
+    return nil // no-op (Capabilities().Pause == true)
 }
 
 func (e *LocalEnvironment) Resume(ctx context.Context) error {
-    return nil // no-op
+    return nil // no-op (Capabilities().Pause == true)
 }
 
 func (e *LocalEnvironment) Destroy(ctx context.Context) error {
-    return nil // no-op
+    e.destroyed = true
+    return nil
 }
 
 func (e *LocalEnvironment) ExecuteTool(ctx context.Context, req environment.ToolRequest, onProgress func(environment.ToolProgress)) (*environment.ToolResponse, error) {
+    if e.destroyed {
+        return nil, environment.ErrNotActive
+    }
     // Dispatch to the local tool execution engine.
     // File ops (read, write, edit, grep, glob) execute as Go functions.
     // Process ops (bash) execute as os/exec commands.
@@ -553,13 +598,12 @@ func (e *NativeSandboxEnvironment) ExecuteTool(ctx context.Context, req environm
     }
     defer stream.Close()
 
+    // The server sends zero or more Progress messages followed by exactly one
+    // Response message, then closes the stream. We break on Response.
     var final *api.ExecuteToolResponse
     for {
         msg, recvErr := stream.Recv()
         if recvErr != nil {
-            if final != nil {
-                break
-            }
             return nil, fmt.Errorf("native sandbox: stream recv: %w", recvErr)
         }
         if msg == nil {
@@ -643,7 +687,8 @@ type E2BSandboxEnvironment struct {
     baseURL    string
     logger     *slog.Logger
 
-    // Session state (set after Create)
+    // Session state (set after Create). Protected by mu per §3.4 concurrency contract.
+    mu        sync.RWMutex
     sandboxID string
     state     SessionState
     created   time.Time
@@ -785,7 +830,8 @@ type DaytonaSandboxEnvironment struct {
     httpClient *http.Client
     logger     *slog.Logger
 
-    // Session state (set after Create)
+    // Session state (set after Create). Protected by mu per §3.4 concurrency contract.
+    mu          sync.RWMutex
     workspaceID string
     state       SessionState
     created     time.Time
@@ -853,7 +899,8 @@ type FlySandboxEnvironment struct {
     httpClient *http.Client
     logger     *slog.Logger
 
-    // Session state (set after Create)
+    // Session state (set after Create). Protected by mu per §3.4 concurrency contract.
+    mu        sync.RWMutex
     machineID string
     volumeID  string
     ipAddr    string // private IPv6 within Fly network
@@ -919,6 +966,8 @@ func (e *FlySandboxEnvironment) Rollback(ctx context.Context, snapshotID string)
 
 // Create, Resume, Destroy follow the same Machine API patterns.
 ```
+
+**SSH Host Key Verification Strategy:** The custom machine image (which must include sshd) pins a known SSH host key pair baked into the image at build time. The public host key is stored in the application's configuration alongside the SSH private key used for client authentication. When connecting, `FlySandboxEnvironment` uses a `knownhosts.FixedHostKey(pinnedPublicKey)` callback — no `InsecureIgnoreHostKey`. If the image is rebuilt with new host keys, the configuration must be updated in lockstep. This approach works because all machines use the same image and thus the same host key.
 
 ---
 
@@ -1039,7 +1088,27 @@ For `NativeSandboxEnvironment`, Tier 1/2 routing is handled server-side by `Sand
 - **File ops** (read, write, edit, grep, glob): Use the environment's filesystem API
 - **Process ops** (bash, git commands): Use the environment's command execution API
 
-This is an internal concern of each environment implementation, not an interface-level distinction. The `isFileOp()` helper (shared utility) helps environments route internally.
+This is an internal concern of each environment implementation, not an interface-level distinction. The `isFileOp()` helper (shared utility in `internal/sandbox/environment`) helps environments route internally:
+
+```go
+// Package: internal/sandbox/environment
+// File: classify.go
+
+// isFileOp returns true for tool names that operate on the filesystem
+// (read, write, edit, grep, glob) and should be dispatched via the
+// environment's filesystem API. All other tools are treated as process
+// operations and dispatched via the command execution API.
+// This is independent of the Tier 1/2 classifier in internal/tools,
+// which is a NativeSandbox-specific concept.
+func IsFileOp(toolName string) bool {
+    switch toolName {
+    case "read", "write", "edit", "grep", "glob":
+        return true
+    default:
+        return false
+    }
+}
+```
 
 ---
 
@@ -1105,14 +1174,52 @@ The following sections of `00-implementation-guide.md` need updates:
 
 ---
 
-## 10. Testing Strategy
+## 10. Acceptance Criteria
+
+These scenarios prove the ExecutionEnvironment abstraction works end-to-end across component boundaries, not just in isolation.
+
+**AC1: Agent executes tools through E2B environment**
+1. RuntimeController creates an `E2BSandboxEnvironment` with a valid template ID.
+2. Agent loop receives a user prompt requiring file read + bash execution.
+3. Agent calls `env.ExecuteTool()` for `read_file` → receives file content via E2B filesystem API.
+4. Agent calls `env.ExecuteTool()` for `bash` → receives streamed output via `onProgress` callback.
+5. **Expected:** Both tools complete successfully; agent produces a coherent response incorporating tool output.
+
+**AC2: RuntimeController pauses and resumes a native sandbox session**
+1. RuntimeController creates a `NativeSandboxEnvironment`, agent writes a file.
+2. RuntimeController calls `env.Pause()` (session state transitions to paused via RPC).
+3. RuntimeController calls `env.Resume()` (session state transitions back to active).
+4. Agent reads the file written before pause.
+5. **Expected:** File content is preserved across pause/resume; agent continues without re-creation.
+
+**AC3: Capability-gated fallback for unsupported operations**
+1. RuntimeController creates a `DaytonaSandboxEnvironment` (Pause=false, Snapshots=false).
+2. Orchestrator calls `env.CreateSnapshot()` → receives `ErrCapabilityNotSupported`.
+3. Orchestrator calls `env.Pause()` → receives `ErrCapabilityNotSupported`.
+4. Orchestrator falls back to destroy+recreate recovery strategy.
+5. **Expected:** No panics, no errors propagated to user; orchestrator adapts gracefully.
+
+**AC4: Environment swap transparency**
+1. Run the same 5-tool agent workflow (read, write, bash, edit, grep) through `LocalEnvironment` and `NativeSandboxEnvironment`.
+2. Compare `ToolResponse` structures (content block count, exit code presence).
+3. **Expected:** Structurally equivalent responses — the agent loop does not need environment-specific handling.
+
+**AC5: Post-Destroy error enforcement**
+1. Create any environment, execute a tool successfully, then call `Destroy()`.
+2. Attempt `ExecuteTool()` on the destroyed environment.
+3. **Expected:** Returns `ErrNotActive` for all five environment types.
+
+---
+
+## 11. Testing Strategy
 
 ### 10.1 Unit Tests (per environment)
 
 **T1: LocalEnvironment behavior**
-- Verify Create/Pause/Resume/Destroy are all no-ops (return nil)
+- Verify Create/Pause/Resume return nil (no-ops)
+- Verify Destroy sets destroyed state; subsequent ExecuteTool returns `ErrNotActive`
 - Verify ExecuteTool dispatches to local tool execution
-- Verify Capabilities returns `LocalCapabilities`
+- Verify Capabilities returns `LocalCapabilities` (including `Pause: true`)
 - Verify CreateSnapshot/Rollback return `ErrCapabilityNotSupported`
 
 **T2: NativeSandboxEnvironment adapter correctness**
@@ -1124,6 +1231,7 @@ The following sections of `00-implementation-guide.md` need updates:
 **T3: E2BSandboxEnvironment API mapping**
 - Use HTTP test server (`httptest.Server`) to mock E2B API
 - Verify Create sends correct POST /sandboxes payload
+- Verify Create with wrong Options type (e.g., `DaytonaOptions` instead of `E2BOptions`) returns a clear error
 - Verify ExecuteTool routes file ops to filesystem API, commands to commands API
 - Verify Pause calls POST /sandboxes/{id}/pause
 - Verify CreateSnapshot returns `ErrCapabilityNotSupported`
@@ -1179,7 +1287,7 @@ The following sections of `00-implementation-guide.md` need updates:
 
 ---
 
-## 11. Implementation Sequence
+## 12. Implementation Sequence
 
 1. **Phase 1: Interface + Types** -- Create `internal/sandbox/environment` package with interface, types, capabilities, errors. No implementations yet.
 
@@ -1197,7 +1305,24 @@ The following sections of `00-implementation-guide.md` need updates:
 
 ---
 
-## 12. Open Questions
+## 13. Orphaned Environment Cleanup
+
+When the RuntimeController process crashes after creating a remote environment but before destroying it, the environment becomes orphaned. Each provider handles this differently:
+
+| Provider | Mechanism | Recovery |
+|----------|-----------|----------|
+| **E2B** | Built-in 24h TTL (configurable via `timeout` parameter) | Orphaned sandboxes auto-destroy at timeout. Set a conservative default (e.g., 1h). |
+| **Daytona** | Auto-stop after idle period | Workspace stops but disk persists. Requires manual cleanup or label-based GC sweep. |
+| **Fly** | Auto-stop configured on machine creation | Machine stops after idle; volume persists. Label-based GC sweep for full cleanup. |
+| **Native** | Server-side session TTL in SandboxHostService | Handled by plan 11's existing session reaping logic. |
+
+**Label-based GC sweep:** All remote environments attach `Labels` from `SessionConfig` during creation (including a `managed-by: h2-runtime` label and a `created-at` timestamp). A background goroutine in the RuntimeController periodically lists environments via provider APIs, finds those with `managed-by: h2-runtime` labels that exceed a maximum age (configurable, default 2h), and destroys them. This sweep runs every 15 minutes and is safe to run from multiple controllers (destroy is idempotent).
+
+**Manual recovery:** If the GC sweep is disabled or the controller is down, operators can list and destroy orphaned environments via provider CLIs/dashboards using the `managed-by` label filter.
+
+---
+
+## 14. Open Questions
 
 1. **Environment-specific tool implementations:** Remote environments need to translate tool requests (e.g., `read_file` with path parameter) into environment-specific API calls (e.g., E2B filesystem API). Should this translation live in each environment, or should we define a `RemoteToolExecutor` helper that environments can share?
 
@@ -1206,3 +1331,24 @@ The following sections of `00-implementation-guide.md` need updates:
 3. **Health checks:** Should `ExecutionEnvironment` include a `HealthCheck()` method? The native environment delegates to `SandboxHostService.HealthCheck()`, but remote environments would need their own health semantics.
 
 4. **Multi-environment sessions:** The current design naturally supports using different environments for different sessions (e.g., some agents on native sandbox, some on E2B). The RuntimeController creates the right environment per session. Orchestrator-level routing logic would need to be designed but is out of scope for this addendum.
+
+---
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | LocalEnvironment Pause capability contract conflict | Incorporated | LocalCapabilities.Pause set to true; capability semantics clarified in §4.2 and Pause doc comment |
+| 2 | coder-1-sea | P1 | Destroy semantics conflict with compliance suite | Incorporated | LocalEnvironment tracks destroyed state; ExecuteTool returns ErrNotActive post-Destroy |
+| 3 | coder-1-sea | P2 | Concurrency safety underspecified | Incorporated | §3.4 concurrency contract added; sync.RWMutex added to E2B/Daytona/Fly structs |
+| 4 | coder-1-sea | P2 | Session identity ownership ambiguous | Incorporated | SessionConfig.SessionID now required; auto-generation removed |
+| 5 | reviewer-sea | P1 | Concurrent access to mutable state unprotected | Incorporated | §3.4 concurrency contract; sync.RWMutex on remote env structs (overlaps coder-1-sea #3) |
+| 6 | reviewer-sea | P1 | LocalEnvironment.Pause violates test harness P1 | Incorporated | LocalCapabilities.Pause=true (overlaps coder-1-sea #1) |
+| 7 | reviewer-sea | P2 | No state query method on ExecutionEnvironment | Incorporated | State() SessionState added to interface §3.1 |
+| 8 | reviewer-sea | P2 | SSH host key verification undefined for Fly | Incorporated | Pinned host key strategy documented in §5.5 |
+| 9 | reviewer-sea | P2 | isFileOp() referenced but never defined | Incorporated | IsFileOp() defined in §7.5 with tool name list |
+| 10 | reviewer-sea | P2 | Missing acceptance criteria section | Incorporated | §10 added with 5 cross-boundary scenarios |
+| 11 | reviewer-sea | P3 | Import flow claim inaccurate | Incorporated | §2.4 updated to acknowledge internal/tools import |
+| 12 | reviewer-sea | P3 | SessionConfig.Options typed as any | Incorporated | Wrong-type Options test added to T3 in §11.1 |
+| 13 | reviewer-sea | P3 | Dead code in NativeSandboxEnvironment stream loop | Incorporated | Unreachable if-final-nil branch removed in §5.2 |
+| 14 | reviewer-sea | P3 | Orphaned sandbox recovery unspecified | Incorporated | §13 added with label-based GC sweep + provider TTL strategy |

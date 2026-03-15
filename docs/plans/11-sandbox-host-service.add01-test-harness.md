@@ -24,6 +24,12 @@ Property: forall env ExecutionEnvironment:
         assert errors.Is(err, ErrCapabilityNotSupported)
         err = env.Resume(ctx)
         assert errors.Is(err, ErrCapabilityNotSupported)
+    if caps.Pause:
+        // Pause=true means Pause()/Resume() succeed (even if no-op, e.g. LocalEnvironment)
+        err := env.Pause(ctx)
+        assert err == nil
+        err = env.Resume(ctx)
+        assert err == nil
 ```
 
 Run against all five environments (with mocked backends). Generates random operation sequences.
@@ -370,13 +376,14 @@ For environments with `ConcurrentSessions > 0`, create environments up to and be
 
 Full agent-like workflow through the local environment:
 
-1. Create environment (no-op)
+1. Create environment (no-op, returns nil)
 2. Execute read_file, write_file, bash tools
 3. Attempt CreateSnapshot -- verify `ErrCapabilityNotSupported`
-4. Pause (no-op)
-5. Resume (no-op)
-6. Destroy (no-op)
-7. Verify tools still work on local filesystem after lifecycle no-ops
+4. Pause (no-op, returns nil — Capabilities().Pause == true)
+5. Resume (no-op, returns nil)
+6. Execute more tools — verify still works after pause/resume
+7. Destroy (marks destroyed)
+8. Attempt ExecuteTool — verify `ErrNotActive`
 
 ### E2E2. NativeSandboxEnvironment Full Cycle (with MemorySandboxService)
 
@@ -445,3 +452,14 @@ Verify that the agent loop sees consistent behavior regardless of environment:
 7. E2E tests verify full lifecycle for local, native sandbox, and mocked remote environments
 8. Backward compatibility: `NativeSandboxEnvironment` produces identical results to direct `SandboxClient` path
 9. 85%+ code coverage on `internal/sandbox/environment/**` files
+
+---
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | Pause capability contract: P1 property fails for LocalEnvironment | Incorporated | P1 property updated with positive branch for Pause=true |
+| 2 | coder-1-sea | P1 | Destroy compliance: DestroyedEnvironmentErrors test fails for Local | Incorporated | E2E1 updated: Destroy marks destroyed, ExecuteTool returns ErrNotActive |
+| 3 | reviewer-sea | P1 | Concurrent access: stress tests require sync but plan had none | Incorporated | §3.4 concurrency contract covers sync strategy; ST1/ST2 validate |
+| 4 | reviewer-sea | P1 | LocalEnvironment.Pause violates P1 invariant | Incorporated | P1 property now tests both Pause=true and Pause=false branches |
