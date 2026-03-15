@@ -67,3 +67,16 @@ Restructure to create N local + N native environments, execute tools concurrentl
 4 findings: 0 P0, 0 P1, 2 P2, 2 P3
 
 **Verdict**: Approved with revisions
+
+## R1 Disposition
+
+All findings addressed at bd72a78. Re-reviewed and verified.
+
+| # | Severity | Summary | Disposition | Notes |
+|---|----------|---------|-------------|-------|
+| 1 | P2 | ST1/ST2 goroutine counts below plan spec | Incorporated | ST1 now 50, ST2 now 100 — matches plan. |
+| 2 | P2 | P5 duplicates local parity test | Incorporated | Reworked to NativeSandboxEnvironment parity vs direct service stream path. Correct per plan. |
+| 3 | P3 | SEC2 missing path traversal cases | Incorporated | Now tests empty, `../../../etc/passwd`, and `..\\windows\\system32` paths. |
+| 4 | P3 | ST3 sequential instead of concurrent | Incorporated | Creates 10 local + 10 native, executes concurrently across all 20, then destroys. |
+
+**Final verdict**: Approved
