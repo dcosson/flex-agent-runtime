@@ -148,15 +148,24 @@ func (m *MemorySandboxService) CreateSession(_ context.Context, req *api.CreateS
 	sess.state = memoryStateActive
 	m.sessions[sessionID] = sess
 
-	return &api.CreateSessionResponse{Session: &api.Session{
-		ID:         sessionID,
-		State:      sess.state,
-		Mountpoint: sess.mountpoint,
-		TurnCount:  sess.turnCount,
-		SnapCount:  sess.snapCount,
-		Created:    sess.created,
-		Labels:     cloneLabels(sess.labels),
-	}}, nil
+	return &api.CreateSessionResponse{
+		Session: &api.Session{
+			ID:         sessionID,
+			State:      sess.state,
+			Mountpoint: sess.mountpoint,
+			TurnCount:  sess.turnCount,
+			SnapCount:  sess.snapCount,
+			Created:    sess.created,
+			Labels:     cloneLabels(sess.labels),
+		},
+		ServerCapabilities: api.Capabilities{
+			Snapshots:         true,
+			Rollback:          true,
+			Pause:             true,
+			TierRouting:       true,
+			StreamingProgress: true,
+		},
+	}, nil
 }
 
 func (m *MemorySandboxService) GetSession(_ context.Context, req *api.GetSessionRequest) (*api.GetSessionResponse, error) {

@@ -8,6 +8,9 @@ import (
 )
 
 func (svc *SandboxHostService) TurnComplete(ctx context.Context, sessionID string) (*SnapshotResult, error) {
+	if svc.config.StorageBackend != StorageBackendZFS {
+		return nil, nil
+	}
 	sess, err := svc.getSession(sessionID)
 	if err != nil {
 		return nil, err
@@ -42,6 +45,9 @@ func (svc *SandboxHostService) TurnComplete(ctx context.Context, sessionID strin
 }
 
 func (svc *SandboxHostService) CreateSnapshot(ctx context.Context, sessionID string, name string) (*SnapshotResult, error) {
+	if svc.config.StorageBackend != StorageBackendZFS {
+		return nil, ErrSnapshotsNotAvailable
+	}
 	sess, err := svc.getSession(sessionID)
 	if err != nil {
 		return nil, err
@@ -60,6 +66,9 @@ func (svc *SandboxHostService) CreateSnapshot(ctx context.Context, sessionID str
 }
 
 func (svc *SandboxHostService) RollbackSession(ctx context.Context, sessionID string, snapshotID string) error {
+	if svc.config.StorageBackend != StorageBackendZFS {
+		return ErrSnapshotsNotAvailable
+	}
 	sess, err := svc.getSession(sessionID)
 	if err != nil {
 		return err
@@ -109,6 +118,9 @@ func (svc *SandboxHostService) RollbackSession(ctx context.Context, sessionID st
 }
 
 func (svc *SandboxHostService) ListSnapshots(ctx context.Context, sessionID string) ([]zfs.SnapshotInfo, error) {
+	if svc.config.StorageBackend != StorageBackendZFS {
+		return nil, ErrSnapshotsNotAvailable
+	}
 	sess, err := svc.getSession(sessionID)
 	if err != nil {
 		return nil, err

@@ -15,7 +15,18 @@ type CreateSessionRequest struct {
 }
 
 type CreateSessionResponse struct {
-	Session *Session
+	Session            *Session
+	ServerCapabilities Capabilities
+}
+
+type Capabilities struct {
+	Snapshots          bool
+	Rollback           bool
+	Pause              bool
+	StreamingProgress  bool
+	TierRouting        bool
+	MaxSessionDuration time.Duration
+	ConcurrentSessions int
 }
 
 type GetSessionRequest struct {

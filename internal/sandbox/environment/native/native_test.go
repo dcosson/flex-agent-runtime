@@ -50,12 +50,14 @@ type mockSandboxService struct {
 	rollbackCalls int
 	lastCreateReq *api.CreateSessionRequest
 	lastExecReq   *api.ExecuteToolRequest
+	serverCaps    api.Capabilities
 }
 
 func newMockService() *mockSandboxService {
 	return &mockSandboxService{
-		sessions:  make(map[string]*api.Session),
-		snapshots: make(map[string]*api.CreateSnapshotResponse),
+		sessions:   make(map[string]*api.Session),
+		snapshots:  make(map[string]*api.CreateSnapshotResponse),
+		serverCaps: api.Capabilities{Snapshots: true, Rollback: true, Pause: true, TierRouting: true, StreamingProgress: true},
 	}
 }
 
@@ -72,7 +74,10 @@ func (m *mockSandboxService) CreateSession(_ context.Context, req *api.CreateSes
 		State: "active",
 	}
 	m.sessions[req.SessionID] = sess
-	return &api.CreateSessionResponse{Session: sess}, nil
+	return &api.CreateSessionResponse{
+		Session:            sess,
+		ServerCapabilities: m.serverCaps,
+	}, nil
 }
 
 func (m *mockSandboxService) GetSession(_ context.Context, req *api.GetSessionRequest) (*api.GetSessionResponse, error) {
@@ -440,8 +445,70 @@ func TestCapabilities(t *testing.T) {
 	if !caps.StreamingProgress {
 		t.Error("StreamingProgress should be true")
 	}
-	if caps != environment.NativeSandboxCapabilities {
-		t.Fatalf("Capabilities() = %#v, want NativeSandboxCapabilities", caps)
+	if got, want := caps.Snapshots, true; got != want {
+		t.Fatalf("Snapshots = %v, want %v", got, want)
+	}
+	if got, want := caps.Rollback, true; got != want {
+		t.Fatalf("Rollback = %v, want %v", got, want)
+	}
+	if got, want := caps.Pause, true; got != want {
+		t.Fatalf("Pause = %v, want %v", got, want)
+	}
+	if got, want := caps.TierRouting, true; got != want {
+		t.Fatalf("TierRouting = %v, want %v", got, want)
+	}
+}
+
+func TestCapabilities_FromConfig(t *testing.T) {
+	env := NewNativeSandboxEnvironment(newMockService(), slog.Default(), NativeSandboxConfig{
+		StorageBackend:   StorageBackendLocalDisk,
+		ContainerRuntime: ContainerRuntimeNone,
+	})
+	caps := env.Capabilities()
+	if caps.Snapshots {
+		t.Fatal("Snapshots should be false for local-disk")
+	}
+	if caps.Rollback {
+		t.Fatal("Rollback should be false for local-disk")
+	}
+	if caps.TierRouting {
+		t.Fatal("TierRouting should be false for runtime=none")
+	}
+	if !caps.Pause {
+		t.Fatal("Pause should remain true")
+	}
+}
+
+func TestCreate_CapabilityNegotiationMismatchSnapshots(t *testing.T) {
+	svc := newMockService()
+	svc.serverCaps.Snapshots = false
+	svc.serverCaps.Rollback = false
+	env := NewNativeSandboxEnvironment(svc, slog.Default(), NativeSandboxConfig{
+		StorageBackend:   StorageBackendZFS,
+		ContainerRuntime: ContainerRuntimeGVisor,
+	})
+	err := env.Create(context.Background(), environment.SessionConfig{SessionID: "sess-1"})
+	if err == nil {
+		t.Fatal("expected mismatch error")
+	}
+	if !strings.Contains(err.Error(), "configured zfs backend") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCreate_CapabilityNegotiationMismatchTierRouting(t *testing.T) {
+	svc := newMockService()
+	svc.serverCaps.TierRouting = false
+	env := NewNativeSandboxEnvironment(svc, slog.Default(), NativeSandboxConfig{
+		StorageBackend:   StorageBackendZFS,
+		ContainerRuntime: ContainerRuntimeGVisor,
+	})
+	err := env.Create(context.Background(), environment.SessionConfig{SessionID: "sess-1"})
+	if err == nil {
+		t.Fatal("expected mismatch error")
+	}
+	if !strings.Contains(err.Error(), "configured gvisor runtime") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -704,6 +771,20 @@ func TestCreateSnapshot_RPCError(t *testing.T) {
 	}
 }
 
+func TestCreateSnapshot_NonZFSCapability(t *testing.T) {
+	svc := newMockService()
+	env := NewNativeSandboxEnvironment(svc, slog.Default(), NativeSandboxConfig{
+		StorageBackend:   StorageBackendLocalDisk,
+		ContainerRuntime: ContainerRuntimeNone,
+	})
+	if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "sess-1"}); err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+	if _, err := env.CreateSnapshot(context.Background(), "snap"); !errors.Is(err, environment.ErrCapabilityNotSupported) {
+		t.Fatalf("CreateSnapshot error = %v, want ErrCapabilityNotSupported", err)
+	}
+}
+
 func TestRollback_Success(t *testing.T) {
 	svc := newMockService()
 	env := createTestEnv(t, svc, "sess-1")
@@ -728,6 +809,20 @@ func TestRollback_RPCError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "native sandbox: rollback") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRollback_NonZFSCapability(t *testing.T) {
+	svc := newMockService()
+	env := NewNativeSandboxEnvironment(svc, slog.Default(), NativeSandboxConfig{
+		StorageBackend:   StorageBackendLocalDisk,
+		ContainerRuntime: ContainerRuntimeNone,
+	})
+	if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "sess-1"}); err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+	if err := env.Rollback(context.Background(), "snap"); !errors.Is(err, environment.ErrCapabilityNotSupported) {
+		t.Fatalf("Rollback error = %v, want ErrCapabilityNotSupported", err)
 	}
 }
 

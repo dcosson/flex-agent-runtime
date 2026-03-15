@@ -25,12 +25,17 @@ import (
 type NativeSandboxEnvironment struct {
 	service   api.SandboxService
 	logger    *slog.Logger
+	config    NativeSandboxConfig
 	sessionID string // set after Create(), read-only thereafter
 	destroyed atomic.Bool
 }
 
-func NewNativeSandboxEnvironment(service api.SandboxService, logger *slog.Logger) *NativeSandboxEnvironment {
-	return &NativeSandboxEnvironment{service: service, logger: logger}
+func NewNativeSandboxEnvironment(service api.SandboxService, logger *slog.Logger, cfg ...NativeSandboxConfig) *NativeSandboxEnvironment {
+	config := DefaultConfig()
+	if len(cfg) > 0 {
+		config = cfg[0]
+	}
+	return &NativeSandboxEnvironment{service: service, logger: logger, config: config}
 }
 
 func (e *NativeSandboxEnvironment) Create(ctx context.Context, config environment.SessionConfig) error {
@@ -44,6 +49,12 @@ func (e *NativeSandboxEnvironment) Create(ctx context.Context, config environmen
 	})
 	if err != nil {
 		return fmt.Errorf("native sandbox: create: %w", err)
+	}
+	if e.config.StorageBackend == StorageBackendZFS && !rpcResp.ServerCapabilities.Snapshots {
+		return fmt.Errorf("native sandbox: capability mismatch: configured zfs backend but server has snapshots=false")
+	}
+	if e.config.ContainerRuntime == ContainerRuntimeGVisor && !rpcResp.ServerCapabilities.TierRouting {
+		return fmt.Errorf("native sandbox: capability mismatch: configured gvisor runtime but server has tier_routing=false")
 	}
 	e.sessionID = rpcResp.Session.ID
 	return nil
@@ -151,10 +162,19 @@ func (e *NativeSandboxEnvironment) State() environment.SessionState {
 }
 
 func (e *NativeSandboxEnvironment) Capabilities() environment.Capabilities {
-	return environment.NativeSandboxCapabilities
+	return environment.Capabilities{
+		Snapshots:         e.config.StorageBackend == StorageBackendZFS,
+		Rollback:          e.config.StorageBackend == StorageBackendZFS,
+		Pause:             true,
+		TierRouting:       e.config.ContainerRuntime == ContainerRuntimeGVisor,
+		StreamingProgress: true,
+	}
 }
 
 func (e *NativeSandboxEnvironment) CreateSnapshot(ctx context.Context, name string) (*environment.SnapshotInfo, error) {
+	if e.config.StorageBackend != StorageBackendZFS {
+		return nil, environment.ErrCapabilityNotSupported
+	}
 	resp, err := e.service.CreateSnapshot(ctx, &api.CreateSnapshotRequest{
 		SessionID: e.sessionID,
 		Name:      name,
@@ -171,6 +191,9 @@ func (e *NativeSandboxEnvironment) CreateSnapshot(ctx context.Context, name stri
 }
 
 func (e *NativeSandboxEnvironment) Rollback(ctx context.Context, snapshotID string) error {
+	if e.config.StorageBackend != StorageBackendZFS {
+		return environment.ErrCapabilityNotSupported
+	}
 	_, err := e.service.RollbackSession(ctx, &api.RollbackSessionRequest{
 		SessionID:  e.sessionID,
 		SnapshotID: snapshotID,

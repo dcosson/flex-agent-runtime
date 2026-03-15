@@ -10,14 +10,15 @@ import (
 )
 
 var (
-	ErrSessionNotFound    = errors.New("sandbox: session not found")
-	ErrSessionExists      = errors.New("sandbox: session already exists")
-	ErrSessionPaused      = errors.New("sandbox: session is paused")
-	ErrSessionDestroying  = errors.New("sandbox: session is destroying")
-	ErrRollbackInProgress = errors.New("sandbox: rollback in progress")
-	ErrInvalidState       = errors.New("sandbox: invalid session state")
-	ErrMaxSessionsReached = errors.New("sandbox: max sessions reached")
-	ErrToolsInFlight      = errors.New("sandbox: tools in flight")
+	ErrSessionNotFound       = errors.New("sandbox: session not found")
+	ErrSessionExists         = errors.New("sandbox: session already exists")
+	ErrSessionPaused         = errors.New("sandbox: session is paused")
+	ErrSessionDestroying     = errors.New("sandbox: session is destroying")
+	ErrRollbackInProgress    = errors.New("sandbox: rollback in progress")
+	ErrInvalidState          = errors.New("sandbox: invalid session state")
+	ErrMaxSessionsReached    = errors.New("sandbox: max sessions reached")
+	ErrToolsInFlight         = errors.New("sandbox: tools in flight")
+	ErrSnapshotsNotAvailable = errors.New("sandbox: snapshots not available (requires ZFS storage backend)")
 )
 
 type SessionState string
@@ -50,9 +51,13 @@ type SnapshotEntry struct {
 }
 
 type ServiceConfig struct {
+	StorageBackend   StorageBackend
+	ContainerRuntime ContainerRuntime
+
 	PoolName               string
 	BasesDataset           string
 	SessionsDataset        string
+	SessionsRootDir        string
 	MaxSessions            int
 	DefaultSessionQuota    int64
 	SnapshotPrefix         string
@@ -69,6 +74,8 @@ type ServiceConfig struct {
 
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
+		StorageBackend:         StorageBackendZFS,
+		ContainerRuntime:       ContainerRuntimeGVisor,
 		SnapshotPrefix:         "turn",
 		ToolTimeout:            5 * time.Minute,
 		PoolSpaceWarnThreshold: 0.85,

@@ -15,7 +15,10 @@ import (
 func TestMergeDefaultConfig(t *testing.T) {
 	// mergeDefaultConfig is called when SnapshotPrefix is empty
 	cfg := ServiceConfig{} // all zero values
-	svc := NewSandboxHostService(cfg, zfs.NewMockManager(), newMockGVisor(), nil)
+	svc, err := NewSandboxHostService(cfg, zfs.NewMockManager(), newMockGVisor(), nil)
+	if err != nil {
+		t.Fatalf("NewSandboxHostService: %v", err)
+	}
 
 	if svc.config.SnapshotPrefix != "turn" {
 		t.Errorf("SnapshotPrefix = %q, want 'turn'", svc.config.SnapshotPrefix)
@@ -504,9 +507,13 @@ func TestShutdownWithNilGVisor(t *testing.T) {
 	cfg.PoolName = "pool"
 	cfg.BasesDataset = "pool/bases"
 	cfg.SessionsDataset = "pool/sessions"
-	svc := NewSandboxHostService(cfg, zm, nil, nil)
+	cfg.ContainerRuntime = ContainerRuntimeNone
+	svc, err := NewSandboxHostService(cfg, zm, nil, nil)
+	if err != nil {
+		t.Fatalf("NewSandboxHostService: %v", err)
+	}
 
-	err := svc.Shutdown(ctx)
+	err = svc.Shutdown(ctx)
 	if err != nil {
 		t.Fatalf("shutdown with nil gvisor: %v", err)
 	}

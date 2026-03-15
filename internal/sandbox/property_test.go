@@ -79,10 +79,13 @@ func rapidCreateSession(t *rapid.T) (svc *SandboxHostService, info *SessionInfo,
 	cfg.ToolTimeout = 0
 	cfg.PauseDrainTimeout = 50 * time.Millisecond
 	cfg.ShutdownTimeout = 50 * time.Millisecond
-	svc = NewSandboxHostService(cfg, zm, gm, nil)
+	var err error
+	svc, err = NewSandboxHostService(cfg, zm, gm, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	id := fmt.Sprintf("rapid-%d", rapidSessionCounter.Add(1))
-	var err error
 	info, err = svc.CreateSession(ctx, CreateSessionRequest{
 		BaseSnapshot: "pool/bases/test@v1",
 		SessionID:    id,
@@ -362,7 +365,10 @@ func TestPropertySessionCapacityEnforcement(t *testing.T) {
 		cfg.BasesDataset = "pool/bases"
 		cfg.SessionsDataset = "pool/sessions"
 		cfg.ToolTimeout = 0
-		svc := NewSandboxHostService(cfg, zm, gm, nil)
+		svc, err := NewSandboxHostService(cfg, zm, gm, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		maxSessions := rapid.IntRange(1, 10).Draw(t, "maxSessions")
 		svc.config.MaxSessions = maxSessions
@@ -381,7 +387,7 @@ func TestPropertySessionCapacityEnforcement(t *testing.T) {
 		}
 
 		// Next creation should fail
-		_, err := svc.CreateSession(ctx, CreateSessionRequest{
+		_, err = svc.CreateSession(ctx, CreateSessionRequest{
 			BaseSnapshot: "pool/bases/test@v1",
 			SessionID:    fmt.Sprintf("overflow-%d", rapidSessionCounter.Add(1)),
 		})

@@ -21,14 +21,6 @@ var LocalCapabilities = Capabilities{
 	StreamingProgress: true,
 }
 
-var NativeSandboxCapabilities = Capabilities{
-	Snapshots:         true,
-	Rollback:          true,
-	Pause:             true,
-	TierRouting:       true,
-	StreamingProgress: true,
-}
-
 var E2BCapabilities = Capabilities{
 	Snapshots:          false,
 	Rollback:           false,

@@ -71,7 +71,10 @@ func newServiceForTest(t *testing.T) (*SandboxHostService, *zfs.MockManager, *fa
 	cfg.ToolTimeout = 0
 	cfg.PauseDrainTimeout = 50 * time.Millisecond
 	cfg.ShutdownTimeout = 50 * time.Millisecond
-	svc := NewSandboxHostService(cfg, zm, gm, nil)
+	svc, err := NewSandboxHostService(cfg, zm, gm, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return svc, zm, gm
 }
 

@@ -164,7 +164,16 @@ func (m *complianceMockService) CreateSession(_ context.Context, req *api.Create
 	defer m.mu.Unlock()
 	m.lastCreateReq = req
 	m.sessions[req.SessionID] = "active"
-	return &api.CreateSessionResponse{Session: &api.Session{ID: req.SessionID, State: "active"}}, nil
+	return &api.CreateSessionResponse{
+		Session: &api.Session{ID: req.SessionID, State: "active"},
+		ServerCapabilities: api.Capabilities{
+			Snapshots:         true,
+			Rollback:          true,
+			Pause:             true,
+			TierRouting:       true,
+			StreamingProgress: true,
+		},
+	}, nil
 }
 
 func (m *complianceMockService) GetSession(_ context.Context, req *api.GetSessionRequest) (*api.GetSessionResponse, error) {

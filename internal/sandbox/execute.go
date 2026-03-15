@@ -41,6 +41,9 @@ func (svc *SandboxHostService) ExecuteTool(ctx context.Context, req ExecuteToolR
 	}
 
 	tier := tools.ClassifyTool(req.ToolName)
+	if svc.config.ContainerRuntime == ContainerRuntimeNone {
+		tier = tools.Tier1
+	}
 	start := time.Now()
 	var resp *ExecuteToolResponse
 	switch tier {
@@ -58,7 +61,7 @@ func (svc *SandboxHostService) ExecuteTool(ctx context.Context, req ExecuteToolR
 	resp.Duration = time.Since(start)
 	resp.Tier = int(tier)
 
-	if svc.config.PerToolSnapshots && req.ToolCallID != "" {
+	if svc.config.PerToolSnapshots && svc.config.StorageBackend == StorageBackendZFS && req.ToolCallID != "" {
 		snapName := fmt.Sprintf("tool-%s-%s", req.ToolCallID, time.Now().Format("20060102-150405"))
 		if snap, snapErr := svc.zfs.CreateSnapshot(ctx, sess.dataset, snapName); snapErr == nil {
 			resp.SnapshotID = snap.Name
@@ -92,6 +95,9 @@ func (svc *SandboxHostService) executeTier1(ctx context.Context, mountpoint stri
 }
 
 func (svc *SandboxHostService) executeTier2(ctx context.Context, mountpoint string, req ExecuteToolRequest) (*ExecuteToolResponse, error) {
+	if svc.gvisor == nil {
+		return nil, fmt.Errorf("tier2 execution unavailable: container runtime is %q", svc.config.ContainerRuntime)
+	}
 	resources := svc.config.DefaultResources
 	if req.Resources != nil {
 		resources = *req.Resources

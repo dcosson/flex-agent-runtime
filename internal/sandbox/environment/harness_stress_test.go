@@ -127,7 +127,8 @@ func TestST4_SessionLimitEnforcement(t *testing.T) {
 	if environment.LocalCapabilities.ConcurrentSessions != 0 {
 		t.Fatalf("LocalCapabilities.ConcurrentSessions = %d, want 0", environment.LocalCapabilities.ConcurrentSessions)
 	}
-	if environment.NativeSandboxCapabilities.ConcurrentSessions != 0 {
-		t.Fatalf("NativeSandboxCapabilities.ConcurrentSessions = %d, want 0", environment.NativeSandboxCapabilities.ConcurrentSessions)
+	nativeEnv := native.NewNativeSandboxEnvironment(newComplianceMockService(), slog.Default())
+	if nativeEnv.Capabilities().ConcurrentSessions != 0 {
+		t.Fatalf("native capabilities ConcurrentSessions = %d, want 0", nativeEnv.Capabilities().ConcurrentSessions)
 	}
 }

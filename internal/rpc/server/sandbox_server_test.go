@@ -35,7 +35,10 @@ func newHostForRPC(t *testing.T) (*sandbox.SandboxHostService, *zfs.MockManager)
 	cfg.BasesDataset = "tank/bases"
 	cfg.SessionsDataset = "tank/sessions"
 	cfg.ToolTimeout = 0
-	host := sandbox.NewSandboxHostService(cfg, zm, &testGVisor{}, nil)
+	host, err := sandbox.NewSandboxHostService(cfg, zm, &testGVisor{}, nil)
+	if err != nil {
+		t.Fatalf("NewSandboxHostService: %v", err)
+	}
 	ctx := context.Background()
 	if err := zm.CreateDataset(ctx, "tank/bases/repo", zfs.DatasetOptions{}); err != nil {
 		t.Fatal(err)

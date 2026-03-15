@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"h2-agent-runtime/internal/ai"
+	"h2-agent-runtime/internal/sandbox/environment"
 	"h2-agent-runtime/internal/sandbox/gvisor"
 	"h2-agent-runtime/internal/sandbox/zfs"
 )
@@ -86,18 +88,33 @@ type HealthStatus struct {
 	Errors       []string
 }
 
-func NewSandboxHostService(cfg ServiceConfig, z zfs.ZFSManager, g gvisor.GVisorManager, logger *slog.Logger) *SandboxHostService {
+func NewSandboxHostService(cfg ServiceConfig, z zfs.ZFSManager, g gvisor.GVisorManager, logger *slog.Logger) (*SandboxHostService, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if cfg.SnapshotPrefix == "" {
 		cfg = mergeDefaultConfig(cfg)
 	}
-	return &SandboxHostService{config: cfg, zfs: z, gvisor: g, logger: logger, started: time.Now(), metrics: &serviceMetrics{}}
+	if cfg.StorageBackend == StorageBackendZFS && z == nil {
+		return nil, fmt.Errorf("sandbox: storage_backend is %q but ZFSManager is nil", cfg.StorageBackend)
+	}
+	if cfg.ContainerRuntime == ContainerRuntimeGVisor && g == nil {
+		return nil, fmt.Errorf("sandbox: container_runtime is %q but GVisorManager is nil", cfg.ContainerRuntime)
+	}
+	if cfg.StorageBackend == StorageBackendLocalDisk && cfg.SessionsRootDir == "" {
+		return nil, fmt.Errorf("sandbox: storage_backend is %q but sessions_root_dir is empty", cfg.StorageBackend)
+	}
+	return &SandboxHostService{config: cfg, zfs: z, gvisor: g, logger: logger, started: time.Now(), metrics: &serviceMetrics{}}, nil
 }
 
 func mergeDefaultConfig(cfg ServiceConfig) ServiceConfig {
 	d := DefaultServiceConfig()
+	if cfg.StorageBackend == "" {
+		cfg.StorageBackend = d.StorageBackend
+	}
+	if cfg.ContainerRuntime == "" {
+		cfg.ContainerRuntime = d.ContainerRuntime
+	}
 	if cfg.SnapshotPrefix == "" {
 		cfg.SnapshotPrefix = d.SnapshotPrefix
 	}
@@ -132,9 +149,6 @@ func (svc *SandboxHostService) sessionCount() int {
 }
 
 func (svc *SandboxHostService) CreateSession(ctx context.Context, req CreateSessionRequest) (*SessionInfo, error) {
-	if req.BaseSnapshot == "" {
-		return nil, fmt.Errorf("base snapshot is required")
-	}
 	sessionID := req.SessionID
 	if sessionID == "" {
 		sessionID = generateSessionID()
@@ -152,28 +166,53 @@ func (svc *SandboxHostService) CreateSession(ctx context.Context, req CreateSess
 	svc.sessions.Store(sessionID, &Session{id: sessionID, state: SessionCreating})
 	svc.sessionsMu.Unlock()
 
-	dataset := svc.config.SessionsDataset + "/" + sessionID
-	if err := svc.zfs.CloneFromSnapshot(ctx, req.BaseSnapshot, dataset); err != nil {
-		svc.sessions.Delete(sessionID)
-		return nil, fmt.Errorf("clone base snapshot: %w", err)
-	}
+	var mountpoint string
+	var dataset string
 
-	quota := req.Quota
-	if quota == 0 {
-		quota = svc.config.DefaultSessionQuota
-	}
-	if quota > 0 {
-		if err := svc.zfs.SetProperty(ctx, dataset, "quota", fmt.Sprintf("%d", quota)); err != nil {
+	switch svc.config.StorageBackend {
+	case StorageBackendZFS:
+		if req.BaseSnapshot == "" {
+			svc.sessions.Delete(sessionID)
+			return nil, fmt.Errorf("base snapshot is required for ZFS backend")
+		}
+		dataset = svc.config.SessionsDataset + "/" + sessionID
+		if err := svc.zfs.CloneFromSnapshot(ctx, req.BaseSnapshot, dataset); err != nil {
+			svc.sessions.Delete(sessionID)
+			return nil, fmt.Errorf("clone base snapshot: %w", err)
+		}
+
+		quota := req.Quota
+		if quota == 0 {
+			quota = svc.config.DefaultSessionQuota
+		}
+		if quota > 0 {
+			if err := svc.zfs.SetProperty(ctx, dataset, "quota", fmt.Sprintf("%d", quota)); err != nil {
+				_ = svc.zfs.DestroyDataset(ctx, dataset, zfs.DestroyOptions{Recursive: true, Force: true})
+				svc.sessions.Delete(sessionID)
+				return nil, fmt.Errorf("set quota: %w", err)
+			}
+		}
+		mp, err := svc.zfs.GetMountpoint(ctx, dataset)
+		if err != nil {
 			_ = svc.zfs.DestroyDataset(ctx, dataset, zfs.DestroyOptions{Recursive: true, Force: true})
 			svc.sessions.Delete(sessionID)
-			return nil, fmt.Errorf("set quota: %w", err)
+			return nil, fmt.Errorf("get mountpoint: %w", err)
 		}
-	}
-	mountpoint, err := svc.zfs.GetMountpoint(ctx, dataset)
-	if err != nil {
-		_ = svc.zfs.DestroyDataset(ctx, dataset, zfs.DestroyOptions{Recursive: true, Force: true})
+		mountpoint = mp
+	case StorageBackendLocalDisk:
+		mp, err := safeSessionPath(svc.config.SessionsRootDir, sessionID)
+		if err != nil {
+			svc.sessions.Delete(sessionID)
+			return nil, err
+		}
+		if err := os.MkdirAll(mp, 0o755); err != nil {
+			svc.sessions.Delete(sessionID)
+			return nil, fmt.Errorf("create session directory: %w", err)
+		}
+		mountpoint = mp
+	default:
 		svc.sessions.Delete(sessionID)
-		return nil, fmt.Errorf("get mountpoint: %w", err)
+		return nil, fmt.Errorf("unsupported storage backend: %q", svc.config.StorageBackend)
 	}
 
 	sess := &Session{
@@ -317,7 +356,12 @@ func (svc *SandboxHostService) DestroySession(ctx context.Context, sessionID str
 	}
 
 destroy:
-	_ = svc.zfs.DestroyDataset(ctx, sess.dataset, zfs.DestroyOptions{Recursive: true, Force: true})
+	switch svc.config.StorageBackend {
+	case StorageBackendZFS:
+		_ = svc.zfs.DestroyDataset(ctx, sess.dataset, zfs.DestroyOptions{Recursive: true, Force: true})
+	case StorageBackendLocalDisk:
+		_ = os.RemoveAll(sess.mountpoint)
+	}
 	svc.sessions.Delete(sessionID)
 	svc.metrics.sessionsDestroyed.Add(1)
 	return nil
@@ -344,6 +388,14 @@ func (svc *SandboxHostService) ListSessions(_ context.Context) ([]SessionInfo, e
 }
 
 func (svc *SandboxHostService) HealthCheck(ctx context.Context) (*HealthStatus, error) {
+	if svc.config.StorageBackend != StorageBackendZFS {
+		return &HealthStatus{
+			Status:       "healthy",
+			SessionCount: svc.sessionCount(),
+			ActiveTools:  svc.totalActiveTools(),
+			Uptime:       time.Since(svc.started),
+		}, nil
+	}
 	ps, err := svc.zfs.PoolSpace(ctx, svc.config.PoolName)
 	if err != nil {
 		return &HealthStatus{
@@ -379,6 +431,17 @@ func (svc *SandboxHostService) HealthCheck(ctx context.Context) (*HealthStatus, 
 		ActiveTools:  svc.totalActiveTools(),
 		Uptime:       time.Since(svc.started),
 	}, nil
+}
+
+// Capabilities returns host capabilities derived from configured backends.
+func (svc *SandboxHostService) Capabilities() environment.Capabilities {
+	return environment.Capabilities{
+		Snapshots:         svc.config.StorageBackend == StorageBackendZFS,
+		Rollback:          svc.config.StorageBackend == StorageBackendZFS,
+		Pause:             true,
+		TierRouting:       svc.config.ContainerRuntime == ContainerRuntimeGVisor,
+		StreamingProgress: true,
+	}
 }
 
 func (svc *SandboxHostService) Start(ctx context.Context) {

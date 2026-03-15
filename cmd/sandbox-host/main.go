@@ -69,7 +69,11 @@ func main() {
 		svcCfg.ToolTimeout = cfg.ToolTimeout
 	}
 
-	host := sandbox.NewSandboxHostService(svcCfg, zm, gm, logger)
+	host, err := sandbox.NewSandboxHostService(svcCfg, zm, gm, logger)
+	if err != nil {
+		logger.Error("failed to initialize sandbox host service", "error", err)
+		os.Exit(1)
+	}
 	sandboxRPC := rpcserver.NewSandboxServer(host)
 	defer sandboxRPC.Close()
 	eventRPC := rpcserver.NewAgentEventServer()

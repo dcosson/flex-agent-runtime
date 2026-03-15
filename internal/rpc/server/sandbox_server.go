@@ -47,7 +47,10 @@ func (s *SandboxServer) CreateSession(ctx context.Context, req *api.CreateSessio
 	if err != nil {
 		return nil, rpc.MapError(err)
 	}
-	return &api.CreateSessionResponse{Session: codec.FromSessionInfo(info)}, nil
+	return &api.CreateSessionResponse{
+		Session:            codec.FromSessionInfo(info),
+		ServerCapabilities: codec.FromEnvironmentCapabilities(s.host.Capabilities()),
+	}, nil
 }
 
 func (s *SandboxServer) GetSession(ctx context.Context, req *api.GetSessionRequest) (*api.GetSessionResponse, error) {
@@ -161,6 +164,9 @@ func (s *SandboxServer) TurnComplete(ctx context.Context, req *api.TurnCompleteR
 	result, err := s.host.TurnComplete(ctx, req.SessionID)
 	if err != nil {
 		return nil, rpc.MapError(err)
+	}
+	if result == nil {
+		return &api.TurnCompleteResponse{}, nil
 	}
 	return &api.TurnCompleteResponse{SnapshotID: result.SnapshotID, TurnNumber: result.TurnNumber, SpaceUsed: result.SpaceUsed}, nil
 }

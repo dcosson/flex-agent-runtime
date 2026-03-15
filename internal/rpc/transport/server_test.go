@@ -36,7 +36,10 @@ func newSandboxRPCForTransport(t *testing.T) *rpcserver.SandboxServer {
 	cfg.BasesDataset = "tank/bases"
 	cfg.SessionsDataset = "tank/sessions"
 	cfg.ToolTimeout = 0
-	host := sandbox.NewSandboxHostService(cfg, zm, &fakeGVisor{}, nil)
+	host, err := sandbox.NewSandboxHostService(cfg, zm, &fakeGVisor{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	if err := zm.CreateDataset(ctx, "tank/bases/repo", zfs.DatasetOptions{}); err != nil {
 		t.Fatal(err)

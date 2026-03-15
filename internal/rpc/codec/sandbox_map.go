@@ -6,6 +6,7 @@ import (
 	"h2-agent-runtime/internal/ai"
 	"h2-agent-runtime/internal/rpc/api"
 	"h2-agent-runtime/internal/sandbox"
+	"h2-agent-runtime/internal/sandbox/environment"
 	"h2-agent-runtime/internal/sandbox/gvisor"
 	"h2-agent-runtime/internal/sandbox/zfs"
 	"h2-agent-runtime/internal/tools"
@@ -20,6 +21,18 @@ func ToCreateSessionRequest(req *api.CreateSessionRequest) sandbox.CreateSession
 		SessionID:    req.SessionID,
 		Quota:        req.Quota,
 		Labels:       req.Labels,
+	}
+}
+
+func FromEnvironmentCapabilities(c environment.Capabilities) api.Capabilities {
+	return api.Capabilities{
+		Snapshots:          c.Snapshots,
+		Rollback:           c.Rollback,
+		Pause:              c.Pause,
+		StreamingProgress:  c.StreamingProgress,
+		TierRouting:        c.TierRouting,
+		MaxSessionDuration: c.MaxSessionDuration,
+		ConcurrentSessions: c.ConcurrentSessions,
 	}
 }
 

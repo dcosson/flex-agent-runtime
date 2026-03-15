@@ -24,7 +24,10 @@ func newBenchStack(b *testing.B) (*server.SandboxServer, *server.AgentEventServe
 	cfg.BasesDataset = "tank/bases"
 	cfg.SessionsDataset = "tank/sessions"
 	cfg.ToolTimeout = 0
-	host := sandbox.NewSandboxHostService(cfg, zm, &testGVisor{}, nil)
+	host, err := sandbox.NewSandboxHostService(cfg, zm, &testGVisor{}, nil)
+	if err != nil {
+		b.Fatal(err)
+	}
 
 	ctx := context.Background()
 	if err := zm.CreateDataset(ctx, "tank/bases/repo", zfs.DatasetOptions{}); err != nil {
