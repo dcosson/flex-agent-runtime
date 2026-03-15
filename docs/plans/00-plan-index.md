@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plan index organizes the full h2-agent-runtime implementation into sub-plans grouped by dependency order. The runtime has seven major components spanning four batches, progressing from foundation types through the full distributed runtime.
+This plan index organizes the full h2-agent-runtime implementation into sub-plans grouped by dependency order. The runtime has seven major components spanning six batches, progressing from foundation types through the full distributed runtime and multi-provider sandbox support.
 
 The existing reviewed plans for AI core (01-ai-core, 01-ai-core-test-harness) are incorporated as the foundation. New plans cover built-in tools, code interpreter, agent loop, terminal mux, sandbox host, and the RPC layer.
 
@@ -68,15 +68,34 @@ The sandbox host, terminal mux, and RPC layer. These are the components that ena
 
 Disambiguation note: `09-sandbox-zfs` and `09-h2-termmux-port` intentionally share the `09` prefix. Use full doc IDs (not just number) in cross-plan references to avoid ambiguity.
 
-## Batch 5: Integration & Polish
+## Batch 4b: ExecutionEnvironment Abstraction
 
-Full system integration tests, Mode 2/3/4 E2E tests, and any cross-cutting polish.
+Refactor the tool execution and sandbox session interfaces into a unified `ExecutionEnvironment` abstraction. Replaces `ToolBackend` (LocalBackend + SandboxBackend) with a single interface covering lifecycle, tool execution, and optional capabilities (snapshots, pause/resume). Implements `LocalEnvironment` and `NativeSandboxEnvironment` (wrapping existing ConnectRPC path). Remote provider adapters are deferred to Batch 6.
 
 | Doc | Component | Description | Depends On | Status |
 |-----|-----------|-------------|------------|--------|
-| [14-mode3-e2e](./14-mode3-e2e.md) | Mode 3 E2E | End-to-end test: agent loop dispatching tool calls to remote sandbox host via RPC. Full lifecycle: create session, execute tools, take snapshots, rollback, pause/resume, destroy. | 13-rpc-layer, 08-agent-tools-e2e | Not started |
-| [15-mode2-e2e](./15-mode2-e2e.md) | Mode 2 E2E | End-to-end test: orchestrator launches 3rd party agent driver in sandbox via terminal mux. Credential injection, event normalization, session lifecycle. | 09-h2-termmux-port, 11-sandbox-host-service | Not started |
-| [16-runtime-test-harness](./16-runtime-test-harness.md) | Runtime test harness | Cross-cutting test harness: load testing (many concurrent agents), soak testing (long-running sessions), snapshot space growth analysis, container boot time benchmarks, RPC latency profiling. | 14-mode3-e2e, 15-mode2-e2e | Not started |
+| [11-sandbox-host-service.add01](./11-sandbox-host-service.add01.md) | `internal/sandbox/environment` | `ExecutionEnvironment` interface, capability system, `LocalEnvironment` (All Local mode), `NativeSandboxEnvironment` (wraps ConnectRPC → SandboxHostService), migration from ToolBackend/SandboxBackend | 11-sandbox-host-service, 06-built-in-tools, 13-rpc-layer | Approved |
+| [11-sandbox-host-service.add01-test-harness](./11-sandbox-host-service.add01-test-harness.md) | Test harness | Property tests, contract compliance suite, fault injection, benchmarks, security tests for ExecutionEnvironment implementations | 11-sandbox-host-service.add01 | Approved |
+
+## Batch 5: Integration & Polish
+
+Full system integration tests, Agent outside Sandbox and Agent in Sandbox E2E tests, and cross-cutting polish.
+
+| Doc | Component | Description | Depends On | Status |
+|-----|-----------|-------------|------------|--------|
+| [14-mode3-e2e](./14-mode3-e2e.md) | Agent outside Sandbox E2E | End-to-end test: agent loop dispatching tool calls to remote sandbox host via RPC. Full lifecycle: create session, execute tools, take snapshots, rollback, pause/resume, destroy. | 13-rpc-layer, 08-agent-tools-e2e | Implementation Complete |
+| [15-mode2-e2e](./15-mode2-e2e.md) | Agent in Sandbox E2E | End-to-end test: orchestrator launches 3rd party agent driver in sandbox via terminal mux. Credential injection, event normalization, session lifecycle. | 09-h2-termmux-port, 11-sandbox-host-service | Implementation Complete |
+| [16-runtime-test-harness](./16-runtime-test-harness.md) | Runtime test harness | Cross-cutting test harness: load testing (many concurrent agents), soak testing (long-running sessions), snapshot space growth analysis, container boot time benchmarks, RPC latency profiling. | 14-mode3-e2e, 15-mode2-e2e | Implementation Complete |
+
+## Batch 6: Remote Sandbox Providers (Future)
+
+Implement remote sandbox provider adapters for the `ExecutionEnvironment` interface. Each adapter translates the unified interface to a specific cloud sandbox provider's API.
+
+| Doc | Component | Description | Depends On | Status |
+|-----|-----------|-------------|------------|--------|
+| TBD | `E2BSandboxEnvironment` | E2B Sandbox adapter: pause/resume with full state preservation, commands.run() for tool execution, 24hr max lifetime. Best semantic fit. | 11-sandbox-host-service.add01 | Not started |
+| TBD | `DaytonaSandboxEnvironment` | Daytona Sandbox adapter: auto-stop lifecycle (lossy pause), code_run() for tool execution, template-based snapshots. | 11-sandbox-host-service.add01 | Not started |
+| TBD | `FlySandboxEnvironment` | Fly.io Machines adapter: Firecracker VM lifecycle, suspend/resume, SSH-based tool execution, volume snapshots. Most flexible, highest effort. | 11-sandbox-host-service.add01 | Not started |
 
 ---
 
@@ -110,10 +129,20 @@ graph TD
         M[13-rpc-layer<br/>Tool dispatch protocol,<br/>event streaming]
     end
 
+    subgraph "Batch 4b: ExecutionEnvironment"
+        Q[11-sandbox-host-service.add01<br/>ExecutionEnvironment interface,<br/>LocalEnvironment,<br/>NativeSandboxEnvironment]
+    end
+
     subgraph "Batch 5: Integration"
         N[14-mode3-e2e<br/>Remote tool dispatch<br/>E2E]
         O[15-mode2-e2e<br/>3rd party agent driver<br/>E2E]
         P[16-runtime-test-harness<br/>Load, soak, perf<br/>tests]
+    end
+
+    subgraph "Batch 6: Remote Providers"
+        R[E2BSandboxEnvironment]
+        S[DaytonaSandboxEnvironment]
+        T[FlySandboxEnvironment]
     end
 
     A --> AH
@@ -146,6 +175,13 @@ graph TD
     N --> P
     O --> P
 
+    K --> Q
+    F --> Q
+    M --> Q
+    Q --> R
+    Q --> S
+    Q --> T
+
     style A fill:#e1f5fe
     style AH fill:#e1f5fe
     style B fill:#fff3e0
@@ -163,6 +199,10 @@ graph TD
     style N fill:#f3e5f5
     style O fill:#f3e5f5
     style P fill:#f3e5f5
+    style Q fill:#ffe0b2
+    style R fill:#d1c4e9
+    style S fill:#d1c4e9
+    style T fill:#d1c4e9
 ```
 
 ### Parallelization Opportunities
