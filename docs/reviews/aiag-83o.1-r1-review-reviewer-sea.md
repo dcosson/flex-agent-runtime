@@ -98,3 +98,19 @@ Consider having `mkEnv` create a per-sub-test temp directory (using the `t` para
 5 findings: 0 P0, 0 P1, 3 P2, 2 P3
 
 **Verdict**: Approved with revisions
+
+## R1 Disposition
+
+All findings addressed at a690d5c. Re-reviewed and verified.
+
+| # | Severity | Summary | Disposition | Notes |
+|---|----------|---------|-------------|-------|
+| 1 | P2 | Error sentinel strings/names differ from plan | Incorporated | Renamed ErrProviderUnavailable→ErrUnavailable, aligned all sentinel strings to plan §3.3. ErrSessionNotFound kept as addition. |
+| 2 | P2 | Compliance suite missing State() transition tests | Incorporated | State() assertions added to FullLifecycle (StateActive after Create, terminal after Destroy) and PauseResume (StatePaused/StateActive after Pause, StateActive after Resume). |
+| 3 | P2 | LocalEnvironment embeds tools.LocalBackend | Incorporated | Extracted executeLocalTool seam in local/execute.go. LocalEnvironment stores func field, no longer structurally depends on tools.LocalBackend. |
+| 4 | P3 | Create() validates SessionID but plan says no-op | Not Incorporated | Intentional improvement — code is stricter than plan. No change needed. |
+| 5 | P3 | Compliance suite factory shares root dir | Incorporated | Factory now creates per-subtest temp dirs using the t parameter. |
+
+**Re-review note:** One minor observation — `executeLocalTool` creates a new `tools.NewLocalBackend(workDir)` on every call (builds a 12-entry tool map each time). This is lightweight but unnecessary allocation per tool execution. Not blocking — can be optimized later if profiling shows it matters.
+
+**Final verdict**: Approved
