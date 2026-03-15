@@ -1495,3 +1495,90 @@ Seam review completed with 5 findings (1 P1, 2 P2, 2 P3). All 5 incorporated int
 
 - coder-1-sea
 - reviewer-sea
+
+---
+
+## Work Completion Signoff
+
+| Field | Value |
+|-------|-------|
+| **Status** | Partially Complete (Local + Native only; remote providers deferred to Batch 6) |
+| **Date** | 2026-03-15 |
+| **Branch** | main |
+| **Commit** | c20ced1 |
+| **Verified by** | claude-opus-4-6 |
+
+### Scope of Verification
+
+Only `LocalEnvironment` and `NativeSandboxEnvironment` implementations were verified, per instruction. Remote provider implementations (E2B, Daytona, Fly.io -- plan sections 5.3, 5.4, 5.5) are deferred to Batch 6.
+
+### Implementation Checklist
+
+| Plan Section | Item | Status | Notes |
+|-------------|------|--------|-------|
+| §3.1 | `ExecutionEnvironment` interface | DONE | All 9 methods match plan in `environment.go` |
+| §3.2 | Shared types (`SessionConfig`, `SnapshotInfo`, `SessionState`, type aliases) | DONE | Match plan in `types.go` |
+| §3.3 | Error sentinels (`ErrCapabilityNotSupported`, `ErrNotActive`, `ErrUnavailable`, `ErrSessionLimitReached`) | DONE | Match plan in `errors.go`; extra `ErrSessionNotFound` exists |
+| §3.4 | Concurrency contract | DONE | `atomic.Bool` for Local, `atomic.Bool` + server-delegated state for Native |
+| §4 | Capabilities struct + 5 constants | DONE | Match plan in `capabilities.go` |
+| §5.1 | `LocalEnvironment` | DONE | All methods implemented correctly |
+| §5.2 | `NativeSandboxEnvironment` | DONE | All RPC mappings, streaming, state query, snapshot/rollback |
+| §5.3 | `E2BSandboxEnvironment` | DEFERRED | Batch 6 |
+| §5.4 | `DaytonaSandboxEnvironment` | DEFERRED | Batch 6 |
+| §5.5 | `FlySandboxEnvironment` | DEFERRED | Batch 6 |
+| §7.3 | Remove `ToolBackend`, `SandboxBackend`, `SandboxToolClient` | DONE | All removed from codebase |
+| §7.4 | Agent loop migration (Phase 4) | NOT STARTED | Agent loop does not yet reference `ExecutionEnvironment` |
+| §7.5 | `IsFileOp()` helper in `classify.go` | NOT IMPLEMENTED | Only needed by remote environments (Batch 6) |
+| §9.4 | Implementation guide / architecture doc updates | NOT STARTED | Planned for Phase 4 (agent loop migration) |
+
+### Test Harness Verification
+
+| Test ID | Plan Item | Status | Notes |
+|---------|-----------|--------|-------|
+| P1 | Interface completeness | PASS | Local + Native |
+| P2 | State machine consistency | PASS | Local + Native |
+| P3 | Tool execution determinism | PASS | Local + Native |
+| P4 | Capabilities are static | PASS | Local + Native |
+| P5 | NativeSandbox parity | PASS | Compared via mock service |
+| F1 | RPC failure handling | PASS | Stream open + recv failure (Native only; remote deferred) |
+| F2 | Create failure recovery | PASS | |
+| F3 | Context cancellation | PASS | |
+| F4 | Response type mapping errors | PASS | |
+| F5 | SSH failure (Fly) | DEFERRED | Batch 6 |
+| O1-O3 | Remote wire format goldens | DEFERRED | Batch 6 |
+| O4 | Native type mapping golden | PASS | |
+| C1 | Compliance suite | PASS | Local + Native |
+| B1 | Environment selection latency | PASS | |
+| B2 | Native adapter overhead | PASS | |
+| B3 | Capability check latency | PASS | |
+| B4 | Type conversion overhead | PASS | |
+| ST1 | Concurrent lifecycle (50 goroutines) | PASS | |
+| ST2 | Concurrent tool execution (100 calls) | PASS | |
+| ST3 | Rapid environment switching (20 envs) | PASS | |
+| ST4 | Session limit enforcement | PASS | |
+| SEC1 | SessionID validation | PASS | Local + Native |
+| SEC2 | Path traversal sanitization | PASS | Local |
+| SEC3-4 | API key / SSH key handling | DEFERRED | Batch 6 |
+| E2E1 | LocalEnvironment full cycle | PASS | Covered by compliance + unit tests |
+| E2E2 | NativeSandbox full cycle | PASS | Covered by compliance + unit tests |
+| E2E3-E2E5 | Remote environment E2E | DEFERRED | Batch 6 |
+
+### Exit Criteria Status
+
+| Criterion | Status | Measurement |
+|-----------|--------|-------------|
+| Property tests pass (100+ iterations) | PASS | P1-P5 all pass |
+| Fault injection -- no panics, no goroutine leaks | PASS | F1-F4 pass |
+| Golden tests match wire formats | PARTIAL | O4 passes; O1-O3 deferred (remote) |
+| Compliance suite passes for all implementations | PARTIAL | Local + Native pass; remote deferred |
+| Benchmark < 1us overhead for Native adapter | PASS | B2 confirms |
+| Stress tests pass with -race | PASS | ST1-ST4 |
+| E2E full lifecycle | PARTIAL | E2E1-E2E2 pass; E2E3-E2E5 deferred |
+| NativeSandbox parity with direct SandboxClient | PASS | P5 + unit tests |
+| 85%+ coverage on environment packages | PASS | 95.6% (Local: 95.2%, Native: 95.7%) |
+
+### Gaps Surfaced
+
+1. **Agent loop migration (Phase 4)** -- `internal/agent` does not yet use `ExecutionEnvironment`. The `ToolBackend` and related interfaces have been removed, but the agent loop wiring to the new interface is not yet done. This is expected per the plan's phased implementation sequence.
+2. **`IsFileOp()` helper** -- Not implemented. Only needed by remote environments (E2B/Daytona/Fly), which are deferred to Batch 6.
+3. **Implementation guide / architecture doc updates** -- Plan §9.4 calls for updates during Phase 4. Not yet done since Phase 4 has not started.

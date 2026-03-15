@@ -483,3 +483,44 @@ Signed off as part of parent plan [11-sandbox-host-service.add01.md](./11-sandbo
 | **Date** | 2026-03-14 |
 | **Branch** | main |
 | **Commit** | 1179700a45a895eda92c921c1baddd8e0d6ec7d4 |
+
+---
+
+## Work Completion Signoff
+
+| Field | Value |
+|-------|-------|
+| **Status** | Partially Complete (Local + Native only; remote provider tests deferred to Batch 6) |
+| **Date** | 2026-03-15 |
+| **Branch** | main |
+| **Commit** | c20ced1 |
+| **Verified by** | claude-opus-4-6 |
+
+### Test Implementation Summary
+
+All test harness items for `LocalEnvironment` and `NativeSandboxEnvironment` are implemented and passing. Tests for remote providers (E2B, Daytona, Fly.io) are deferred to Batch 6 alongside their implementations.
+
+**Test files verified:**
+- `internal/sandbox/environment/harness_property_test.go` -- P1-P5
+- `internal/sandbox/environment/harness_fault_oracle_security_test.go` -- F1-F4, O4, SEC1-SEC2
+- `internal/sandbox/environment/harness_stress_test.go` -- ST1-ST4
+- `internal/sandbox/environment/harness_bench_test.go` -- B1-B4
+- `internal/sandbox/environment/compliance_test.go` -- C1
+- `internal/sandbox/environment/local/local_test.go` -- T1 (LocalEnvironment unit tests)
+- `internal/sandbox/environment/native/native_test.go` -- T2 (NativeSandboxEnvironment unit tests)
+
+**Coverage:** 95.6% on `internal/sandbox/environment/**` (exceeds 85% exit criterion)
+
+### Deferred Items (Batch 6)
+
+| Test ID | Reason |
+|---------|--------|
+| F5 | FlySandboxEnvironment SSH failure tests -- requires Fly implementation |
+| O1 | E2B API wire format goldens -- requires E2B implementation |
+| O2 | Daytona API wire format goldens -- requires Daytona implementation |
+| O3 | Fly Machines API wire format goldens -- requires Fly implementation |
+| SEC3 | API key handling tests -- requires remote provider implementations |
+| SEC4 | SSH key handling tests -- requires Fly implementation |
+| E2E3 | E2B full cycle E2E -- requires E2B implementation |
+| E2E4 | Environment fallback behavior -- requires remote provider implementations |
+| E2E5 | Environment transparency -- requires remote provider implementations |
