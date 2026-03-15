@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"h2-agent-runtime/internal/agent"
 	"h2-agent-runtime/internal/ai"
 )
 
@@ -1063,71 +1064,14 @@ func TestGitCommit_MissingMessage(t *testing.T) {
 }
 
 // =====================================================================
-// SandboxBackend
+// NewEnvironmentTools
 // =====================================================================
 
-type fakeSandboxClient struct {
-	lastReq    ToolRequest
-	lastSessID string
-	response   *ToolResponse
-	err        error
-}
-
-func (f *fakeSandboxClient) ExecuteTool(_ context.Context, sessionID string, req ToolRequest, _ func(ToolProgress)) (*ToolResponse, error) {
-	f.lastReq = req
-	f.lastSessID = sessionID
-	return f.response, f.err
-}
-
-func TestSandboxBackend_ForwardsRequest(t *testing.T) {
-	client := &fakeSandboxClient{
-		response: textResponse("sandbox result"),
+func TestNewEnvironmentTools_ReturnsSameToolNames(t *testing.T) {
+	fakeExecute := func(_ context.Context, _ ToolRequest, _ func(ToolProgress)) (*ToolResponse, error) {
+		return textResponse("ok"), nil
 	}
-	backend := NewSandboxBackend(client, "sess-123")
-
-	resp, err := backend.ExecuteTool(context.Background(), ToolRequest{
-		ToolName:   "read_file",
-		ToolCallID: "tc-1",
-		Params:     map[string]any{"path": "test.txt"},
-	}, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if client.lastSessID != "sess-123" {
-		t.Fatalf("expected session ID 'sess-123', got %q", client.lastSessID)
-	}
-	if client.lastReq.ToolName != "read_file" {
-		t.Fatalf("expected tool name 'read_file', got %q", client.lastReq.ToolName)
-	}
-	if client.lastReq.SessionID != "sess-123" {
-		t.Fatalf("expected SessionID propagated, got %q", client.lastReq.SessionID)
-	}
-
-	text := responseText(resp)
-	if !strings.Contains(text, "sandbox result") {
-		t.Fatalf("expected sandbox result, got %q", text)
-	}
-}
-
-func TestSandboxBackend_NilClient(t *testing.T) {
-	backend := NewSandboxBackend(nil, "sess-1")
-	_, err := backend.ExecuteTool(context.Background(), ToolRequest{
-		ToolName: "test",
-	}, nil)
-	if err == nil {
-		t.Fatal("expected error for nil client")
-	}
-	if !strings.Contains(err.Error(), "not configured") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestNewSandboxTools_ReturnsSameToolNames(t *testing.T) {
-	client := &fakeSandboxClient{
-		response: textResponse("ok"),
-	}
-	sandboxTools := NewSandboxTools(client, "sess-1")
+	envTools := NewEnvironmentTools(fakeExecute)
 	localTools := NewLocalTools(tmpWorkspace(t), LocalToolsOptions{})
 
 	localNames := make(map[string]bool)
@@ -1135,19 +1079,83 @@ func TestNewSandboxTools_ReturnsSameToolNames(t *testing.T) {
 		localNames[tool.Name] = true
 	}
 
-	sandboxNames := make(map[string]bool)
-	for _, tool := range sandboxTools {
-		sandboxNames[tool.Name] = true
+	envNames := make(map[string]bool)
+	for _, tool := range envTools {
+		envNames[tool.Name] = true
 	}
 
-	if len(localNames) != len(sandboxNames) {
-		t.Fatalf("tool count mismatch: local=%d sandbox=%d", len(localNames), len(sandboxNames))
+	if len(localNames) != len(envNames) {
+		t.Fatalf("tool count mismatch: local=%d env=%d", len(localNames), len(envNames))
 	}
 	for name := range localNames {
-		if !sandboxNames[name] {
-			t.Errorf("sandbox missing tool: %s", name)
+		if !envNames[name] {
+			t.Errorf("environment tools missing tool: %s", name)
 		}
 	}
+}
+
+func TestNewEnvironmentTools_DelegatesToExecute(t *testing.T) {
+	var capturedReq ToolRequest
+	fakeExecute := func(_ context.Context, req ToolRequest, _ func(ToolProgress)) (*ToolResponse, error) {
+		capturedReq = req
+		return textResponse("delegated result"), nil
+	}
+	envTools := NewEnvironmentTools(fakeExecute)
+
+	for _, tool := range envTools {
+		if tool.Name == "read_file" {
+			result, err := tool.Execute(context.Background(), "tc-1", map[string]any{"path": "test.txt"}, nil)
+			if err != nil {
+				t.Fatalf("Execute error: %v", err)
+			}
+			if capturedReq.ToolName != "read_file" {
+				t.Fatalf("ToolName = %q, want read_file", capturedReq.ToolName)
+			}
+			if capturedReq.ToolCallID != "tc-1" {
+				t.Fatalf("ToolCallID = %q, want tc-1", capturedReq.ToolCallID)
+			}
+			tc, ok := result.Content[0].(*ai.TextContent)
+			if !ok {
+				t.Fatalf("expected TextContent, got %T", result.Content[0])
+			}
+			if tc.Text != "delegated result" {
+				t.Fatalf("content = %q, want %q", tc.Text, "delegated result")
+			}
+			return
+		}
+	}
+	t.Fatal("read_file not found in environment tools")
+}
+
+func TestNewEnvironmentTools_ProgressCallbacks(t *testing.T) {
+	fakeExecute := func(_ context.Context, _ ToolRequest, onProgress func(ToolProgress)) (*ToolResponse, error) {
+		if onProgress != nil {
+			onProgress(ToolProgress{Content: "progress line", IsError: false})
+		}
+		return textResponse("done"), nil
+	}
+	envTools := NewEnvironmentTools(fakeExecute)
+
+	for _, tool := range envTools {
+		if tool.Name == "bash" {
+			var updates []string
+			_, err := tool.Execute(context.Background(), "tc-1", map[string]any{"cmd": "test"}, func(result agent.AgentToolResult) {
+				if len(result.Content) > 0 {
+					if tc, ok := result.Content[0].(*ai.TextContent); ok {
+						updates = append(updates, tc.Text)
+					}
+				}
+			})
+			if err != nil {
+				t.Fatalf("Execute error: %v", err)
+			}
+			if len(updates) != 1 || updates[0] != "progress line" {
+				t.Fatalf("progress updates = %v, unexpected", updates)
+			}
+			return
+		}
+	}
+	t.Fatal("bash not found in environment tools")
 }
 
 // helper for git tests

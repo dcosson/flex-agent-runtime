@@ -231,7 +231,7 @@ func TestO2_APIVersionPropagation(t *testing.T) {
 	}
 }
 
-// O3. SandboxBackend parity oracle — compare direct host results vs RPC-mediated.
+// O3. RPC client parity oracle — compare direct host results vs RPC-mediated.
 func TestO3_SandboxBackendParity(t *testing.T) {
 	stack := newTestStack(t)
 	ctx := context.Background()
@@ -239,7 +239,7 @@ func TestO3_SandboxBackendParity(t *testing.T) {
 	// Create session via direct host API
 	createRPCSession(t, stack.Server, "parity")
 
-	// Execute via RPC (SandboxClient implements SandboxToolClient)
+	// Execute via RPC
 	rpcResp, err := stack.Client.ExecuteTool(ctx, "parity", tools.ToolRequest{
 		ToolCallID: "tc-parity",
 		ToolName:   "bash",

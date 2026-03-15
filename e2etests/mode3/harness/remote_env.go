@@ -52,7 +52,10 @@ func NewRemoteEnv(t *testing.T, script []testutil.ScriptEntry, baseFiles map[str
 	}
 
 	cl := client.NewSandboxClient(svc)
-	toolset := tools.NewSandboxTools(cl, sessionID)
+	executeFn := func(ctx context.Context, req tools.ToolRequest, onProgress func(tools.ToolProgress)) (*tools.ToolResponse, error) {
+		return cl.ExecuteTool(ctx, sessionID, req, onProgress)
+	}
+	toolset := tools.NewEnvironmentTools(executeFn)
 	toolset = replaceCodeInterpTool(ai.Model{ID: "mode3-model", API: apiName, Provider: "mode3", MaxTokens: 4096}, toolset)
 	driver := agent.NewNativeDriver(agent.DriverConfig{
 		Model: ai.Model{ID: "mode3-model", API: apiName, Provider: "mode3", MaxTokens: 4096},

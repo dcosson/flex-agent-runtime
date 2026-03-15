@@ -170,8 +170,6 @@ func TestP5_EventRPCCorrelation(t *testing.T) {
 func TestF1_RPCTransientFailureDuringToolCall(t *testing.T) {
 	base, sessionID := newTestMemoryService(t)
 	chaos := &chaosSandboxService{base: base, failStreamOnce: rpc.NewRPCError(rpc.CodeUnavailable, "transient unavailable", nil)}
-	client := tools.NewSandboxBackend(nil, sessionID)
-	_ = client
 
 	rpcClient := apiToolClient{svc: chaos}
 	_, err := rpcClient.ExecuteTool(context.Background(), sessionID, tools.ToolRequest{ToolCallID: "f1-a", ToolName: "read_file", Params: map[string]any{"path": "state.txt"}}, nil)

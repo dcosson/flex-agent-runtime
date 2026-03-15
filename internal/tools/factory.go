@@ -27,22 +27,28 @@ type LocalToolsOptions struct {
 // filesystem execution. All Tier 1 tools run in-process.
 func NewLocalTools(rootDir string, _ LocalToolsOptions) []agent.AgentTool {
 	backend := NewLocalBackend(rootDir)
-	tools := buildAgentTools(backend)
-	tools = append(tools, codeinterp.NewTool(ai.Model{}, tools))
-	return tools
+	return NewEnvironmentTools(backend.ExecuteTool)
 }
 
-// buildAgentTools wraps each tool implementation as an agent.AgentTool.
-func buildAgentTools(backend ToolBackend) []agent.AgentTool {
-	lb, ok := backend.(*LocalBackend)
-	if !ok {
-		return nil
-	}
-
-	tools := make([]agent.AgentTool, 0, len(lb.tools))
-	for _, impl := range lb.tools {
-		impl := impl // capture loop variable
-		tools = append(tools, agent.AgentTool{
+// NewEnvironmentTools creates agent tools that delegate execution to the
+// provided execute function. This is the unified factory for all environments:
+// LocalEnvironment, NativeSandboxEnvironment, etc.
+//
+// Usage:
+//
+//	// Local environment
+//	env := local.NewLocalEnvironment(rootDir, logger)
+//	tools := tools.NewEnvironmentTools(env.ExecuteTool)
+//
+//	// Native sandbox environment
+//	env := native.NewNativeSandboxEnvironment(svc, logger)
+//	tools := tools.NewEnvironmentTools(env.ExecuteTool)
+func NewEnvironmentTools(executeFn func(ctx context.Context, req ToolRequest, onProgress func(ToolProgress)) (*ToolResponse, error)) []agent.AgentTool {
+	schemas := toolSchemas()
+	result := make([]agent.AgentTool, 0, len(schemas)+1)
+	for _, impl := range schemas {
+		impl := impl
+		result = append(result, agent.AgentTool{
 			Tool: ai.Tool{
 				Name:        impl.name,
 				Description: impl.description,
@@ -55,7 +61,7 @@ func buildAgentTools(backend ToolBackend) []agent.AgentTool {
 					ToolCallID: toolCallID,
 					Params:     params,
 				}
-				resp, err := backend.ExecuteTool(ctx, req, func(p ToolProgress) {
+				resp, err := executeFn(ctx, req, func(p ToolProgress) {
 					if onUpdate != nil {
 						onUpdate(agent.AgentToolResult{
 							Content: []ai.ContentBlock{&ai.TextContent{Text: p.Content}},
@@ -74,7 +80,28 @@ func buildAgentTools(backend ToolBackend) []agent.AgentTool {
 			},
 		})
 	}
-	return tools
+	result = append(result, codeinterp.NewTool(ai.Model{}, result))
+	return result
+}
+
+// toolSchemas returns the standard tool schema definitions without execution
+// logic. Used by NewEnvironmentTools to create tool definitions.
+func toolSchemas() []toolImpl {
+	dummyRoot := "/"
+	return []toolImpl{
+		readFileTool(dummyRoot),
+		writeFileTool(dummyRoot),
+		editFileTool(dummyRoot),
+		grepTool(dummyRoot),
+		globTool(dummyRoot),
+		bashTool(dummyRoot),
+		gitStatusTool(dummyRoot),
+		gitDiffTool(dummyRoot),
+		gitLogTool(dummyRoot),
+		gitShowTool(dummyRoot),
+		gitAddTool(dummyRoot),
+		gitCommitTool(dummyRoot),
+	}
 }
 
 // mustSchema parses a JSON schema string, panicking on error.

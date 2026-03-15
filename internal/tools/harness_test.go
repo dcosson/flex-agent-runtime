@@ -294,22 +294,25 @@ func TestF2_BashTimeoutCleanTermination(t *testing.T) {
 // F3. Sandbox RPC intermittent failures
 // =====================================================================
 
-func TestF3_SandboxRPCFailure(t *testing.T) {
-	client := &fakeSandboxClient{
-		err: fmt.Errorf("connection reset by peer"),
+func TestF3_EnvironmentExecuteFailure(t *testing.T) {
+	fakeExecute := func(_ context.Context, _ ToolRequest, _ func(ToolProgress)) (*ToolResponse, error) {
+		return nil, fmt.Errorf("connection reset by peer")
 	}
-	backend := NewSandboxBackend(client, "sess-fail")
 
-	_, err := backend.ExecuteTool(context.Background(), ToolRequest{
-		ToolName: "read_file",
-		Params:   map[string]any{"path": "test.txt"},
-	}, nil)
-	if err == nil {
-		t.Fatal("expected error from sandbox RPC failure")
+	envTools := NewEnvironmentTools(fakeExecute)
+	for _, tool := range envTools {
+		if tool.Name == "read_file" {
+			result, err := tool.Execute(context.Background(), "tc-1", map[string]any{"path": "test.txt"}, nil)
+			if err == nil {
+				t.Fatal("expected error from environment execute failure")
+			}
+			if !result.IsError {
+				t.Fatal("expected IsError=true on failure")
+			}
+			return
+		}
 	}
-	if !strings.Contains(err.Error(), "connection reset") {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	t.Fatal("read_file not found")
 }
 
 // =====================================================================
@@ -484,15 +487,15 @@ func TestS1_TierRoutingSimulation(t *testing.T) {
 func TestS3_SnapshotMetadataPropagation(t *testing.T) {
 	snapshotID := "snap-tool-tc1-20260313"
 	exitCode := 0
-	client := &fakeSandboxClient{
-		response: &ToolResponse{
+	fakeExecute := func(_ context.Context, _ ToolRequest, _ func(ToolProgress)) (*ToolResponse, error) {
+		return &ToolResponse{
 			Content:    []ai.ContentBlock{&ai.TextContent{Text: "result"}},
 			SnapshotID: snapshotID,
 			ExitCode:   &exitCode,
-		},
+		}, nil
 	}
 
-	tools := NewSandboxTools(client, "sess-snap")
+	tools := NewEnvironmentTools(fakeExecute)
 	for _, tool := range tools {
 		if tool.Name == "read_file" {
 			result, err := tool.Execute(context.Background(), "tc-1", map[string]any{"path": "x.txt"}, nil)

@@ -19,7 +19,7 @@ func NewSandboxClient(service api.SandboxService) *SandboxClient {
 	return &SandboxClient{service: service}
 }
 
-// ExecuteTool implements tools.SandboxToolClient via RPC ExecuteToolStream.
+// ExecuteTool dispatches a tool call via RPC ExecuteToolStream.
 func (c *SandboxClient) ExecuteTool(ctx context.Context, sessionID string, req tools.ToolRequest, onProgress func(tools.ToolProgress)) (*tools.ToolResponse, error) {
 	if c.service == nil {
 		return nil, fmt.Errorf("sandbox rpc client not configured")
@@ -74,8 +74,6 @@ func (c *SandboxClient) ExecuteTool(ctx context.Context, sessionID string, req t
 func wrapClientError(err error, sessionID, toolName string) error {
 	return rpc.WrapRPCError(err, sessionID, toolName)
 }
-
-var _ tools.SandboxToolClient = (*SandboxClient)(nil)
 
 func decodeResponseContent(resp *api.ExecuteToolResponse) []ai.ContentBlock {
 	if resp == nil {

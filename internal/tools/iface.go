@@ -1,16 +1,8 @@
 package tools
 
 import (
-	"context"
-
 	"h2-agent-runtime/internal/ai"
 )
-
-// ToolBackend abstracts execution placement for tool calls.
-// LocalBackend runs tools in-process; SandboxBackend forwards via RPC.
-type ToolBackend interface {
-	ExecuteTool(ctx context.Context, req ToolRequest, onProgress func(ToolProgress)) (*ToolResponse, error)
-}
 
 // ToolRequest carries all parameters needed to dispatch a single tool call.
 type ToolRequest struct {
@@ -24,7 +16,7 @@ type ToolRequest struct {
 // ToolResponse is the result of a tool execution.
 type ToolResponse struct {
 	Content    []ai.ContentBlock
-	SnapshotID string // empty for LocalBackend
+	SnapshotID string
 	ExitCode   *int
 }
 

@@ -341,7 +341,7 @@ func TestO1_DeterministicSemanticOracle(t *testing.T) {
 
 func TestO2_LocalVsSandboxOracle(t *testing.T) {
 	local := tools.NewLocalTools(".", tools.LocalToolsOptions{})
-	sandbox := tools.NewSandboxTools(&sandboxOracleClient{}, "sess-o2")
+	sandbox := tools.NewEnvironmentTools(sandboxOracleExecute)
 	ln := map[string]bool{}
 	for _, tool := range local {
 		ln[tool.Name] = true
@@ -563,8 +563,6 @@ func TestB4_ParallelScalingSignal(t *testing.T) {
 	}
 }
 
-type sandboxOracleClient struct{}
-
-func (s *sandboxOracleClient) ExecuteTool(context.Context, string, tools.ToolRequest, func(tools.ToolProgress)) (*tools.ToolResponse, error) {
+func sandboxOracleExecute(_ context.Context, _ tools.ToolRequest, _ func(tools.ToolProgress)) (*tools.ToolResponse, error) {
 	return &tools.ToolResponse{Content: []ai.ContentBlock{&ai.TextContent{Text: "ok"}}}, nil
 }
