@@ -1,7 +1,7 @@
 # 17: External / End-to-End Testing Plan
 
 **Status:** Draft
-**Depends on:** 08-agent-tools-e2e, 14-mode3-e2e, 15-mode2-e2e, 16-runtime-test-harness, 11-sandbox-host-service.add01
+**Depends on:** 08-agent-tools-e2e, 14-mode3-e2e, 15-mode2-e2e, 16-runtime-test-harness, 11-sandbox-host-service.add01, 11-sandbox-host-service.add02
 **Depended on by:** --
 **Scope:** External E2E testing strategy covering usage examples, Docker-based CI, dedicated host testing, mock-based testing, and CI integration across all placement modes.
 
@@ -12,7 +12,7 @@
 This plan defines how to test the h2-agent-runtime end-to-end from the outside -- as a consumer of the Go library and the `sandbox-host` binary would. It complements the existing internal E2E tests in `e2etests/` (plans 08, 14, 15, 16) by adding:
 
 - **Concrete usage examples** showing how callers wire up agents in each placement mode.
-- **Docker-based CI** that runs the full ZFS + gVisor stack without dedicated infrastructure.
+- **Docker-based CI** that can run the full ZFS + gVisor stack, gVisor-only, or neither -- without dedicated infrastructure (see addendum 02 for configurable backends).
 - **Tiered test matrix** that gates PRs with fast mock-based tests and runs heavier infrastructure tests nightly.
 - **Cross-mode parity verification** ensuring the same agent logic produces equivalent results across All Local, Agent in Sandbox, and Agent outside Sandbox.
 
@@ -285,6 +285,8 @@ graph TD
         T2A[Full Mode 3<br/>Docker: ZFS + gVisor<br/>sandbox-host binary]
         T2B[Full Mode 2<br/>Docker: sandbox-host<br/>+ terminal mux]
         T2C[Lifecycle tests<br/>snapshot, rollback,<br/>pause/resume]
+        T2D[local-disk + none<br/>No ZFS or gVisor<br/>sandbox-host binary]
+        T2E[gVisor-only<br/>local-disk + gVisor<br/>sandbox-host binary]
     end
 
     subgraph "Tier 3: Nightly (Dedicated Host)"
@@ -308,6 +310,8 @@ graph TD
     style T2A fill:#fff3e0
     style T2B fill:#fff3e0
     style T2C fill:#fff3e0
+    style T2D fill:#fff3e0
+    style T2E fill:#fff3e0
     style T3A fill:#fce4ec
     style T3B fill:#fce4ec
     style T3C fill:#fce4ec
@@ -317,7 +321,9 @@ graph TD
 | Tier | What | Where it runs | ZFS | gVisor | LLM Provider | Duration |
 |------|------|---------------|-----|--------|--------------|----------|
 | **PR-Fast** | Mock-based E2E, cross-mode parity | Any CI runner (Linux/Mac) | No | No | ScriptedProvider | <30s |
-| **PR-Standard** | Docker-based full stack E2E | Linux CI with Docker | Yes (in container) | Yes (in container) | ScriptedProvider | <5min |
+| **PR-Standard (minimal)** | Docker sandbox-host with local-disk + no gVisor | Linux CI with Docker | No | No | ScriptedProvider | <2min |
+| **PR-Standard (gVisor)** | Docker sandbox-host with local-disk + gVisor | Linux CI with Docker | No | Yes (in container) | ScriptedProvider | <3min |
+| **PR-Standard (full)** | Docker sandbox-host with ZFS + gVisor | Linux CI with Docker + ZFS module | Yes (in container) | Yes (in container) | ScriptedProvider | <5min |
 | **Nightly** | Real provider, stress, failure injection | Dedicated Linux host | Yes (native) | Yes (native) | Real APIs (gated) | <30min |
 
 ### 3.2 Test Flow Architecture
@@ -340,13 +346,29 @@ sequenceDiagram
     Agent-->>Test: events + session state
     Test->>Test: assert parity across modes
 
-    Note over CI,GV: Tier 2: Docker-Based
-    CI->>CI: docker compose up (sandbox-host)
+    Note over CI,GV: Tier 2: Docker-Based (config variants)
+
+    Note over CI,SH: Variant A: local-disk + none (simplest)
+    CI->>CI: docker compose up (sandbox-host, config: local-disk/none)
     CI->>Test: go test -tags=docker ./e2etests/external/docker/...
+    Test->>SH: RPC: CreateSession
+    SH->>SH: os.MkdirAll (session dir)
+    SH-->>Test: session_id
+    Test->>Agent: New(NativeDriver, NativeSandboxEnvironment)
+    Agent->>SH: RPC: ExecuteTool (all Tier 1)
+    SH-->>Agent: ToolResponse (no snapshot)
+    Agent-->>Test: events + session state
+
+    Note over CI,GV: Variant B: local-disk + gVisor
+    Agent->>SH: RPC: ExecuteTool
+    SH->>GV: runsc run (Tier 2 tools)
+    GV-->>SH: result
+    SH-->>Agent: ToolResponse (no snapshot)
+
+    Note over CI,GV: Variant C: ZFS + gVisor (full, requires ZFS module)
     Test->>SH: RPC: CreateSession
     SH->>ZFS: zfs clone base@snap
     SH-->>Test: session_id
-    Test->>Agent: New(NativeDriver, NativeSandboxEnvironment)
     Agent->>SH: RPC: ExecuteTool
     SH->>GV: runsc run (Tier 2 tools)
     GV-->>SH: result
@@ -364,55 +386,115 @@ sequenceDiagram
 
 ## 4. Docker Test Environment Setup
 
+With configurable backends (addendum 02), Docker-based testing supports three configurations with decreasing infrastructure requirements:
+
+| Config | StorageBackend | ContainerRuntime | Requires ZFS module? | Requires privileged? | What it tests |
+|--------|---------------|-----------------|---------------------|---------------------|---------------|
+| **Minimal** | `local-disk` | `none` | No | No | Session lifecycle, Tier 1 tools, pause/resume |
+| **gVisor-only** | `local-disk` | `gvisor` | No | Yes (for runsc) | Above + Tier 2 container isolation |
+| **Full** | `zfs` | `gvisor` | Yes | Yes | Above + snapshots, rollback, COW clones |
+
 ### 4.1 Dockerfile for Test Image
 
-The test image bundles ZFS userland tools, gVisor (runsc), the `sandbox-host` binary, and the Go test runner.
+The base Dockerfile builds the `sandbox-host` binary. Optional layers add gVisor and/or ZFS tools.
 
 ```dockerfile
 # syntax=docker/dockerfile:1
-FROM ubuntu:22.04 AS base
 
-# ZFS userland
+# --- Minimal: just sandbox-host with local-disk + none ---
+FROM ubuntu:22.04 AS base-minimal
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    zfsutils-linux \
-    kmod \
     ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# gVisor runsc
+COPY --from=golang:1.23 /usr/local/go /usr/local/go
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+WORKDIR /src
+COPY . .
+RUN go build -o /usr/local/bin/sandbox-host ./cmd/sandbox-host
+
+# --- gVisor-only: adds runsc ---
+FROM base-minimal AS base-gvisor
+
 RUN curl -fsSL https://gvisor.dev/archive.key | gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
     > /etc/apt/sources.list.d/gvisor.list \
     && apt-get update && apt-get install -y runsc \
     && rm -rf /var/lib/apt/lists/*
 
-# Go (for running tests inside the container)
-COPY --from=golang:1.23 /usr/local/go /usr/local/go
-ENV PATH="/usr/local/go/bin:${PATH}"
+# --- Full: adds ZFS userland ---
+FROM base-gvisor AS base-full
 
-WORKDIR /src
-COPY . .
-
-# Build sandbox-host binary
-RUN go build -o /usr/local/bin/sandbox-host ./cmd/sandbox-host
-
-# Test entrypoint
-ENTRYPOINT ["go", "test"]
-CMD ["-tags=docker", "-v", "-timeout=5m", "./e2etests/external/docker/..."]
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    zfsutils-linux \
+    kmod \
+    && rm -rf /var/lib/apt/lists/*
 ```
 
+Use `--target=base-minimal`, `--target=base-gvisor`, or `--target=base-full` to select the configuration.
+
 ### 4.2 Docker Compose for Multi-Container Testing
+
+Three compose profiles support the different configurations:
 
 ```yaml
 # docker-compose.e2e.yaml
 version: "3.8"
 
 services:
-  sandbox-host:
+  # --- Minimal config: local-disk + none ---
+  # Runs on any Linux Docker host. No special privileges needed.
+  sandbox-host-minimal:
     build:
       context: .
       dockerfile: e2etests/external/docker/Dockerfile.sandbox-host
+      target: base-minimal
+    environment:
+      SANDBOX_LISTEN_ADDR: "0.0.0.0:8080"
+      SANDBOX_STORAGE_BACKEND: "local-disk"
+      SANDBOX_CONTAINER_RUNTIME: "none"
+      SANDBOX_SESSIONS_ROOT_DIR: "/var/lib/sandbox/sessions"
+      SANDBOX_AUTH_TOKEN: "e2e-test-token"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    entrypoint: ["/usr/local/bin/sandbox-host"]
+    profiles: ["minimal"]
+
+  # --- gVisor-only config: local-disk + gvisor ---
+  sandbox-host-gvisor:
+    build:
+      context: .
+      dockerfile: e2etests/external/docker/Dockerfile.sandbox-host
+      target: base-gvisor
+    privileged: true                    # required for gVisor runsc
+    cap_add:
+      - NET_RAW                         # gVisor networking
+    environment:
+      SANDBOX_LISTEN_ADDR: "0.0.0.0:8080"
+      SANDBOX_STORAGE_BACKEND: "local-disk"
+      SANDBOX_CONTAINER_RUNTIME: "gvisor"
+      SANDBOX_SESSIONS_ROOT_DIR: "/var/lib/sandbox/sessions"
+      SANDBOX_AUTH_TOKEN: "e2e-test-token"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    entrypoint: ["/usr/local/bin/sandbox-host"]
+    profiles: ["gvisor"]
+
+  # --- Full config: ZFS + gVisor ---
+  sandbox-host-full:
+    build:
+      context: .
+      dockerfile: e2etests/external/docker/Dockerfile.sandbox-host
+      target: base-full
     privileged: true                    # required for ZFS + gVisor
     cap_add:
       - SYS_ADMIN                      # ZFS mount operations
@@ -423,6 +505,8 @@ services:
       - zfs-pool:/var/lib/zfs-test     # backing store for ZFS test pool
     environment:
       SANDBOX_LISTEN_ADDR: "0.0.0.0:8080"
+      SANDBOX_STORAGE_BACKEND: "zfs"
+      SANDBOX_CONTAINER_RUNTIME: "gvisor"
       SANDBOX_POOL_NAME: "testpool"
       SANDBOX_BASES_DATASET: "testpool/bases"
       SANDBOX_SESSIONS_DATASET: "testpool/sessions"
@@ -433,15 +517,12 @@ services:
       timeout: 5s
       retries: 10
     entrypoint: ["/usr/local/bin/sandbox-host"]
-    command: []
+    profiles: ["full"]
 
   test-runner:
     build:
       context: .
       dockerfile: e2etests/external/docker/Dockerfile.test-runner
-    depends_on:
-      sandbox-host:
-        condition: service_healthy
     environment:
       SANDBOX_HOST_URL: "http://sandbox-host:8080"
       SANDBOX_AUTH_TOKEN: "e2e-test-token"
@@ -449,12 +530,14 @@ services:
     volumes:
       - ./:/src:ro
     working_dir: /src
+    profiles: ["minimal", "gvisor", "full"]
 
-  # Initialization: create ZFS pool and base snapshot
+  # Initialization: create ZFS pool and base snapshot (full profile only)
   init-pool:
     build:
       context: .
       dockerfile: e2etests/external/docker/Dockerfile.sandbox-host
+      target: base-full
     privileged: true
     cap_add: [SYS_ADMIN]
     devices: [/dev/zfs:/dev/zfs]
@@ -464,43 +547,55 @@ services:
     command:
       - |
         set -e
-        # Create a file-backed ZFS pool if it doesn't exist
         if ! zpool list testpool 2>/dev/null; then
           truncate -s 2G /var/lib/zfs-test/pool.img
           zpool create testpool /var/lib/zfs-test/pool.img
         fi
-        # Create base datasets
         zfs create -p testpool/bases
         zfs create -p testpool/sessions
-        # Create a base snapshot with a minimal workspace
         zfs create testpool/bases/ubuntu-base
         echo '{"ready": true}' > /testpool/bases/ubuntu-base/.workspace-ready
         zfs snapshot testpool/bases/ubuntu-base@ready
         echo "ZFS pool initialized successfully"
+    profiles: ["full"]
 
 volumes:
   zfs-pool:
 ```
 
+Usage:
+
+```bash
+# Minimal -- runs anywhere with Docker
+docker compose -f docker-compose.e2e.yaml --profile minimal up --build --abort-on-container-exit
+
+# gVisor-only -- needs privileged mode
+docker compose -f docker-compose.e2e.yaml --profile gvisor up --build --abort-on-container-exit
+
+# Full -- needs ZFS kernel module + privileged mode
+docker compose -f docker-compose.e2e.yaml --profile full up --build --abort-on-container-exit
+```
+
 ### 4.3 Required Host Prerequisites
 
-| Requirement | Docker-based | Dedicated host |
-|-------------|-------------|----------------|
-| Linux kernel | 5.10+ (host) | 5.10+ |
-| ZFS kernel module | Loaded on host (`modprobe zfs`) | Loaded (`zfs-dkms` or built-in) |
-| gVisor (runsc) | Installed in container | Installed on host |
-| Docker mode | `--privileged` or `--cap-add SYS_ADMIN,NET_RAW` + `--device /dev/zfs` | N/A |
-| Disk space | 4GB+ for ZFS pool image | 20GB+ ZFS pool on real disk/EBS |
+| Requirement | Minimal (local-disk + none) | gVisor-only (local-disk + gvisor) | Full (ZFS + gVisor) | Dedicated host |
+|-------------|:---:|:---:|:---:|:---:|
+| Linux kernel | Any | 5.4+ | 5.10+ (host) | 5.10+ |
+| ZFS kernel module | Not needed | Not needed | Loaded on host (`modprobe zfs`) | Loaded |
+| gVisor (runsc) | Not needed | Installed in container | Installed in container | Installed on host |
+| Docker mode | Standard (no privileges) | `--privileged` | `--privileged` + `--device /dev/zfs` | N/A |
+| Disk space | 1GB | 1GB | 4GB+ for ZFS pool image | 20GB+ ZFS pool |
 
 ### 4.4 Known Limitations and Workarounds
 
 | Limitation | Impact | Workaround |
 |-----------|--------|------------|
-| ZFS in Docker requires host kernel module | Cannot run on CI hosts without `zfs.ko` | Use CI runners with ZFS support (e.g., Ubuntu runners with `zfs-dkms`), or skip Tier 2 tests |
-| `--privileged` required | Security concern in shared CI | Use dedicated CI runners for Tier 2, or use rootless containers with user-namespace ZFS (experimental) |
+| ZFS in Docker requires host kernel module | Cannot run full-config tests on CI hosts without `zfs.ko` | Use minimal or gVisor-only config; full config runs only where ZFS is available |
+| `--privileged` required for gVisor | Security concern in shared CI | Use minimal config (no privileges needed) for basic CI; use dedicated CI runners for gVisor/full |
 | gVisor `--net-raw` | Network isolation in gVisor needs raw socket cap | Pass `--cap-add NET_RAW` in Docker; gVisor's own network stack handles isolation |
 | File-backed ZFS pool performance | Slower than real block devices | Acceptable for CI tests; keep pool size small (2-4GB) |
-| macOS Docker Desktop | No ZFS kernel module available | Skip Tier 2; use Tier 1 (mock-based) for Mac development |
+| macOS Docker Desktop | No ZFS module, no gVisor | Use minimal config for Docker tests on Mac; Tier 1 (mock-based) always works |
+| No snapshots with local-disk | Cannot test snapshot/rollback in minimal/gVisor configs | Snapshot tests only run in full config; mock-based snapshot tests in Tier 1 |
 
 ---
 
@@ -525,30 +620,46 @@ These tests use `LocalEnvironment` with `ScriptedProvider` and run on any platfo
 
 ### 5.2 Agent in Sandbox -- Mode 2 (Tier 2/3)
 
-These tests require ZFS + gVisor (Docker or dedicated host).
+These tests run against a sandbox-host. The infrastructure config determines which scenarios are applicable. Tests that require ZFS or gVisor skip gracefully when the sandbox-host is configured without them.
 
-| Scenario | Description | Assertions |
-|----------|-------------|------------|
-| **S1: Full lifecycle** | Create session -> execute tools -> snapshot -> pause -> resume -> destroy | Each lifecycle transition succeeds; state transitions are valid |
-| **S2: ZFS snapshot correctness** | Write files, snapshot, write more, rollback | After rollback, filesystem matches snapshot state exactly |
-| **S3: Per-turn snapshots** | Run 3-turn agent; verify a snapshot exists per turn | Snapshot count matches turn count; each snapshot captures correct state |
-| **S4: 3rd party driver launch** | Launch Claude Code driver in sandbox via terminal mux | Driver produces normalized events; session log captured |
-| **S5: Credential injection** | Inject API keys into sandbox environment | Driver can authenticate; credentials not leaked in events |
-| **S6: Pause/resume preserves state** | Multi-turn conversation, pause, resume, continue | Conversation log intact after resume; filesystem unchanged |
-| **S7: gVisor isolation** | Tier 2 bash commands run inside gVisor container | Process isolation verified (PID namespace, filesystem root); resource limits enforced |
+| Scenario | Description | Required config | Assertions |
+|----------|-------------|----------------|------------|
+| **S1: Full lifecycle** | Create session -> execute tools -> snapshot -> pause -> resume -> destroy | Any | Each lifecycle transition succeeds; state transitions are valid |
+| **S2: ZFS snapshot correctness** | Write files, snapshot, write more, rollback | ZFS | After rollback, filesystem matches snapshot state exactly |
+| **S3: Per-turn snapshots** | Run 3-turn agent; verify a snapshot exists per turn | ZFS | Snapshot count matches turn count; each snapshot captures correct state |
+| **S4: 3rd party driver launch** | Launch Claude Code driver in sandbox via terminal mux | Any | Driver produces normalized events; session log captured |
+| **S5: Credential injection** | Inject API keys into sandbox environment | Any | Driver can authenticate; credentials not leaked in events |
+| **S6: Pause/resume preserves state** | Multi-turn conversation, pause, resume, continue | Any | Conversation log intact after resume; filesystem unchanged |
+| **S7: gVisor isolation** | Tier 2 bash commands run inside gVisor container | gVisor | Process isolation verified (PID namespace, filesystem root); resource limits enforced |
+| **S8: local-disk lifecycle** | Create session with local-disk, execute tools, destroy | local-disk | Session dir created via mkdir; tools execute directly; session dir removed on destroy |
+| **S9: Snapshot on local-disk returns error** | Call CreateSnapshot on local-disk sandbox-host | local-disk | Returns `ErrSnapshotsNotAvailable`; agent handles gracefully |
+| **S10: All-direct execution (no gVisor)** | Execute Tier 2 classified tools without gVisor | none runtime | All tools execute directly (Tier 1); correct results returned |
 
 ### 5.3 Agent outside Sandbox -- Mode 3 (Tier 2/3)
 
-These tests verify RPC dispatch from a local agent to a remote sandbox-host.
+These tests verify RPC dispatch from a local agent to a remote sandbox-host. Config combinations determine which capabilities are available.
 
-| Scenario | Description | Assertions |
-|----------|-------------|------------|
-| **R1: RPC happy path** | Agent dispatches read/write/bash over RPC | Tool results match expected; RPC round-trip succeeds |
-| **R2: Tier routing** | Mix of Tier 1 (read, grep) and Tier 2 (bash) calls | Tier 1 runs without container; Tier 2 runs in gVisor; both return correct results |
-| **R3: Streaming progress** | Bash tool emits progress updates over RPC stream | Progress events received by agent before final result |
-| **R4: Snapshot via RPC** | Create snapshot after tool execution via NativeSandboxEnvironment | Snapshot ID returned; rollback via RPC restores state |
-| **R5: Session lifecycle over RPC** | Create -> execute -> pause -> resume -> execute -> destroy | All RPC calls succeed; state transitions valid |
-| **R6: Concurrent tool calls** | Agent dispatches 3 tool calls in parallel (if supported) | All complete successfully; no race conditions |
+| Scenario | Description | Required config | Assertions |
+|----------|-------------|----------------|------------|
+| **R1: RPC happy path** | Agent dispatches read/write/bash over RPC | Any | Tool results match expected; RPC round-trip succeeds |
+| **R2: Tier routing** | Mix of Tier 1 (read, grep) and Tier 2 (bash) calls | gVisor | Tier 1 runs without container; Tier 2 runs in gVisor; both return correct results |
+| **R3: Streaming progress** | Bash tool emits progress updates over RPC stream | Any | Progress events received by agent before final result |
+| **R4: Snapshot via RPC** | Create snapshot after tool execution via NativeSandboxEnvironment | ZFS | Snapshot ID returned; rollback via RPC restores state |
+| **R5: Session lifecycle over RPC** | Create -> execute -> pause -> resume -> execute -> destroy | Any | All RPC calls succeed; state transitions valid |
+| **R6: Concurrent tool calls** | Agent dispatches 3 tool calls in parallel (if supported) | Any | All complete successfully; no race conditions |
+| **R7: Capabilities reflect config** | Query NativeSandboxEnvironment.Capabilities() for each config | Any | Caps match config: local-disk has Snapshots=false; none runtime has TierRouting=false |
+| **R8: Snapshot ErrCapabilityNotSupported** | Call CreateSnapshot on NativeSandboxEnvironment with local-disk config | local-disk | Returns `ErrCapabilityNotSupported` locally before RPC; agent loop handles gracefully |
+
+### 5.3.1 Backend Config Combination Matrix (Tier 2)
+
+Each backend config combination is tested with a core set of lifecycle and tool execution scenarios:
+
+| Config | StorageBackend | ContainerRuntime | Snapshot tests | Tier routing tests | Lifecycle tests |
+|--------|---------------|-----------------|:-:|:-:|:-:|
+| **C1: Full** | `zfs` | `gvisor` | Yes | Yes | Yes |
+| **C2: ZFS-only** | `zfs` | `none` | Yes | No (all Tier 1) | Yes |
+| **C3: gVisor-only** | `local-disk` | `gvisor` | No | Yes | Yes |
+| **C4: Minimal** | `local-disk` | `none` | No | No | Yes |
 
 ### 5.4 Cross-Mode Parity (Tier 1)
 
@@ -684,21 +795,38 @@ jobs:
         with: { go-version: '1.23' }
       - run: go test -v -timeout=2m ./e2etests/external/...
 
-  tier2-docker:
-    name: "Tier 2: Docker E2E"
+  tier2-docker-minimal:
+    name: "Tier 2: Docker E2E (local-disk + none)"
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     needs: tier1-mock
     steps:
       - uses: actions/checkout@v4
+      - name: Run minimal Docker E2E
+        run: |
+          docker compose -f docker-compose.e2e.yaml --profile minimal \
+            up --build --abort-on-container-exit
+        env:
+          SANDBOX_STORAGE_BACKEND: "local-disk"
+          SANDBOX_CONTAINER_RUNTIME: "none"
+
+  tier2-docker-full:
+    name: "Tier 2: Docker E2E (ZFS + gVisor)"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: tier2-docker-minimal
+    steps:
+      - uses: actions/checkout@v4
       - name: Load ZFS kernel module
         run: sudo modprobe zfs || echo "ZFS module not available; skipping"
-      - name: Run Docker E2E
+      - name: Run full Docker E2E
         run: |
           if lsmod | grep -q zfs; then
-            docker compose -f docker-compose.e2e.yaml up --build --abort-on-container-exit
+            docker compose -f docker-compose.e2e.yaml --profile full \
+              up --build --abort-on-container-exit
           else
-            echo "::warning::ZFS kernel module not available. Skipping Tier 2 tests."
+            echo "::warning::ZFS kernel module not available. Skipping full Tier 2 tests."
+            echo "::notice::Minimal Tier 2 (local-disk + none) already passed."
           fi
 
   tier3-nightly:
@@ -754,46 +882,58 @@ type ReportSummary struct {
 
 ---
 
-## 7. Testing without ZFS -- LocalEnvironment on Any Platform
+## 7. Testing without ZFS -- Broader CI Compatibility
 
-### 7.1 How LocalEnvironment Enables Universal Testing
+### 7.1 Two Paths to ZFS-Free Testing
 
-`LocalEnvironment` (`internal/sandbox/environment/local/local.go`) implements the `ExecutionEnvironment` interface without any ZFS or gVisor dependency. It executes tools directly on the local filesystem. This means:
+With addendum 02's configurable backends, there are now two ways to run E2E tests without ZFS:
 
-- **Mac development**: Developers can run the full Tier 1 E2E suite on macOS without any special setup.
-- **Windows CI**: The same tests run on Windows (tools use Go's `os` package, which is cross-platform).
-- **Cloud CI without ZFS**: Standard GitHub Actions Ubuntu runners can run Tier 1 without `zfs.ko`.
-- **ARM64 CI**: Works on ARM-based runners (e.g., GitHub's ARM64 runners, Graviton EC2).
+**LocalEnvironment (Tier 1, mock-based):** The in-process `LocalEnvironment` implements `ExecutionEnvironment` without any ZFS or gVisor dependency. It executes tools directly on the local filesystem. No RPC, no sandbox-host binary.
 
-The key constraint is that `LocalEnvironment` does not support snapshots or rollback:
+**NativeSandboxEnvironment with local-disk config (Tier 2, Docker-based):** The full sandbox-host binary runs with `StorageBackend: "local-disk"` and optionally `ContainerRuntime: "none"`. This exercises the real RPC path, real session lifecycle, and real tool execution -- just without ZFS snapshots or gVisor isolation. This is a significant improvement for CI compatibility because it means Tier 2 Docker tests can run on any Linux CI runner without the ZFS kernel module.
 
 ```go
-func (e *LocalEnvironment) Capabilities() environment.Capabilities {
-    return environment.LocalCapabilities
-    // LocalCapabilities = { Snapshots: false, Rollback: false, Pause: true, ... }
-}
+// Tier 1: LocalEnvironment (no sandbox-host, no RPC)
+env := local.NewLocalEnvironment("/tmp/workspace", logger)
+caps := env.Capabilities()
+// Snapshots: false, Rollback: false, TierRouting: false
 
-func (e *LocalEnvironment) CreateSnapshot(context.Context, string) (*environment.SnapshotInfo, error) {
-    return nil, environment.ErrCapabilityNotSupported
-}
+// Tier 2: NativeSandboxEnvironment with local-disk + none
+env := native.NewNativeSandboxEnvironment(sandboxClient, native.NativeSandboxConfig{
+    StorageBackend:   native.StorageBackendLocalDisk,
+    ContainerRuntime: native.ContainerRuntimeNone,
+}, logger)
+caps := env.Capabilities()
+// Snapshots: false, Rollback: false, TierRouting: false
+// But: real RPC, real sandbox-host, real session lifecycle
 ```
 
-Tests that exercise snapshot/rollback behavior use `MemorySandboxService` (the in-memory fake from `e2etests/mode3/harness/`) which simulates ZFS semantics without requiring the kernel module.
+### 7.2 What Each Config Level Tests
 
-### 7.2 Platform Test Matrix
+| Capability | LocalEnvironment | local-disk + none | local-disk + gvisor | ZFS + gvisor |
+|-----------|:---:|:---:|:---:|:---:|
+| Session lifecycle (create/destroy) | In-process no-op | Real RPC + mkdir | Real RPC + mkdir | Real RPC + ZFS clone |
+| Tool execution | Direct local | RPC -> direct | RPC -> direct (T1) / gVisor (T2) | RPC -> direct (T1) / gVisor (T2) |
+| Pause/resume | In-process | Real RPC | Real RPC | Real RPC |
+| Snapshots | No | No | No | Yes |
+| Rollback | No | No | No | Yes |
+| Tier routing | No | No | Yes | Yes |
+| Container isolation | No | No | Yes (Tier 2) | Yes (Tier 2) |
 
-| Platform | Tier 1 (Mock) | Tier 2 (Docker) | Tier 3 (Native) |
-|----------|:---:|:---:|:---:|
-| macOS (dev laptop) | Yes | No | No |
-| Ubuntu CI (no ZFS module) | Yes | No | No |
-| Ubuntu CI (with ZFS module) | Yes | Yes | No |
-| Dedicated Linux host (ZFS + gVisor) | Yes | Yes | Yes |
-| Windows CI | Yes | No | No |
-| ARM64 Linux | Yes | Possible (with ARM gVisor) | Possible |
+### 7.3 Platform Test Matrix
 
-### 7.3 Graceful Degradation Pattern
+| Platform | Tier 1 (Mock) | Tier 2 Minimal (local-disk + none) | Tier 2 gVisor (local-disk + gvisor) | Tier 2 Full (ZFS + gVisor) | Tier 3 (Native) |
+|----------|:---:|:---:|:---:|:---:|:---:|
+| macOS (dev laptop) | Yes | Yes (Docker) | No (gVisor = Linux) | No | No |
+| Ubuntu CI (no ZFS module) | Yes | Yes | Yes | No | No |
+| Ubuntu CI (with ZFS module) | Yes | Yes | Yes | Yes | No |
+| Dedicated Linux host (ZFS + gVisor) | Yes | Yes | Yes | Yes | Yes |
+| Windows CI | Yes | No | No | No | No |
+| ARM64 Linux | Yes | Yes (Docker) | Possible (ARM gVisor) | Possible | Possible |
 
-Tests detect the available environment at runtime and skip unsupported tiers:
+### 7.4 Graceful Degradation Pattern
+
+Tests detect the available environment at runtime and skip unsupported configurations. The sandbox-host's config is communicated to the test runner via environment variables:
 
 ```go
 func requireZFS(t *testing.T) {
@@ -801,7 +941,6 @@ func requireZFS(t *testing.T) {
     if _, err := exec.LookPath("zfs"); err != nil {
         t.Skip("zfs not found; skipping ZFS-dependent test")
     }
-    // Verify the module is loaded
     out, err := exec.Command("lsmod").Output()
     if err != nil || !strings.Contains(string(out), "zfs") {
         t.Skip("zfs kernel module not loaded; skipping")
@@ -819,6 +958,37 @@ func requireDocker(t *testing.T) {
     t.Helper()
     if _, err := exec.LookPath("docker"); err != nil {
         t.Skip("docker not found; skipping Docker-dependent test")
+    }
+}
+
+// sandboxHostConfig reads the sandbox-host's backend config from env vars
+// set by docker-compose or the test runner.
+func sandboxHostConfig(t *testing.T) (storageBackend, containerRuntime string) {
+    t.Helper()
+    storageBackend = os.Getenv("SANDBOX_STORAGE_BACKEND")
+    containerRuntime = os.Getenv("SANDBOX_CONTAINER_RUNTIME")
+    if storageBackend == "" {
+        storageBackend = "zfs" // default for backwards compatibility
+    }
+    if containerRuntime == "" {
+        containerRuntime = "gvisor"
+    }
+    return
+}
+
+func requireZFSBackend(t *testing.T) {
+    t.Helper()
+    sb, _ := sandboxHostConfig(t)
+    if sb != "zfs" {
+        t.Skipf("sandbox-host storage_backend is %q, not zfs; skipping", sb)
+    }
+}
+
+func requireGVisorRuntime(t *testing.T) {
+    t.Helper()
+    _, cr := sandboxHostConfig(t)
+    if cr != "gvisor" {
+        t.Skipf("sandbox-host container_runtime is %q, not gvisor; skipping", cr)
     }
 }
 ```
@@ -901,7 +1071,7 @@ graph LR
 
 ## 11. Open Questions
 
-1. **Docker-in-Docker for CI**: Some CI providers restrict `--privileged`. Should we support a `--device` + `--cap-add` approach as a less-privileged alternative? Initial research suggests `SYS_ADMIN` + device access is sufficient for ZFS but not for gVisor's `ptrace` platform. The `systrap` platform may work without `--privileged`.
+1. **Docker-in-Docker for CI**: Some CI providers restrict `--privileged`. With configurable backends (addendum 02), the minimal config (`local-disk` + `none`) needs no special privileges at all, which largely resolves this for basic CI. The gVisor-only config still needs `--privileged` for runsc. The full config needs `--privileged` + ZFS device access. Should we also explore gVisor's `systrap` platform as a way to avoid `--privileged` for gVisor-only configs? Initial research suggests `systrap` may work without `--privileged`.
 
 2. **Test pool cleanup**: Should Tier 2 Docker tests destroy and recreate the ZFS pool between test runs, or reuse the pool and just destroy sessions? Recreating is cleaner but adds ~2s startup. Recommendation: reuse pool, destroy all sessions in `TestMain` cleanup.
 
