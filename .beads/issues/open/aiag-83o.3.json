@@ -2,7 +2,7 @@
   "id": "aiag-83o.3",
   "title": "ExecutionEnvironment: Test harness suites",
   "description": "Implement ExecutionEnvironment test harness from docs/plans/11-sandbox-host-service.add01-test-harness.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nKey deliverables:\n- Property tests: interface completeness, state machine consistency, tool execution determinism, capabilities static, local provider parity\n- Fault injection: API failures, session creation failures, mid-execution failures, RPC failures\n- Oracle/golden tests: wire format verification, type mapping\n- Contract compliance suite run against LocalEnvironment and NativeSandboxEnvironment\n- Benchmarks: selection latency, adapter overhead, capability check, type conversion\n- Stress tests: concurrent lifecycle, concurrent execution, rapid switching, session limit enforcement\n- Security tests: session ID validation, parameter sanitization\n- CI tier mapping\n\nDepends on: T1 + T2 (both environments must exist)\n\nAC: Full harness passes for LocalEnvironment and NativeSandboxEnvironment, CI tiers defined.",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "aiag-83o",
@@ -27,6 +27,7 @@
     "batch=4b",
     "plan-doc=11-sandbox-host-service.add01"
   ],
+  "assignee": "coder-1-sea",
   "created_at": "2026-03-15T06:38:32.185559-07:00",
-  "updated_at": "2026-03-15T06:38:32.185559-07:00"
+  "updated_at": "2026-03-15T07:19:16.377734-07:00"
 }

@@ -2,7 +2,7 @@
   "id": "aiag-83o.2",
   "title": "ExecutionEnvironment: NativeSandboxEnvironment + migration",
   "description": "Implement NativeSandboxEnvironment and migrate from ToolBackend to ExecutionEnvironment. From docs/plans/11-sandbox-host-service.add01.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: §5.2 (NativeSandboxEnvironment), §7 (migration path), §8 (snapshot handling)\n\nKey deliverables:\n- NativeSandboxEnvironment in internal/sandbox/environment/native/:\n  - Wraps existing ConnectRPC SandboxClient\n  - Full lifecycle: Create/Pause/Resume/Destroy map to RPC calls\n  - ExecuteTool dispatches via existing SandboxClient.ExecuteToolStream\n  - Snapshots: CreateSnapshot, Rollback, TurnComplete via RPC\n  - State() queries server or tracks locally\n  - sync.RWMutex for concurrent access (lifecycle vs ExecuteTool)\n  - Capabilities() returns NativeSandboxCapabilities\n- Migration:\n  - Update agent loop to use ExecutionEnvironment instead of ToolBackend\n  - Update RuntimeController to create/manage ExecutionEnvironment\n  - Remove ToolBackend interface, LocalBackend, SandboxBackend, SandboxToolClient\n  - Environment selection factory: NewEnvironment(config) → ExecutionEnvironment\n- Unit tests for NativeSandboxEnvironment (mock RPC client)\n- Integration tests verifying migration doesn't break existing functionality\n- Contract compliance suite passes for NativeSandboxEnvironment\n\nDepends on: T1 (interface + LocalEnvironment must exist first)\n\nAC: NativeSandboxEnvironment passes contract compliance, ToolBackend removed, agent loop uses ExecutionEnvironment, all existing tests pass after migration.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-83o",
@@ -45,5 +45,7 @@
     }
   ],
   "created_at": "2026-03-15T06:38:22.658037-07:00",
-  "updated_at": "2026-03-15T07:12:19.758318-07:00"
+  "updated_at": "2026-03-15T07:19:16.368012-07:00",
+  "closed_at": "2026-03-15T07:19:16.368012-07:00",
+  "close_reason": "Closed"
 }
