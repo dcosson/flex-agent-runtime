@@ -28,7 +28,8 @@ The current `SandboxHostService` unconditionally requires ZFS for session storag
 **What does NOT change:**
 - The `ExecutionEnvironment` interface (addendum 01)
 - ZFS and gVisor internal packages (`internal/sandbox/zfs`, `internal/sandbox/gvisor`)
-- The RPC layer
+
+**What changes in the RPC layer:** The `CreateSessionResponse` API type gains a `ServerCapabilities` field for capability negotiation (§6.1). This is an additive, backward-compatible change — see §9.2 for cross-plan dependency on plan 13 and mixed-version rollout behavior.
 
 ---
 
@@ -94,13 +95,15 @@ type ServiceConfig struct {
     // gVisor-specific config (only used when ContainerRuntime == "gvisor")
     DefaultResources gvisor.ResourceSpec
 
+    // ZFS behavioral config (only effective when StorageBackend == "zfs")
+    PerToolSnapshots    bool
+
     // General config (used regardless of backend)
     MaxSessions         int
     ToolTimeout         time.Duration
     HealthCheckInterval time.Duration
     PauseDrainTimeout   time.Duration
     ShutdownTimeout     time.Duration
-    PerToolSnapshots    bool // only effective when StorageBackend == "zfs"
 }
 ```
 
@@ -112,6 +115,18 @@ func NewSandboxHostService(cfg ServiceConfig, z zfs.ZFSManager, g gvisor.GVisorM
         logger = slog.Default()
     }
     cfg = mergeDefaultConfig(cfg)
+
+    // Validate known enum values
+    switch cfg.StorageBackend {
+    case StorageBackendZFS, StorageBackendLocalDisk:
+    default:
+        return nil, fmt.Errorf("sandbox: unknown storage_backend: %q", cfg.StorageBackend)
+    }
+    switch cfg.ContainerRuntime {
+    case ContainerRuntimeGVisor, ContainerRuntimeNone:
+    default:
+        return nil, fmt.Errorf("sandbox: unknown container_runtime: %q", cfg.ContainerRuntime)
+    }
 
     // Validate backend/manager consistency
     if cfg.StorageBackend == StorageBackendZFS && z == nil {
@@ -210,7 +225,32 @@ func (e *NativeSandboxEnvironment) Rollback(ctx context.Context, snapshotID stri
 
 ## 4. SandboxHostService Adaptations
 
-### 4.1 CreateSession with Local-Disk Backend
+### 4.1 Session ID Filesystem Safety Contract
+
+When using `StorageBackendLocalDisk`, session IDs are used directly in filesystem paths (`filepath.Join(SessionsRootDir, sessionID)`). This creates a path-traversal attack surface if session IDs are caller-provided. The following safety contract applies:
+
+1. **Allowed charset:** Session IDs must match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`. No path separators (`/`, `\`), no leading dots, no empty strings.
+2. **Validation function:** A shared `ValidateSessionID(id string) error` function in `internal/sandbox/` validates the ID before any filesystem operation. This is called at the top of `CreateSession` regardless of backend (ZFS session IDs have the same constraint since they become ZFS dataset name components).
+3. **Path containment check:** After `filepath.Join`, the resolved path is verified to remain under `SessionsRootDir` using `filepath.Rel` or prefix comparison against `filepath.Clean(SessionsRootDir)`. This is a defense-in-depth measure.
+4. **Security tests:** Explicit tests for traversal attempts (`../`, `..\\`, absolute paths, null bytes, Unicode normalization tricks) must be included in the test suite.
+
+```go
+func ValidateSessionID(id string) error {
+    if id == "" {
+        return fmt.Errorf("session ID is empty")
+    }
+    if len(id) > 128 {
+        return fmt.Errorf("session ID too long: %d chars (max 128)", len(id))
+    }
+    matched, _ := regexp.MatchString(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`, id)
+    if !matched {
+        return fmt.Errorf("session ID contains invalid characters: %q", id)
+    }
+    return nil
+}
+```
+
+### 4.2 CreateSession with Local-Disk Backend
 
 ```go
 func (svc *SandboxHostService) CreateSession(ctx context.Context, req CreateSessionRequest) (*SessionInfo, error) {
@@ -261,7 +301,7 @@ func (svc *SandboxHostService) CreateSession(ctx context.Context, req CreateSess
 }
 ```
 
-### 4.2 DestroySession with Local-Disk Backend
+### 4.3 DestroySession with Local-Disk Backend
 
 ```go
 func (svc *SandboxHostService) DestroySession(ctx context.Context, sessionID string) error {
@@ -284,7 +324,7 @@ func (svc *SandboxHostService) DestroySession(ctx context.Context, sessionID str
 }
 ```
 
-### 4.3 ExecuteTool Without gVisor
+### 4.4 ExecuteTool Without gVisor
 
 When `ContainerRuntime` is `"none"`, all tool calls route to Tier 1 execution regardless of `tools.ClassifyTool()`:
 
@@ -307,7 +347,7 @@ func (svc *SandboxHostService) ExecuteTool(ctx context.Context, req ExecuteToolR
 }
 ```
 
-### 4.4 Snapshot/Rollback Without ZFS
+### 4.5 Snapshot/Rollback Without ZFS
 
 Snapshot and rollback operations on `SandboxHostService` check the storage backend:
 
@@ -340,7 +380,7 @@ New error sentinel:
 var ErrSnapshotsNotAvailable = errors.New("sandbox: snapshots not available (requires ZFS storage backend)")
 ```
 
-### 4.5 HealthCheck Without ZFS
+### 4.6 HealthCheck Without ZFS
 
 When running without ZFS, `HealthCheck` skips pool health queries:
 
@@ -362,7 +402,7 @@ func (svc *SandboxHostService) HealthCheck(ctx context.Context) (*HealthStatus, 
 }
 ```
 
-### 4.6 Shutdown Without gVisor
+### 4.7 Shutdown Without gVisor
 
 The existing `Shutdown` method already handles `nil` gVisor with a nil check (`if svc.gvisor != nil`). No change needed.
 
@@ -427,7 +467,9 @@ if n.config.ContainerRuntime == ContainerRuntimeGVisor && !resp.ServerCapabiliti
 
 This replaces the previous approach of deferring mismatch detection to individual operation failures. The server already knows its own capabilities (section 3.2), so including them in `CreateSessionResponse` is trivial.
 
-Additionally, consider adding periodic health checks that re-validate capabilities have not changed (e.g., if the server is restarted with a different configuration while the client holds an active session). This could be integrated into the existing `HealthCheck` mechanism (section 4.5) by having the client periodically call a `GetCapabilities` or `HealthCheck` RPC and comparing the result against its stored expectations.
+**Note:** Adding `ServerCapabilities` to `CreateSessionResponse` is an RPC contract change. See §9.2 for the cross-plan dependency on plan 13 and mixed-version rollout behavior.
+
+**Periodic capability re-validation** (detecting server restart with changed config while client holds an active session) is explicitly deferred to a future addendum. The current design validates at `Create()` time only.
 
 ---
 
@@ -459,11 +501,11 @@ In the "Agent outside Sandbox" deployment mode, the orchestrator and the agent l
 
 Both processes construct their environments with the same `NativeSandboxConfig` and reference the same session ID. The orchestrator creates the session and passes the session ID to the agent loop (via whatever mechanism launches the agent process).
 
-### 7.2 Capability Negotiation on Both Connections
+### 7.2 Capability Validation Strategy
 
-Capability negotiation (section 6.1) happens independently on both connections. When the orchestrator calls `Create()`, it validates server capabilities against its config. When the agent loop connects and begins executing tools, it should also validate capabilities -- either by calling a `GetCapabilities` RPC on its first interaction, or by receiving capabilities in the response to its first `ExecuteTool` call.
+Capability negotiation (section 6.1) happens when the orchestrator calls `Create()`, validating server capabilities against its config. For the agent loop process, runtime capability validation is deferred to a future addendum. In this design, the agent loop relies on deployment-time config consistency — both the orchestrator and agent loop are deployed with the same `NativeSandboxConfig`, enforced by the operator. The orchestrator's `Create()` validation provides the primary guard against misconfiguration.
 
-This independent validation ensures that both processes detect misconfigurations, even if they were started at different times or against different server instances.
+If runtime agent-loop validation is needed in the future, the recommended approach is a `GetCapabilities` RPC called on the agent loop's first interaction with the server.
 
 ### 7.3 Implications
 
@@ -476,7 +518,7 @@ This independent validation ensures that both processes detect misconfigurations
 
 ## 8. Implementation Notes
 
-1. **Constructor signature change:** `NewSandboxHostService` returns `(*SandboxHostService, error)` instead of `*SandboxHostService`. All callers (tests, `cmd/sandbox-host`, RPC server setup) must be updated.
+1. **Constructor signature change:** `NewSandboxHostService` returns `(*SandboxHostService, error)` instead of `*SandboxHostService`. All callers must be updated.
 
 2. **`NativeSandboxCapabilities` removal:** Delete the package-level var from `capabilities.go`. The compliance test harness and property tests that use it should pass a config-derived `Capabilities` instead.
 
@@ -485,3 +527,147 @@ This independent validation ensures that both processes detect misconfigurations
 4. **`BaseSnapshot` in CreateSession:** When using `local-disk`, the `BaseSnapshot` field in `CreateSessionRequest` is ignored (there's nothing to clone from). The session directory starts empty. If a pre-populated workspace is needed, the caller should copy files in after `Create()`.
 
 5. **Config type placement:** `StorageBackend` and `ContainerRuntime` types go in `internal/sandbox/config.go`. The `NativeSandboxConfig` type goes in `internal/sandbox/environment/native/config.go` and re-exports the backend/runtime constants for convenience.
+
+### 8.1 Constructor Migration Checklist
+
+The `NewSandboxHostService` signature change from `*SandboxHostService` to `(*SandboxHostService, error)` affects the following call sites. Update in this order to minimize partial-migration risk:
+
+1. **`internal/sandbox/sandbox.go`** — primary constructor call. Add error handling.
+2. **`internal/rpc/server/` wiring** — where `SandboxHostService` is created and passed to the RPC handler. Propagate error to server startup.
+3. **`cmd/sandbox-host/main.go`** (or equivalent entrypoint) — handle error at top-level, log and exit on misconfiguration.
+4. **`internal/rpc/rpctest/harness.go`** (`newTestStack`) — test harness builder. Add error handling; `t.Fatal` on error.
+5. **`internal/sandbox/*_test.go`** — unit test constructors. Use `t.Fatal` on error.
+6. **`e2etests/mode3/harness/`** — e2e test harness. Propagate error.
+
+All call sites should be updated in a single commit to avoid compile failures on partial migration.
+
+---
+
+## 9. Connected Components
+
+### 9.1 Modified Seams
+
+| Seam | Change | Impact |
+|------|--------|--------|
+| `NewSandboxHostService` signature | Returns `(*SandboxHostService, error)` instead of `*SandboxHostService` | All callers must handle error (see §8.1 migration checklist) |
+| `NativeSandboxCapabilities` package var | Removed | Compliance tests, property tests, and any code referencing `environment.NativeSandboxCapabilities` must use config-derived capabilities instead |
+| `NewNativeSandboxEnvironment` signature | Gains `NativeSandboxConfig` parameter | All callers must pass config; existing tests updated |
+| `CreateSessionResponse` (RPC API type) | Gains `ServerCapabilities Capabilities` field | Plan 13 RPC layer must add this field (see §9.2) |
+
+### 9.2 Cross-Plan Dependency: Plan 13 RPC Layer
+
+Capability negotiation (§6.1) requires adding a `ServerCapabilities` field to the `CreateSessionResponse` API type. This is a plan 13 change.
+
+**Required changes in plan 13:**
+- `api.CreateSessionResponse` gains `ServerCapabilities Capabilities` field
+- `Capabilities` struct: `{Snapshots bool, Rollback bool, Pause bool, TierRouting bool, StreamingProgress bool}`
+- `SandboxHostService.CreateSession` computes capabilities from its `ServiceConfig` and includes them in the response
+- Codec mapping: `codec.ToCreateSessionResponse` includes capabilities serialization
+
+**Mixed-version rollout behavior:**
+- **Old client / new server:** Old client ignores the `ServerCapabilities` field (additive field, backward-compatible). No capability negotiation occurs; client operates as before. This is safe — the old client never had negotiation.
+- **New client / old server:** `ServerCapabilities` is zero-valued (all false). New client's negotiation check detects mismatch if it expects any capabilities. This is the desired fail-fast behavior — it forces both client and server to be updated together, preventing silent misconfiguration.
+- **Rollout order:** Update server first (additive change, no breakage), then update clients.
+
+### 9.3 Updated Import Flow
+
+This addendum introduces a new import dependency:
+
+```
+internal/sandbox/environment/native → internal/sandbox (for StorageBackend, ContainerRuntime types)
+```
+
+This is consistent with the existing pattern where `native` already imports `internal/sandbox/environment` (for the interface). The new import is for config types only — no circular dependency risk since `internal/sandbox` does not import `native`.
+
+---
+
+## 10. Acceptance Criteria
+
+Each scenario crosses at least one component boundary (NativeSandboxEnvironment → SandboxHostService via RPC).
+
+**AC1 — Full degraded mode lifecycle (local-disk + no gVisor):**
+Configure `StorageBackend: "local-disk"`, `ContainerRuntime: "none"`. Create session → verify directory created under `SessionsRootDir`. Execute a Tier 2 tool (e.g., `bash`) → verify it runs directly (no container). Call `CreateSnapshot` → verify `ErrCapabilityNotSupported`. Destroy session → verify directory removed. `Capabilities()` reports `Snapshots: false, Rollback: false, TierRouting: false`.
+
+**AC2 — Capability negotiation failure:**
+Configure client with `StorageBackend: "zfs"`. Configure server with `StorageBackend: "local-disk"`. Call `Create()` on NativeSandboxEnvironment → verify it fails with a clear error message indicating the client/server capability mismatch (client expects snapshots, server doesn't support them).
+
+**AC3 — Constructor validation:**
+Call `NewSandboxHostService` with `StorageBackend: "zfs"` but `ZFSManager: nil` → verify error. Call with `ContainerRuntime: "gvisor"` but `GVisorManager: nil` → verify error. Call with `StorageBackend: "local-disk"` but `SessionsRootDir: ""` → verify error. Call with `StorageBackend: "invalid"` → verify error. Call with `ContainerRuntime: ""` → verify error.
+
+**AC4 — Mixed mode (ZFS + no gVisor):**
+Configure `StorageBackend: "zfs"`, `ContainerRuntime: "none"`. Create session → verify ZFS clone. Execute Tier 2 tool → verify it runs as Tier 1 (no container). `CreateSnapshot` → verify success. `Rollback` → verify success. `Capabilities()` reports `Snapshots: true, TierRouting: false`.
+
+**AC5 — PerToolSnapshots silently skipped on local-disk:**
+Configure `StorageBackend: "local-disk"`, `PerToolSnapshots: true`. Execute a tool → verify no error, no snapshot attempt. Verify a warning is logged at startup about `PerToolSnapshots` being ineffective without ZFS.
+
+**AC6 — Session ID path traversal rejected:**
+Attempt to create a session with IDs containing `../`, `..\\`, absolute paths, null bytes → verify all are rejected by `ValidateSessionID` before any filesystem operation.
+
+---
+
+## 11. Testing Strategy
+
+### 11.1 Constructor Validation Tests
+- All four valid backend/runtime combinations construct successfully with appropriate managers
+- `StorageBackendZFS` + nil `ZFSManager` → error
+- `ContainerRuntimeGVisor` + nil `GVisorManager` → error
+- `StorageBackendLocalDisk` + empty `SessionsRootDir` → error
+- Unknown/empty `StorageBackend` or `ContainerRuntime` → error
+
+### 11.2 Local-Disk Session Lifecycle Tests
+- `CreateSession` with local-disk creates directory under `SessionsRootDir`
+- `DestroySession` with local-disk removes directory
+- `CreateSession` with local-disk ignores `BaseSnapshot` (no error, empty directory)
+- Session ID validation rejects traversal attempts (§4.1 safety contract)
+- Path containment verified after `filepath.Join`
+
+### 11.3 Capability-Gated Method Tests
+- `CreateSnapshot` returns `ErrCapabilityNotSupported` when `StorageBackend != "zfs"`
+- `Rollback` returns `ErrCapabilityNotSupported` when `StorageBackend != "zfs"`
+- `TurnComplete` returns nil (no-op) when `StorageBackend != "zfs"`
+- `CreateSnapshot` succeeds when `StorageBackend == "zfs"`
+
+### 11.4 ExecuteTool Tier Downgrade Tests
+- Tier 2 tool (e.g., `bash`) runs as Tier 1 when `ContainerRuntime == "none"`
+- Tier 1 tool runs as Tier 1 regardless of `ContainerRuntime`
+- Tier 2 tool routes to gVisor when `ContainerRuntime == "gvisor"`
+
+### 11.5 Dynamic Capabilities Tests
+- Each of the four config combinations returns expected `Capabilities` struct
+- `Pause` and `StreamingProgress` are always true
+- `Snapshots` and `Rollback` true only with ZFS
+- `TierRouting` true only with gVisor
+
+### 11.6 Capability Negotiation Tests
+- Client configured for ZFS, server reports no snapshots → `Create()` fails
+- Client configured for gVisor, server reports no tier routing → `Create()` fails
+- Client and server configs match → `Create()` succeeds
+- Server returns zero-valued capabilities (old server) → new client fails fast
+
+### 11.7 HealthCheck Per Backend
+- ZFS backend: health check reports pool status
+- Local-disk backend: health check returns "healthy" without pool queries
+
+### 11.8 Compliance Suite Updates
+- Update `runEnvironmentComplianceSuite` registration for NativeSandboxEnvironment to accept `NativeSandboxConfig`
+- Run compliance suite with each of the four config combinations
+- Verify capability-gated subtests (PauseResume, SnapshotRollback) behave correctly per config
+
+---
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | RPC seam changed but plan declares unchanged | Incorporated | §1 "What does NOT change" updated; §9.2 cross-plan dependency added with mixed-version rollout |
+| 2 | coder-1-sea | P1 | Local-disk path safety for session ID | Incorporated | §4.1 session ID safety contract added |
+| 3 | coder-1-sea | P2 | Constructor migration sequencing not concrete | Incorporated | §8.1 migration checklist added |
+| 4 | coder-1-sea | P2 | Missing acceptance criteria | Incorporated | §10 acceptance criteria added |
+| 5 | reviewer-sea | P1 | No acceptance criteria section | Incorporated | §10 acceptance criteria added (same as #4) |
+| 6 | reviewer-sea | P2 | No testing strategy section | Incorporated | §11 testing strategy added |
+| 7 | reviewer-sea | P2 | Missing connected components / seam impacts | Incorporated | §9 connected components added |
+| 8 | reviewer-sea | P2 | Constructor doesn't validate unknown enum values | Incorporated | §2.3 exhaustive switch validation added |
+| 9 | reviewer-sea | P2 | Capability negotiation requires plan 13 RPC change | Incorporated | §9.2 cross-plan dependency section added |
+| 10 | reviewer-sea | P3 | Agent-loop capability validation underspecified | Incorporated | §7.2 commits to deployment-time consistency, defers runtime validation |
+| 11 | reviewer-sea | P3 | Periodic capability re-validation is speculative | Incorporated | §6.1 "consider" replaced with explicit deferral |
+| 12 | reviewer-sea | P3 | PerToolSnapshots under General config but ZFS-specific | Incorporated | §2.2 moved to ZFS behavioral config section |
