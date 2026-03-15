@@ -1,32 +1,36 @@
-# 11 Addendum 01: Sandbox Provider Abstraction
+# 11 Addendum 01: ExecutionEnvironment Abstraction
 
 **Parent plan:** [11-sandbox-host-service.md](./11-sandbox-host-service.md)
 **Status:** Draft
-**Scope:** Client-side `SandboxProvider` interface, capability system, local provider adapter (wrapping ConnectRPC to SandboxHostService), remote provider adapters (E2B, Daytona, Fly.io), migration path from current `SandboxToolClient` + `SandboxBackend`
+**Scope:** Unified `ExecutionEnvironment` interface replacing both `ToolBackend` (LocalBackend + SandboxBackend) and the sandbox provider layer. Implementations for local, native sandbox (ZFS/gVisor), E2B, Daytona, and Fly.io. Migration path from current `ToolBackend` split.
 **Integrates with:** Plan 06 (ToolBackend), Plan 11 (SandboxHostService), Plan 13 (RPC Layer), Architecture (Placement Modes)
 
 ---
 
 ## 1. Overview
 
-The current sandbox architecture assumes a single execution model: our ZFS + gVisor stack running behind `SandboxHostService`, accessed via ConnectRPC through `SandboxClient` and `SandboxBackend`. This addendum introduces a `SandboxProvider` abstraction at the **client level** — the interface that the agent loop / orchestrator calls — enabling pluggable sandbox backends including cloud-hosted environments like E2B, Daytona, and Fly.io.
+The current sandbox architecture has two separate interface hierarchies that need to be unified:
 
-**Key insight:** The abstraction that matters is NOT on the sandbox host side. `SandboxHostService`, `ZFSManager`, and `GVisorManager` all stay as-is — they become internal implementation details of the "local" provider. The abstraction lives at the client level, replacing the current hard-coded `SandboxToolClient` → `SandboxBackend` path with a provider-selected implementation.
+1. **ToolBackend** (Plan 06) with `LocalBackend` and `SandboxBackend` — determines *how* tools execute
+2. **Sandbox lifecycle** managed directly by the RuntimeController via RPC calls
+
+This addendum replaces both with a single **`ExecutionEnvironment`** interface that covers lifecycle, tool execution, and optional capabilities (snapshots, rollback). Every environment — from "run everything locally with no sandbox" to "use E2B cloud sandboxes" — implements the same interface.
+
+**Key insight:** There is no meaningful distinction between "how tools execute" (ToolBackend) and "what sandbox to use" (provider). They are the same decision. An `ExecutionEnvironment` IS the backend. The agent loop calls `ExecutionEnvironment.ExecuteTool()`. The RuntimeController calls lifecycle methods on the same interface.
 
 **What changes:**
-- New `SandboxProvider` interface in `internal/sandbox/provider` — the unified client-side contract
-- Capability detection system so the orchestrator knows what each provider supports
-- `NativeSandboxProvider` wraps the existing ConnectRPC path (`SandboxClient` → `SandboxHostService`)
-- `E2BSandboxProvider`, `DaytonaSandboxProvider`, `FlyMachineSandboxProvider` implement the same interface against their respective APIs
-- `SandboxBackend` updated to accept `SandboxProvider` instead of `SandboxToolClient`
-- Per-tool snapshots become an optional capability, not a core contract requirement
+- New `ExecutionEnvironment` interface in `internal/sandbox/environment` — the single unified contract
+- `ToolBackend` interface goes away — `ExecutionEnvironment` subsumes it
+- `SandboxBackend` wrapper goes away — no more intermediary layer
+- `LocalBackend` becomes `LocalEnvironment` (lifecycle methods are no-ops)
+- `NativeSandboxEnvironment` wraps ConnectRPC to SandboxHostService
+- `E2BSandboxEnvironment`, `DaytonaSandboxEnvironment`, `FlySandboxEnvironment` implement the same interface against their respective APIs
+- Capability detection system so the RuntimeController/orchestrator knows what each environment supports
 
 **What does NOT change:**
 - `SandboxHostService` and all ZFS/gVisor internals (plan 11 core)
-- `ToolBackend` interface (plan 06)
-- Agent loop tool dispatch — still calls `ToolBackend.ExecuteTool()`
-- `LocalBackend` (All Local / Agent in Sandbox) — unchanged
-- RPC layer (plan 13) — unchanged, becomes an implementation detail of `NativeSandboxProvider`
+- RPC layer (plan 13) — unchanged, becomes an implementation detail of `NativeSandboxEnvironment`
+- Agent loop tool dispatch — still calls `ExecuteTool()`, just on `ExecutionEnvironment` instead of `ToolBackend`
 
 ---
 
@@ -37,24 +41,19 @@ The current sandbox architecture assumes a single execution model: our ZFS + gVi
 ```mermaid
 graph TB
     subgraph "Agent Loop (internal/agent)"
-        agent[Agent / NativeDriver<br/>calls ToolBackend.ExecuteTool]
+        agent[Agent / NativeDriver<br/>calls ExecutionEnvironment.ExecuteTool]
     end
 
-    subgraph "Tools Layer (internal/tools)"
-        tb[ToolBackend interface]
-        lb[LocalBackend<br/>All Local / Agent in Sandbox]
-        sb[SandboxBackend<br/>Agent outside Sandbox]
-    end
-
-    subgraph "Sandbox Provider (internal/sandbox/provider)"
-        iface[SandboxProvider interface]
+    subgraph "Execution Environment (internal/sandbox/environment)"
+        iface[ExecutionEnvironment interface]
         caps[Capabilities struct]
 
         subgraph "Implementations"
-            local[NativeSandboxProvider<br/>ConnectRPC → SandboxHostService]
-            e2b[E2BSandboxProvider<br/>E2B REST API]
-            daytona[DaytonaSandboxProvider<br/>Daytona API]
-            fly[FlyMachineSandboxProvider<br/>Fly Machines API]
+            localenv[LocalEnvironment<br/>Direct local execution<br/>Lifecycle = no-ops]
+            native[NativeSandboxEnvironment<br/>ConnectRPC → SandboxHostService]
+            e2b[E2BSandboxEnvironment<br/>E2B REST API]
+            daytona[DaytonaSandboxEnvironment<br/>Daytona API]
+            fly[FlySandboxEnvironment<br/>Fly Machines API]
         end
     end
 
@@ -72,222 +71,220 @@ graph TB
         end
     end
 
-    agent --> tb
-    tb --> lb
-    tb --> sb
-    sb --> iface
-    iface --> local
+    agent --> iface
+    iface --> localenv
+    iface --> native
     iface --> e2b
     iface --> daytona
     iface --> fly
-    local --> rpcclient
+    native --> rpcclient
     rpcclient --> shs
     e2b --> e2bapi
     daytona --> dayapi
     fly --> flyapi
 
     style iface fill:#fce4ec
-    style local fill:#e8f5e9
+    style localenv fill:#e8f5e9
+    style native fill:#e8f5e9
     style e2b fill:#e1f5fe
     style daytona fill:#e1f5fe
     style fly fill:#e1f5fe
-    style sb fill:#fff3e0
 ```
 
-### 2.2 Call Flow: Agent Loop to Provider
+### 2.2 Placement Mode Mapping
+
+```mermaid
+graph LR
+    subgraph "All Local"
+        al_agent[Agent Loop] --> al_env[LocalEnvironment]
+        al_env --> al_fs[Local Filesystem]
+    end
+
+    subgraph "Agent in Sandbox"
+        ais_rc[RuntimeController] -->|lifecycle| ais_sandbox[Sandbox Environment<br/>Native/E2B/Daytona/Fly]
+        ais_agent[Agent inside sandbox] --> ais_env[LocalEnvironment]
+        ais_env --> ais_fs[Sandbox Filesystem]
+    end
+
+    subgraph "Agent outside Sandbox"
+        aos_rc[RuntimeController] -->|lifecycle| aos_env[Sandbox Environment<br/>Native/E2B/Daytona/Fly]
+        aos_agent[Agent Loop] -->|ExecuteTool| aos_env
+    end
+```
+
+**All Local** -- `LocalEnvironment`. Create/Pause/Resume/Destroy are no-ops. ExecuteTool runs tools directly on the local filesystem. No sandbox involved.
+
+**Agent in Sandbox** -- The RuntimeController uses a sandbox environment (NativeSandboxEnvironment, E2BSandboxEnvironment, etc.) for lifecycle: create the sandbox, put the agent in it. The agent running *inside* the sandbox uses `LocalEnvironment` for tool execution (tools are local to that sandbox).
+
+**Agent outside Sandbox** -- The RuntimeController uses a sandbox environment for *both* lifecycle AND tool execution. The agent loop calls `ExecuteTool()` on the sandbox environment directly. Tool calls are dispatched to the sandbox infrastructure.
+
+### 2.3 Call Flow: Agent Loop to Environment
 
 ```mermaid
 sequenceDiagram
+    participant RC as RuntimeController
     participant Agent as Agent Loop
-    participant SB as SandboxBackend
-    participant SP as SandboxProvider
-    participant Impl as Provider Impl<br/>(Local / E2B / etc.)
+    participant Env as ExecutionEnvironment
 
-    Note over Agent,Impl: Session creation (at orchestrator level, before agent starts)
+    Note over RC,Env: Session creation (before agent starts)
+    RC->>Env: Create(ctx, SessionConfig)
+    Env-->>RC: nil (success)
 
-    Agent->>SB: ExecuteTool(ctx, ToolRequest, onProgress)
-    SB->>SP: ExecuteTool(ctx, sessionID, ToolRequest, onProgress)
-    SP->>Impl: provider-specific execution
-    Impl-->>SP: ToolResponse
-    SP-->>SB: ToolResponse
-    SB-->>Agent: ToolResponse
+    Note over Agent,Env: Agent execution
+    Agent->>Env: ExecuteTool(ctx, ToolRequest, onProgress)
+    Env-->>Agent: *ToolResponse
 
-    Note over Agent,Impl: Turn boundary
+    Note over Agent,Env: Optional: snapshot at turn boundary
+    Agent->>Env: CreateSnapshot(ctx, "turn-3")
+    Env-->>Agent: *SnapshotInfo (or ErrCapabilityNotSupported)
 
-    Agent->>SB: (orchestrator calls TurnComplete)
-    SB->>SP: TurnComplete(ctx, sessionID)
-    SP->>Impl: provider-specific snapshot (or no-op)
-    Impl-->>SP: SnapshotResult (or empty)
-    SP-->>SB: SnapshotResult
+    Note over RC,Env: Session pause (between turns)
+    RC->>Env: Pause(ctx)
+    Env-->>RC: nil
+
+    Note over RC,Env: Session resume
+    RC->>Env: Resume(ctx)
+    Env-->>RC: nil
+
+    Note over RC,Env: Session teardown
+    RC->>Env: Destroy(ctx)
+    Env-->>RC: nil
 ```
 
-### 2.3 Import Flow
+### 2.4 Import Flow
 
 ```
-internal/sandbox/provider           → internal/tools (ToolRequest/ToolResponse types), internal/ai
-internal/sandbox/provider/local     → internal/sandbox/provider, internal/rpc/client
-internal/sandbox/provider/e2b       → internal/sandbox/provider, net/http
-internal/sandbox/provider/daytona   → internal/sandbox/provider, net/http
-internal/sandbox/provider/fly       → internal/sandbox/provider, net/http
-internal/tools                      → internal/sandbox/provider (SandboxBackend uses SandboxProvider)
+internal/sandbox/environment             → (minimal: types + interface only)
+internal/sandbox/environment/local       → internal/sandbox/environment, internal/tools (tool execution logic)
+internal/sandbox/environment/native      → internal/sandbox/environment, internal/rpc/client
+internal/sandbox/environment/e2b         → internal/sandbox/environment, net/http
+internal/sandbox/environment/daytona     → internal/sandbox/environment, net/http
+internal/sandbox/environment/fly         → internal/sandbox/environment, net/http
+internal/agent                           → internal/sandbox/environment (calls ExecuteTool)
 ```
 
-No circular imports. The provider interface package is minimal (types + interface). Each implementation imports only the interface package and its own API client dependencies.
+No circular imports. The environment interface package is minimal (types + interface). Each implementation imports only the interface package and its own dependencies.
 
 ---
 
-## 3. SandboxProvider Interface
+## 3. ExecutionEnvironment Interface
 
 ### 3.1 Core Interface
 
 ```go
-// Package: internal/sandbox/provider
-// File: provider.go
+// Package: internal/sandbox/environment
+// File: environment.go
 
-// SandboxProvider is the client-side abstraction for sandbox environments.
-// It handles session lifecycle, tool execution, and optional snapshot management.
-// The agent loop does not interact with this directly — SandboxBackend wraps it
-// behind the ToolBackend interface.
+// ExecutionEnvironment is the unified interface for tool execution environments.
+// It covers lifecycle management, tool execution, and optional capabilities
+// like snapshots and rollback.
+//
+// Every placement mode maps to an ExecutionEnvironment:
+//   - All Local: LocalEnvironment (lifecycle no-ops, direct local exec)
+//   - Agent in Sandbox: agent inside uses LocalEnvironment; RuntimeController
+//     uses a sandbox environment for lifecycle
+//   - Agent outside Sandbox: sandbox environment for both lifecycle and tool exec
 //
 // Implementations:
-//   - NativeSandboxProvider: ConnectRPC to our SandboxHostService (ZFS + gVisor)
-//   - E2BSandboxProvider: E2B sandbox API
-//   - DaytonaSandboxProvider: Daytona workspace API
-//   - FlyMachineSandboxProvider: Fly.io Machines API
-type SandboxProvider interface {
-    // Name returns a human-readable provider identifier (e.g., "local", "e2b", "daytona", "fly").
-    Name() string
+//   - LocalEnvironment: direct local filesystem execution, no sandbox
+//   - NativeSandboxEnvironment: ConnectRPC to SandboxHostService (ZFS + gVisor)
+//   - E2BSandboxEnvironment: E2B sandbox API
+//   - DaytonaSandboxEnvironment: Daytona workspace API
+//   - FlySandboxEnvironment: Fly.io Machines API
+type ExecutionEnvironment interface {
+    // --- Lifecycle ---
 
-    // Capabilities returns the static capability set for this provider.
-    // Callers use this to adapt behavior (e.g., skip snapshot calls if not supported).
-    Capabilities() Capabilities
+    // Create initializes the execution environment.
+    // For LocalEnvironment: no-op (local filesystem is always available).
+    // For NativeSandboxEnvironment: creates a ZFS dataset clone from base snapshot.
+    // For E2BSandboxEnvironment: creates a sandbox from a template.
+    // For DaytonaSandboxEnvironment: creates a workspace.
+    // For FlySandboxEnvironment: creates a Machine with a volume.
+    Create(ctx context.Context, config SessionConfig) error
 
-    // --- Session Lifecycle ---
+    // Pause suspends the environment with minimal idle compute cost.
+    // For LocalEnvironment: no-op.
+    // For NativeSandboxEnvironment: transitions session state to paused (ZFS persists).
+    // For E2BSandboxEnvironment: sandbox.pause() (full state preserved).
+    // For DaytonaSandboxEnvironment: auto-stop (lossy — disk preserved, processes lost).
+    // For FlySandboxEnvironment: machine.suspend() (memory saved to disk).
+    // Returns ErrCapabilityNotSupported if pause is not meaningful for this environment.
+    Pause(ctx context.Context) error
 
-    // CreateSession creates a new sandbox session.
-    // For local: clones a ZFS dataset from base snapshot.
-    // For E2B: creates a new sandbox from a template.
-    // For Daytona: creates a workspace.
-    // For Fly: creates a Machine with a volume.
-    CreateSession(ctx context.Context, req CreateSessionRequest) (*SessionInfo, error)
+    // Resume re-activates a previously paused environment.
+    // Returns ErrCapabilityNotSupported if pause/resume is not supported.
+    Resume(ctx context.Context) error
 
-    // DestroySession tears down a sandbox session and all associated resources.
-    DestroySession(ctx context.Context, sessionID string) error
-
-    // PauseSession suspends a session with zero idle compute cost.
-    // For local: transitions session state to Paused (ZFS dataset persists).
-    // For E2B: calls sandbox.pause().
-    // For Daytona: triggers auto-stop (lossy — workspace state preserved, process state lost).
-    // For Fly: calls machine.suspend() (memory saved to disk).
-    // Returns ErrCapabilityNotSupported if the provider does not support pause.
-    PauseSession(ctx context.Context, sessionID string) error
-
-    // ResumeSession re-activates a previously paused session.
-    // Returns ErrCapabilityNotSupported if the provider does not support pause.
-    ResumeSession(ctx context.Context, sessionID string) error
-
-    // GetSession returns current session metadata.
-    GetSession(ctx context.Context, sessionID string) (*SessionInfo, error)
+    // Destroy tears down the environment and all associated resources.
+    // For LocalEnvironment: no-op.
+    // For sandbox environments: destroys the sandbox/machine/workspace and volumes.
+    Destroy(ctx context.Context) error
 
     // --- Tool Execution ---
 
-    // ExecuteTool runs a tool in the sandbox session.
-    // For local: dispatches via ConnectRPC to SandboxHostService (Tier 1/2 routing happens server-side).
-    // For remote providers: all tools execute as remote commands (no tier distinction).
-    // onProgress streams incremental output for long-running tools.
-    ExecuteTool(ctx context.Context, sessionID string, req ToolRequest, onProgress func(ToolProgress)) (*ToolResponse, error)
+    // ExecuteTool runs a tool in this environment.
+    // For LocalEnvironment: executes directly on local filesystem/processes.
+    // For sandbox environments: dispatches to the sandbox via RPC/API.
+    // onProgress streams incremental output for long-running tools (e.g., bash).
+    ExecuteTool(ctx context.Context, req ToolRequest, onProgress func(ToolProgress)) (*ToolResponse, error)
 
-    // --- Snapshot Management (optional) ---
+    // --- Capabilities & Snapshots ---
 
-    // TurnComplete signals end of an agent turn.
-    // For local: creates a ZFS snapshot (named turn-NNN).
-    // For remote providers: may be a no-op or a coarser checkpoint.
-    // Returns empty SnapshotResult if the provider does not support snapshots.
-    TurnComplete(ctx context.Context, sessionID string) (*SnapshotResult, error)
+    // Capabilities returns the static capability set for this environment.
+    // Callers use this to adapt behavior (e.g., skip snapshot calls if not supported).
+    Capabilities() Capabilities
 
-    // CreateSnapshot creates an explicit named snapshot.
-    // Returns ErrCapabilityNotSupported if the provider does not support snapshots.
-    CreateSnapshot(ctx context.Context, sessionID string, name string) (*SnapshotResult, error)
+    // CreateSnapshot creates a named snapshot of the environment's current state.
+    // For NativeSandboxEnvironment: creates a ZFS snapshot (instant, COW).
+    // Returns ErrCapabilityNotSupported for environments without snapshot support.
+    CreateSnapshot(ctx context.Context, name string) (*SnapshotInfo, error)
 
-    // RollbackSession rolls back a session to a prior snapshot.
-    // Returns ErrCapabilityNotSupported if the provider does not support rollback.
-    RollbackSession(ctx context.Context, sessionID string, snapshotID string) error
-
-    // ListSnapshots returns the snapshot history for a session.
-    // Returns empty list (not error) if the provider does not support snapshots.
-    ListSnapshots(ctx context.Context, sessionID string) ([]SnapshotInfo, error)
+    // Rollback restores the environment to a prior snapshot.
+    // For NativeSandboxEnvironment: ZFS rollback (<100ms).
+    // Returns ErrCapabilityNotSupported for environments without rollback support.
+    Rollback(ctx context.Context, snapshotID string) error
 }
 ```
 
 ### 3.2 Shared Types
 
 ```go
-// Package: internal/sandbox/provider
+// Package: internal/sandbox/environment
 // File: types.go
 
-// CreateSessionRequest carries parameters for sandbox session creation.
-// Provider-specific fields are passed via Options.
-type CreateSessionRequest struct {
+// SessionConfig carries parameters for environment creation.
+// Environment-specific fields are passed via Options.
+type SessionConfig struct {
     // BaseImage identifies the starting filesystem state.
-    // For local: ZFS snapshot name (e.g., "pool/bases/repo-v1@initial").
-    // For E2B: template ID.
-    // For Daytona: workspace template/image.
-    // For Fly: Dockerfile reference or volume snapshot.
+    // For NativeSandboxEnvironment: ZFS snapshot name (e.g., "pool/bases/repo-v1@initial").
+    // For E2BSandboxEnvironment: template ID.
+    // For DaytonaSandboxEnvironment: workspace template/image.
+    // For FlySandboxEnvironment: Docker image reference or volume snapshot.
+    // For LocalEnvironment: ignored (uses local filesystem as-is).
     BaseImage string
 
     // SessionID is an optional pre-assigned session ID.
-    // If empty, the provider generates one.
+    // If empty, the environment generates one.
     SessionID string
 
     // Labels are arbitrary metadata attached to the session.
     Labels map[string]string
 
-    // Options carries provider-specific configuration.
-    // Each provider defines its own options struct.
+    // Options carries environment-specific configuration.
+    // Each environment implementation defines its own options struct.
     Options any
 }
 
-// SessionInfo describes a sandbox session's current state.
-type SessionInfo struct {
-    ID         string
-    State      SessionState
-    Provider   string            // provider name
-    Mountpoint string            // filesystem path (may be empty for remote providers)
-    TurnCount  int
-    SnapCount  int
-    Created    time.Time
-    Labels     map[string]string
-    Metadata   map[string]string // provider-specific metadata (e.g., E2B sandbox ID)
-}
-
-// SessionState represents the lifecycle state of a sandbox session.
-type SessionState string
-
-const (
-    SessionStateCreating   SessionState = "creating"
-    SessionStateActive     SessionState = "active"
-    SessionStatePaused     SessionState = "paused"
-    SessionStateDestroying SessionState = "destroying"
-    SessionStateFailed     SessionState = "failed"
-)
-
-// SnapshotResult is returned by snapshot operations.
-type SnapshotResult struct {
-    SnapshotID string
-    TurnNumber int
-    SpaceUsed  int64 // bytes; 0 if provider doesn't track this
-}
-
-// SnapshotInfo describes a single snapshot.
+// SnapshotInfo describes a snapshot of the environment state.
 type SnapshotInfo struct {
     ID        string
     Name      string
     CreatedAt time.Time
-    SpaceUsed int64 // bytes; 0 if provider doesn't track this
+    SpaceUsed int64 // bytes; 0 if environment doesn't track this
 }
 
 // ToolRequest and ToolResponse are re-exported from internal/tools.
-// This avoids duplicating types. Providers import internal/tools for these.
+// This avoids duplicating types. Environments import internal/tools for these.
 type ToolRequest = tools.ToolRequest
 type ToolResponse = tools.ToolResponse
 type ToolProgress = tools.ToolProgress
@@ -296,25 +293,22 @@ type ToolProgress = tools.ToolProgress
 ### 3.3 Error Sentinels
 
 ```go
-// Package: internal/sandbox/provider
+// Package: internal/sandbox/environment
 // File: errors.go
 
 var (
-    // ErrCapabilityNotSupported is returned when a provider does not support
+    // ErrCapabilityNotSupported is returned when an environment does not support
     // the requested operation (e.g., snapshots on E2B, rollback on Daytona).
-    ErrCapabilityNotSupported = errors.New("capability not supported by provider")
+    ErrCapabilityNotSupported = errors.New("capability not supported by environment")
 
-    // ErrSessionNotFound is returned when the specified session does not exist.
-    ErrSessionNotFound = errors.New("session not found")
+    // ErrNotActive is returned when an operation requires an active environment
+    // but the environment is in a different state (paused, destroyed, etc.).
+    ErrNotActive = errors.New("environment not in active state")
 
-    // ErrSessionNotActive is returned when an operation requires an active session
-    // but the session is in a different state (paused, destroying, etc.).
-    ErrSessionNotActive = errors.New("session not in active state")
+    // ErrUnavailable is returned when the environment's backing service is unreachable.
+    ErrUnavailable = errors.New("environment unavailable")
 
-    // ErrProviderUnavailable is returned when the provider API is unreachable.
-    ErrProviderUnavailable = errors.New("provider unavailable")
-
-    // ErrSessionLimitReached is returned when the provider cannot create more sessions.
+    // ErrSessionLimitReached is returned when no more environments can be created.
     ErrSessionLimitReached = errors.New("session limit reached")
 )
 ```
@@ -326,50 +320,40 @@ var (
 ### 4.1 Capabilities Struct
 
 ```go
-// Package: internal/sandbox/provider
+// Package: internal/sandbox/environment
 // File: capabilities.go
 
-// Capabilities describes what a SandboxProvider supports.
-// This is a static description — it does not change per session.
-// The orchestrator checks capabilities to adapt behavior:
-//   - Skip TurnComplete calls if PerTurnSnapshots is false
-//   - Skip per-tool snapshot expectations if PerToolSnapshots is false
-//   - Avoid calling PauseSession if Pause is false
-//   - Adjust rollback strategy if Rollback is false
+// Capabilities describes what an ExecutionEnvironment supports.
+// This is a static description — it does not change after Create().
+// The RuntimeController and orchestrator check capabilities to adapt behavior:
+//   - Skip snapshot calls if Snapshots is false
+//   - Skip rollback strategy if Rollback is false
+//   - Avoid calling Pause if Pause is false
 type Capabilities struct {
-    // PerTurnSnapshots indicates the provider creates meaningful snapshots
-    // on TurnComplete(). If false, TurnComplete() is a no-op that returns
-    // an empty SnapshotResult.
-    PerTurnSnapshots bool
+    // Snapshots indicates the environment supports CreateSnapshot().
+    // Only true for NativeSandboxEnvironment (ZFS snapshots).
+    Snapshots bool
 
-    // PerToolSnapshots indicates the provider can create snapshots after
-    // individual tool executions. Only true for the local provider with
-    // config.PerToolSnapshots enabled.
-    PerToolSnapshots bool
-
-    // ExplicitSnapshots indicates the provider supports CreateSnapshot()
-    // for named, on-demand snapshots.
-    ExplicitSnapshots bool
-
-    // Rollback indicates the provider can restore to a prior snapshot.
+    // Rollback indicates the environment can restore to a prior snapshot.
+    // Only true for NativeSandboxEnvironment (ZFS rollback).
     Rollback bool
 
-    // Pause indicates the provider supports PauseSession/ResumeSession
-    // with state preservation. The degree of state preservation varies:
-    //   - Local: full (ZFS dataset persists, instant resume)
-    //   - E2B: full (pause() preserves memory + disk)
-    //   - Fly: full (suspend() saves memory to disk)
-    //   - Daytona: partial (auto-stop preserves disk, loses process state)
+    // Pause indicates the environment supports Pause/Resume
+    // with state preservation. The degree of preservation varies:
+    //   - NativeSandboxEnvironment: full (ZFS dataset persists, instant resume)
+    //   - E2BSandboxEnvironment: full (pause() preserves memory + disk)
+    //   - FlySandboxEnvironment: full (suspend() saves memory to disk)
+    //   - DaytonaSandboxEnvironment: partial (auto-stop preserves disk, loses processes)
     Pause bool
 
-    // TierRouting indicates the provider distinguishes Tier 1 (in-process)
-    // and Tier 2 (container) execution. Only true for the local provider.
-    // Remote providers execute all tools uniformly.
-    TierRouting bool
-
-    // StreamingProgress indicates the provider supports incremental progress
+    // StreamingProgress indicates the environment supports incremental progress
     // callbacks during tool execution (onProgress).
     StreamingProgress bool
+
+    // TierRouting indicates the environment distinguishes Tier 1 (in-process)
+    // and Tier 2 (container) execution. Only true for NativeSandboxEnvironment.
+    // Remote environments execute all tools uniformly.
+    TierRouting bool
 
     // MaxSessionDuration is the maximum session lifetime. Zero means unlimited.
     MaxSessionDuration time.Duration
@@ -379,111 +363,179 @@ type Capabilities struct {
 }
 ```
 
-### 4.2 Capability Constants Per Provider
+### 4.2 Capability Constants Per Environment
 
 ```go
-// LocalCapabilities is the full capability set for ZFS + gVisor local provider.
+// LocalCapabilities: LocalEnvironment has no sandbox features.
 var LocalCapabilities = Capabilities{
-    PerTurnSnapshots:   true,
-    PerToolSnapshots:   true, // configurable via ServiceConfig.PerToolSnapshots
-    ExplicitSnapshots:  true,
-    Rollback:           true,
-    Pause:              true,
-    TierRouting:        true,
-    StreamingProgress:  true,
-    MaxSessionDuration: 0, // unlimited
-    ConcurrentSessions: 0, // limited by ServiceConfig.MaxSessions
+    Snapshots:         false,
+    Rollback:          false,
+    Pause:             false, // no-op, not a real pause
+    TierRouting:       false,
+    StreamingProgress: true,  // local exec can stream output
 }
 
-// E2BCapabilities describes E2B sandbox limitations.
+// NativeSandboxCapabilities: full capability set for ZFS + gVisor.
+var NativeSandboxCapabilities = Capabilities{
+    Snapshots:         true,
+    Rollback:          true,
+    Pause:             true,
+    TierRouting:       true,
+    StreamingProgress: true,
+}
+
+// E2BCapabilities: E2B sandbox limitations.
 var E2BCapabilities = Capabilities{
-    PerTurnSnapshots:   false,
-    PerToolSnapshots:   false,
-    ExplicitSnapshots:  false,
+    Snapshots:          false,
     Rollback:           false,
     Pause:              true,  // sandbox.pause() / sandbox.resume()
     TierRouting:        false,
     StreamingProgress:  true,  // sandbox.commands.run() supports streaming
     MaxSessionDuration: 24 * time.Hour,
-    ConcurrentSessions: 0, // E2B plan-dependent
 }
 
-// DaytonaCapabilities describes Daytona workspace limitations.
+// DaytonaCapabilities: Daytona workspace limitations.
 var DaytonaCapabilities = Capabilities{
-    PerTurnSnapshots:   false,
-    PerToolSnapshots:   false,
-    ExplicitSnapshots:  false,  // template-based snapshots are too slow for per-turn use
-    Rollback:           false,
-    Pause:              false,  // auto-stop + recreate is lossy, not true pause
-    TierRouting:        false,
-    StreamingProgress:  true,   // code_run() supports streaming
-    MaxSessionDuration: 0,
-    ConcurrentSessions: 0,
+    Snapshots:         false,
+    Rollback:          false,
+    Pause:             false, // auto-stop + recreate is lossy, not true pause
+    TierRouting:       false,
+    StreamingProgress: true,  // code_run() supports streaming
 }
 
-// FlyMachineCapabilities describes Fly.io Machine limitations.
-var FlyMachineCapabilities = Capabilities{
-    PerTurnSnapshots:   false,  // volume snapshots are coarse-grained
-    PerToolSnapshots:   false,
-    ExplicitSnapshots:  false,
-    Rollback:           false,
-    Pause:              true,   // machine.suspend() saves memory to disk
-    TierRouting:        false,
-    StreamingProgress:  false,  // no direct exec API; SSH/agent required
-    MaxSessionDuration: 0,
-    ConcurrentSessions: 0, // Fly org-dependent
+// FlyCapabilities: Fly.io Machine limitations.
+var FlyCapabilities = Capabilities{
+    Snapshots:         false, // volume snapshots are coarse-grained
+    Rollback:          false,
+    Pause:             true,  // machine.suspend() saves memory to disk
+    TierRouting:       false,
+    StreamingProgress: false, // no direct exec API; SSH/agent required
 }
 ```
 
 ---
 
-## 5. Provider Implementations
+## 5. Environment Implementations
 
-### 5.1 NativeSandboxProvider
+### 5.1 LocalEnvironment
 
-The local provider wraps the existing `SandboxClient` (ConnectRPC client) and delegates all calls to the remote `SandboxHostService`. This is a thin adapter — the real work happens in plan 11's `SandboxHostService`.
+`LocalEnvironment` is the simplest implementation. Lifecycle methods are no-ops. Tool execution runs directly on the local filesystem and processes. Used in **All Local** mode and by agents running **inside** sandboxes in **Agent in Sandbox** mode.
 
 ```go
-// Package: internal/sandbox/provider/local
+// Package: internal/sandbox/environment/local
 // File: local.go
 
-// NativeSandboxProvider adapts the existing ConnectRPC SandboxClient to the
-// SandboxProvider interface. This is the provider used in Agent outside Sandbox mode.
-//
-// It wraps api.SandboxService (the RPC client interface) and translates
-// between provider-level types and RPC-level types.
-type NativeSandboxProvider struct {
-    service api.SandboxService
+// LocalEnvironment executes tools directly on the local filesystem.
+// All lifecycle methods (Create, Pause, Resume, Destroy) are no-ops.
+// This is used in All Local mode and by agents running inside sandboxes
+// in Agent in Sandbox mode (from the agent's perspective, tools are local).
+type LocalEnvironment struct {
+    workDir string       // working directory for tool execution
     logger  *slog.Logger
 }
 
-func NewNativeSandboxProvider(service api.SandboxService, logger *slog.Logger) *NativeSandboxProvider {
-    return &NativeSandboxProvider{service: service, logger: logger}
+func NewLocalEnvironment(workDir string, logger *slog.Logger) *LocalEnvironment {
+    return &LocalEnvironment{workDir: workDir, logger: logger}
 }
 
-func (p *NativeSandboxProvider) Name() string { return "local" }
-
-func (p *NativeSandboxProvider) Capabilities() provider.Capabilities {
-    return provider.LocalCapabilities
+func (e *LocalEnvironment) Create(ctx context.Context, config environment.SessionConfig) error {
+    return nil // no-op: local filesystem is always available
 }
 
-func (p *NativeSandboxProvider) CreateSession(ctx context.Context, req provider.CreateSessionRequest) (*provider.SessionInfo, error) {
-    rpcResp, err := p.service.CreateSession(ctx, &api.CreateSessionRequest{
-        BaseSnapshot: req.BaseImage,
-        SessionID:    req.SessionID,
-        Labels:       req.Labels,
+func (e *LocalEnvironment) Pause(ctx context.Context) error {
+    return nil // no-op
+}
+
+func (e *LocalEnvironment) Resume(ctx context.Context) error {
+    return nil // no-op
+}
+
+func (e *LocalEnvironment) Destroy(ctx context.Context) error {
+    return nil // no-op
+}
+
+func (e *LocalEnvironment) ExecuteTool(ctx context.Context, req environment.ToolRequest, onProgress func(environment.ToolProgress)) (*environment.ToolResponse, error) {
+    // Dispatch to the local tool execution engine.
+    // File ops (read, write, edit, grep, glob) execute as Go functions.
+    // Process ops (bash) execute as os/exec commands.
+    // This reuses the existing tool execution logic from internal/tools.
+    return executeLocalTool(ctx, e.workDir, req, onProgress)
+}
+
+func (e *LocalEnvironment) Capabilities() environment.Capabilities {
+    return environment.LocalCapabilities
+}
+
+func (e *LocalEnvironment) CreateSnapshot(ctx context.Context, name string) (*environment.SnapshotInfo, error) {
+    return nil, environment.ErrCapabilityNotSupported
+}
+
+func (e *LocalEnvironment) Rollback(ctx context.Context, snapshotID string) error {
+    return environment.ErrCapabilityNotSupported
+}
+```
+
+### 5.2 NativeSandboxEnvironment
+
+Wraps the existing `SandboxClient` (ConnectRPC client) and delegates all calls to the `SandboxHostService`. This is a thin adapter -- the real work happens in plan 11's `SandboxHostService`. Used in **Agent outside Sandbox** mode with our own ZFS + gVisor stack, and by the RuntimeController for lifecycle management in **Agent in Sandbox** mode.
+
+```go
+// Package: internal/sandbox/environment/native
+// File: native.go
+
+// NativeSandboxEnvironment adapts the existing ConnectRPC SandboxClient to the
+// ExecutionEnvironment interface. Wraps api.SandboxService (the RPC client
+// interface) and translates between environment-level types and RPC-level types.
+type NativeSandboxEnvironment struct {
+    service   api.SandboxService
+    logger    *slog.Logger
+    sessionID string // set after Create()
+}
+
+func NewNativeSandboxEnvironment(service api.SandboxService, logger *slog.Logger) *NativeSandboxEnvironment {
+    return &NativeSandboxEnvironment{service: service, logger: logger}
+}
+
+func (e *NativeSandboxEnvironment) Create(ctx context.Context, config environment.SessionConfig) error {
+    rpcResp, err := e.service.CreateSession(ctx, &api.CreateSessionRequest{
+        BaseSnapshot: config.BaseImage,
+        SessionID:    config.SessionID,
+        Labels:       config.Labels,
     })
     if err != nil {
-        return nil, fmt.Errorf("local provider: create session: %w", err)
+        return fmt.Errorf("native sandbox: create: %w", err)
     }
-    return apiSessionToProviderSession(rpcResp.Session), nil
+    e.sessionID = rpcResp.Session.ID
+    return nil
 }
 
-func (p *NativeSandboxProvider) ExecuteTool(ctx context.Context, sessionID string, req provider.ToolRequest, onProgress func(provider.ToolProgress)) (*provider.ToolResponse, error) {
-    // Delegate to the existing SandboxClient RPC path (ExecuteToolStream).
-    // This reuses internal/rpc/client.SandboxClient.ExecuteTool exactly.
+func (e *NativeSandboxEnvironment) Pause(ctx context.Context) error {
+    _, err := e.service.PauseSession(ctx, &api.PauseSessionRequest{SessionID: e.sessionID})
+    if err != nil {
+        return fmt.Errorf("native sandbox: pause: %w", err)
+    }
+    return nil
+}
+
+func (e *NativeSandboxEnvironment) Resume(ctx context.Context) error {
+    _, err := e.service.ResumeSession(ctx, &api.ResumeSessionRequest{SessionID: e.sessionID})
+    if err != nil {
+        return fmt.Errorf("native sandbox: resume: %w", err)
+    }
+    return nil
+}
+
+func (e *NativeSandboxEnvironment) Destroy(ctx context.Context) error {
+    _, err := e.service.DestroySession(ctx, &api.DestroySessionRequest{SessionID: e.sessionID})
+    if err != nil {
+        return fmt.Errorf("native sandbox: destroy: %w", err)
+    }
+    return nil
+}
+
+func (e *NativeSandboxEnvironment) ExecuteTool(ctx context.Context, req environment.ToolRequest, onProgress func(environment.ToolProgress)) (*environment.ToolResponse, error) {
     rpcReq := &api.ExecuteToolRequest{
-        SessionID:  sessionID,
+        SessionID:  e.sessionID,
         ToolCallID: req.ToolCallID,
         ToolName:   req.ToolName,
         Params:     req.Params,
@@ -495,9 +547,9 @@ func (p *NativeSandboxProvider) ExecuteTool(ctx context.Context, sessionID strin
         }
     }
 
-    stream, err := p.service.ExecuteToolStream(ctx, rpcReq)
+    stream, err := e.service.ExecuteToolStream(ctx, rpcReq)
     if err != nil {
-        return nil, fmt.Errorf("local provider: execute tool %s: %w", req.ToolName, err)
+        return nil, fmt.Errorf("native sandbox: execute tool %s: %w", req.ToolName, err)
     }
     defer stream.Close()
 
@@ -508,13 +560,13 @@ func (p *NativeSandboxProvider) ExecuteTool(ctx context.Context, sessionID strin
             if final != nil {
                 break
             }
-            return nil, fmt.Errorf("local provider: stream recv: %w", recvErr)
+            return nil, fmt.Errorf("native sandbox: stream recv: %w", recvErr)
         }
         if msg == nil {
             continue
         }
         if msg.Progress != nil && onProgress != nil {
-            onProgress(provider.ToolProgress{Content: msg.Progress.Content, IsError: msg.Progress.IsError})
+            onProgress(environment.ToolProgress{Content: msg.Progress.Content, IsError: msg.Progress.IsError})
         }
         if msg.Response != nil {
             final = msg.Response
@@ -522,354 +574,299 @@ func (p *NativeSandboxProvider) ExecuteTool(ctx context.Context, sessionID strin
         }
     }
     if final == nil {
-        return nil, fmt.Errorf("local provider: missing final response for tool %s", req.ToolName)
+        return nil, fmt.Errorf("native sandbox: missing final response for tool %s", req.ToolName)
     }
 
-    return &provider.ToolResponse{
+    return &environment.ToolResponse{
         Content:    decodeResponseContent(final),
         SnapshotID: final.SnapshotID,
         ExitCode:   final.ExitCode,
     }, nil
 }
 
-func (p *NativeSandboxProvider) TurnComplete(ctx context.Context, sessionID string) (*provider.SnapshotResult, error) {
-    resp, err := p.service.TurnComplete(ctx, &api.TurnCompleteRequest{SessionID: sessionID})
-    if err != nil {
-        return nil, fmt.Errorf("local provider: turn complete: %w", err)
-    }
-    return &provider.SnapshotResult{
-        SnapshotID: resp.SnapshotID,
-        TurnNumber: resp.TurnNumber,
-        SpaceUsed:  resp.SpaceUsed,
-    }, nil
+func (e *NativeSandboxEnvironment) Capabilities() environment.Capabilities {
+    return environment.NativeSandboxCapabilities
 }
 
-func (p *NativeSandboxProvider) CreateSnapshot(ctx context.Context, sessionID string, name string) (*provider.SnapshotResult, error) {
-    resp, err := p.service.CreateSnapshot(ctx, &api.CreateSnapshotRequest{
-        SessionID: sessionID,
+func (e *NativeSandboxEnvironment) CreateSnapshot(ctx context.Context, name string) (*environment.SnapshotInfo, error) {
+    resp, err := e.service.CreateSnapshot(ctx, &api.CreateSnapshotRequest{
+        SessionID: e.sessionID,
         Name:      name,
     })
     if err != nil {
-        return nil, fmt.Errorf("local provider: create snapshot: %w", err)
+        return nil, fmt.Errorf("native sandbox: create snapshot: %w", err)
     }
-    return &provider.SnapshotResult{
-        SnapshotID: resp.SnapshotID,
-        TurnNumber: resp.TurnNumber,
-        SpaceUsed:  resp.SpaceUsed,
+    return &environment.SnapshotInfo{
+        ID:        resp.SnapshotID,
+        Name:      name,
+        SpaceUsed: resp.SpaceUsed,
     }, nil
 }
 
-func (p *NativeSandboxProvider) RollbackSession(ctx context.Context, sessionID string, snapshotID string) error {
-    _, err := p.service.RollbackSession(ctx, &api.RollbackSessionRequest{
-        SessionID:  sessionID,
+func (e *NativeSandboxEnvironment) Rollback(ctx context.Context, snapshotID string) error {
+    _, err := e.service.RollbackSession(ctx, &api.RollbackSessionRequest{
+        SessionID:  e.sessionID,
         SnapshotID: snapshotID,
     })
     if err != nil {
-        return fmt.Errorf("local provider: rollback: %w", err)
+        return fmt.Errorf("native sandbox: rollback: %w", err)
     }
     return nil
 }
-
-// PauseSession, ResumeSession, DestroySession, GetSession, ListSnapshots
-// all follow the same delegation pattern to api.SandboxService methods.
-// (Full implementations omitted for brevity — each is a 5-line adapter.)
 ```
 
-### 5.2 E2BSandboxProvider
+### 5.3 E2BSandboxEnvironment
 
-E2B is the best-fit remote provider. Its sandbox model maps cleanly to our session concept.
+E2B is the best-fit remote environment. Its sandbox model maps cleanly to our session concept.
 
 ```go
-// Package: internal/sandbox/provider/e2b
+// Package: internal/sandbox/environment/e2b
 // File: e2b.go
 
-// E2BSandboxProvider implements SandboxProvider using the E2B sandbox API.
+// E2BSandboxEnvironment implements ExecutionEnvironment using the E2B sandbox API.
 //
 // Key mapping:
-//   CreateSession → e2b.Sandbox.create(template_id)
-//   ExecuteTool   → sandbox.commands.run(cmd) for Tier 2, sandbox.filesystem for Tier 1
-//   PauseSession  → sandbox.pause()
-//   ResumeSession → e2b.Sandbox.resume(sandbox_id)
-//   DestroySession → sandbox.kill()
-//   TurnComplete  → no-op (E2B has no snapshot API)
+//   Create      → e2b.Sandbox.create(template_id)
+//   ExecuteTool → sandbox.commands.run(cmd) for process ops,
+//                 sandbox.filesystem for file ops
+//   Pause       → sandbox.pause()
+//   Resume      → e2b.Sandbox.resume(sandbox_id)
+//   Destroy     → sandbox.kill()
 //
 // Limitations:
 //   - 24-hour maximum sandbox lifetime
-//   - No snapshot/rollback API (TurnComplete returns empty result)
+//   - No snapshot/rollback API
 //   - pause() preserves full state but has ~2-5s resume latency
-type E2BSandboxProvider struct {
+type E2BSandboxEnvironment struct {
     apiKey     string
     httpClient *http.Client
     baseURL    string
     logger     *slog.Logger
 
-    // sessions tracks E2B sandbox IDs keyed by our session ID
-    sessions   sync.Map // map[string]*e2bSession
+    // Session state (set after Create)
+    sandboxID string
+    state     SessionState
+    created   time.Time
+    labels    map[string]string
 }
 
-type e2bSession struct {
-    sandboxID  string
-    templateID string
-    state      provider.SessionState
-    created    time.Time
-    turnCount  int
-    labels     map[string]string
-}
-
-// E2BOptions carries E2B-specific session creation parameters.
+// E2BOptions carries E2B-specific environment creation parameters.
 type E2BOptions struct {
     TemplateID string        // E2B template to use
     Timeout    time.Duration // sandbox timeout (max 24h, default 5m)
     Metadata   map[string]string
 }
 
-func NewE2BSandboxProvider(apiKey string, opts ...Option) *E2BSandboxProvider {
-    p := &E2BSandboxProvider{
+func NewE2BSandboxEnvironment(apiKey string, opts ...Option) *E2BSandboxEnvironment {
+    e := &E2BSandboxEnvironment{
         apiKey:     apiKey,
         httpClient: &http.Client{Timeout: 30 * time.Second},
         baseURL:    "https://api.e2b.dev/v1",
     }
     for _, opt := range opts {
-        opt(p)
+        opt(e)
     }
-    return p
+    return e
 }
 
-func (p *E2BSandboxProvider) Name() string { return "e2b" }
-
-func (p *E2BSandboxProvider) Capabilities() provider.Capabilities {
-    return provider.E2BCapabilities
-}
-
-func (p *E2BSandboxProvider) CreateSession(ctx context.Context, req provider.CreateSessionRequest) (*provider.SessionInfo, error) {
+func (e *E2BSandboxEnvironment) Create(ctx context.Context, config environment.SessionConfig) error {
     var e2bOpts E2BOptions
-    if req.Options != nil {
+    if config.Options != nil {
         var ok bool
-        e2bOpts, ok = req.Options.(E2BOptions)
+        e2bOpts, ok = config.Options.(E2BOptions)
         if !ok {
-            return nil, fmt.Errorf("e2b provider: Options must be e2b.E2BOptions, got %T", req.Options)
+            return fmt.Errorf("e2b: Options must be e2b.E2BOptions, got %T", config.Options)
         }
     }
     templateID := e2bOpts.TemplateID
     if templateID == "" {
-        templateID = req.BaseImage // fallback: treat BaseImage as template ID
+        templateID = config.BaseImage // fallback: treat BaseImage as template ID
     }
 
     // POST /sandboxes { template_id, timeout, metadata }
-    sandboxID, err := p.apiCreateSandbox(ctx, templateID, e2bOpts)
+    sandboxID, err := e.apiCreateSandbox(ctx, templateID, e2bOpts)
     if err != nil {
-        return nil, fmt.Errorf("e2b provider: create sandbox: %w", err)
+        return fmt.Errorf("e2b: create sandbox: %w", err)
     }
 
-    sessionID := req.SessionID
-    if sessionID == "" {
-        sessionID = "e2b-" + sandboxID
-    }
-
-    sess := &e2bSession{
-        sandboxID:  sandboxID,
-        templateID: templateID,
-        state:      provider.SessionStateActive,
-        created:    time.Now(),
-        labels:     req.Labels,
-    }
-    p.sessions.Store(sessionID, sess)
-
-    return &provider.SessionInfo{
-        ID:       sessionID,
-        State:    provider.SessionStateActive,
-        Provider: "e2b",
-        Created:  sess.created,
-        Labels:   req.Labels,
-        Metadata: map[string]string{"e2b_sandbox_id": sandboxID},
-    }, nil
+    e.sandboxID = sandboxID
+    e.state = StateActive
+    e.created = time.Now()
+    e.labels = config.Labels
+    return nil
 }
 
-func (p *E2BSandboxProvider) ExecuteTool(ctx context.Context, sessionID string, req provider.ToolRequest, onProgress func(provider.ToolProgress)) (*provider.ToolResponse, error) {
-    sess, err := p.getSession(sessionID)
-    if err != nil {
-        return nil, err
+func (e *E2BSandboxEnvironment) ExecuteTool(ctx context.Context, req environment.ToolRequest, onProgress func(environment.ToolProgress)) (*environment.ToolResponse, error) {
+    if e.state != StateActive {
+        return nil, environment.ErrNotActive
     }
 
-    // Remote providers treat all tools uniformly — no tier distinction.
+    // Remote environments treat all tools uniformly — no tier distinction.
     // File ops (read, write, edit, grep, glob) use the filesystem API.
     // Process ops (bash, git) use the commands API.
     switch {
     case isFileOp(req.ToolName):
-        return p.executeFileOp(ctx, sess, req)
+        return e.executeFileOp(ctx, req)
     default:
-        return p.executeCommand(ctx, sess, req, onProgress)
+        return e.executeCommand(ctx, req, onProgress)
     }
 }
 
-func (p *E2BSandboxProvider) TurnComplete(ctx context.Context, sessionID string) (*provider.SnapshotResult, error) {
-    // E2B has no snapshot API. Increment turn count for tracking only.
-    sess, err := p.getSession(sessionID)
-    if err != nil {
-        return nil, err
-    }
-    sess.turnCount++
-    return &provider.SnapshotResult{TurnNumber: sess.turnCount}, nil
-}
-
-func (p *E2BSandboxProvider) CreateSnapshot(ctx context.Context, sessionID string, name string) (*provider.SnapshotResult, error) {
-    return nil, provider.ErrCapabilityNotSupported
-}
-
-func (p *E2BSandboxProvider) RollbackSession(ctx context.Context, sessionID string, snapshotID string) error {
-    return provider.ErrCapabilityNotSupported
-}
-
-func (p *E2BSandboxProvider) PauseSession(ctx context.Context, sessionID string) error {
-    sess, err := p.getSession(sessionID)
-    if err != nil {
-        return err
+func (e *E2BSandboxEnvironment) Pause(ctx context.Context) error {
+    if e.state != StateActive {
+        return environment.ErrNotActive
     }
     // POST /sandboxes/{sandbox_id}/pause
-    if err := p.apiPauseSandbox(ctx, sess.sandboxID); err != nil {
-        return fmt.Errorf("e2b provider: pause: %w", err)
+    if err := e.apiPauseSandbox(ctx, e.sandboxID); err != nil {
+        return fmt.Errorf("e2b: pause: %w", err)
     }
-    sess.state = provider.SessionStatePaused
+    e.state = StatePaused
     return nil
 }
 
-func (p *E2BSandboxProvider) ResumeSession(ctx context.Context, sessionID string) error {
-    sess, err := p.getSession(sessionID)
-    if err != nil {
-        return err
+func (e *E2BSandboxEnvironment) Resume(ctx context.Context) error {
+    if e.state != StatePaused {
+        return environment.ErrNotActive
     }
     // POST /sandboxes/{sandbox_id}/resume
-    if err := p.apiResumeSandbox(ctx, sess.sandboxID); err != nil {
-        return fmt.Errorf("e2b provider: resume: %w", err)
+    if err := e.apiResumeSandbox(ctx, e.sandboxID); err != nil {
+        return fmt.Errorf("e2b: resume: %w", err)
     }
-    sess.state = provider.SessionStateActive
+    e.state = StateActive
     return nil
 }
 
-// DestroySession, GetSession, ListSnapshots follow similar patterns.
-// executeFileOp uses E2B filesystem API (read/write/list).
-// executeCommand uses E2B commands API (sandbox.commands.run).
+func (e *E2BSandboxEnvironment) Destroy(ctx context.Context) error {
+    // DELETE /sandboxes/{sandbox_id}
+    if err := e.apiKillSandbox(ctx, e.sandboxID); err != nil {
+        return fmt.Errorf("e2b: destroy: %w", err)
+    }
+    e.state = StateDestroyed
+    return nil
+}
+
+func (e *E2BSandboxEnvironment) Capabilities() environment.Capabilities {
+    return environment.E2BCapabilities
+}
+
+func (e *E2BSandboxEnvironment) CreateSnapshot(ctx context.Context, name string) (*environment.SnapshotInfo, error) {
+    return nil, environment.ErrCapabilityNotSupported
+}
+
+func (e *E2BSandboxEnvironment) Rollback(ctx context.Context, snapshotID string) error {
+    return environment.ErrCapabilityNotSupported
+}
 ```
 
-### 5.3 DaytonaSandboxProvider
+### 5.4 DaytonaSandboxEnvironment
 
-Daytona provides workspace-based development environments. The fit is medium — no real pause, template-based snapshots are too slow for per-turn use.
+Daytona provides workspace-based development environments. The fit is medium -- no real pause, template-based snapshots are too slow for per-turn use.
 
 ```go
-// Package: internal/sandbox/provider/daytona
+// Package: internal/sandbox/environment/daytona
 // File: daytona.go
 
-// DaytonaSandboxProvider implements SandboxProvider using the Daytona API.
+// DaytonaSandboxEnvironment implements ExecutionEnvironment using the Daytona API.
 //
 // Key mapping:
-//   CreateSession → daytona.workspace.create(target, source)
-//   ExecuteTool   → workspace.code_run() or workspace.filesystem operations
-//   PauseSession  → ErrCapabilityNotSupported (auto-stop is lossy)
-//   ResumeSession → ErrCapabilityNotSupported
-//   DestroySession → workspace.delete()
-//   TurnComplete  → no-op (template-based snapshots too slow)
+//   Create      → daytona.workspace.create(target, source)
+//   ExecuteTool → workspace.code_run() or workspace.filesystem operations
+//   Pause       → ErrCapabilityNotSupported (auto-stop is lossy)
+//   Resume      → ErrCapabilityNotSupported
+//   Destroy     → workspace.delete()
 //
 // Limitations:
 //   - No explicit pause/resume — auto-stop triggers after idle, recreate is lossy
 //   - Template-based snapshots exist but are slow (minutes, not milliseconds)
 //   - Best for stateless or checkpoint-tolerant workloads
-type DaytonaSandboxProvider struct {
+type DaytonaSandboxEnvironment struct {
     apiKey     string
     apiURL     string
     httpClient *http.Client
     logger     *slog.Logger
-    sessions   sync.Map // map[string]*daytonaSession
-}
 
-type daytonaSession struct {
+    // Session state (set after Create)
     workspaceID string
-    state       provider.SessionState
+    state       SessionState
     created     time.Time
-    turnCount   int
     labels      map[string]string
 }
 
-// DaytonaOptions carries Daytona-specific session creation parameters.
+// DaytonaOptions carries Daytona-specific environment creation parameters.
 type DaytonaOptions struct {
-    Target   string // Daytona target (e.g., "local", "aws")
-    Image    string // container image
-    GitURL   string // repository to clone
-    EnvVars  map[string]string
+    Target  string // Daytona target (e.g., "local", "aws")
+    Image   string // container image
+    GitURL  string // repository to clone
+    EnvVars map[string]string
 }
 
-func (p *DaytonaSandboxProvider) Name() string { return "daytona" }
-
-func (p *DaytonaSandboxProvider) Capabilities() provider.Capabilities {
-    return provider.DaytonaCapabilities
+func (e *DaytonaSandboxEnvironment) Capabilities() environment.Capabilities {
+    return environment.DaytonaCapabilities
 }
 
-func (p *DaytonaSandboxProvider) PauseSession(ctx context.Context, sessionID string) error {
-    return provider.ErrCapabilityNotSupported
+func (e *DaytonaSandboxEnvironment) Pause(ctx context.Context) error {
+    return environment.ErrCapabilityNotSupported
 }
 
-func (p *DaytonaSandboxProvider) ResumeSession(ctx context.Context, sessionID string) error {
-    return provider.ErrCapabilityNotSupported
+func (e *DaytonaSandboxEnvironment) Resume(ctx context.Context) error {
+    return environment.ErrCapabilityNotSupported
 }
 
-func (p *DaytonaSandboxProvider) CreateSnapshot(ctx context.Context, sessionID string, name string) (*provider.SnapshotResult, error) {
-    return nil, provider.ErrCapabilityNotSupported
+func (e *DaytonaSandboxEnvironment) CreateSnapshot(ctx context.Context, name string) (*environment.SnapshotInfo, error) {
+    return nil, environment.ErrCapabilityNotSupported
 }
 
-func (p *DaytonaSandboxProvider) RollbackSession(ctx context.Context, sessionID string, snapshotID string) error {
-    return provider.ErrCapabilityNotSupported
+func (e *DaytonaSandboxEnvironment) Rollback(ctx context.Context, snapshotID string) error {
+    return environment.ErrCapabilityNotSupported
 }
 
-// ExecuteTool, CreateSession, DestroySession, GetSession, TurnComplete, ListSnapshots
-// follow the same pattern as E2B but targeting the Daytona REST API.
-// code_run() is the primary execution path for all tool types.
+// Create, ExecuteTool, Destroy follow the same pattern as E2B but targeting
+// the Daytona REST API. code_run() is the primary execution path for all
+// tool types.
 ```
 
-### 5.4 FlyMachineSandboxProvider
+### 5.5 FlySandboxEnvironment
 
-Fly.io is the hardest fit — no direct exec API means we need SSH or an in-sandbox agent for command execution.
+Fly.io is the hardest fit -- no direct exec API means we need SSH or an in-sandbox agent for command execution.
 
 ```go
-// Package: internal/sandbox/provider/fly
+// Package: internal/sandbox/environment/fly
 // File: fly.go
 
-// FlyMachineSandboxProvider implements SandboxProvider using Fly.io Machines API.
+// FlySandboxEnvironment implements ExecutionEnvironment using the Fly.io Machines API.
 //
 // Key mapping:
-//   CreateSession → fly.machine.create(image, volume)
-//   ExecuteTool   → SSH into machine + exec (requires sshd or agent in image)
-//   PauseSession  → machine.suspend()
-//   ResumeSession → machine.start()
-//   DestroySession → machine.destroy() + volume.destroy()
-//   TurnComplete  → no-op (volume snapshots are coarse-grained)
+//   Create      → fly.machine.create(image, volume)
+//   ExecuteTool → SSH into machine + exec (requires sshd or agent in image)
+//   Pause       → machine.suspend()
+//   Resume      → machine.start()
+//   Destroy     → machine.destroy() + volume.destroy()
 //
 // Limitations:
 //   - No direct exec API — requires SSH or in-sandbox agent for command execution
 //   - Volume snapshots are coarse-grained (not suitable for per-turn)
 //   - suspend() saves memory to disk; resume has ~1-3s latency
 //   - Custom image required (must include sshd or agent binary)
-type FlyMachineSandboxProvider struct {
+type FlySandboxEnvironment struct {
     apiToken   string
     appName    string
     httpClient *http.Client
     logger     *slog.Logger
-    sessions   sync.Map // map[string]*flySession
 
-    // sshConfig for connecting to machines for tool execution
+    // Session state (set after Create)
+    machineID string
+    volumeID  string
+    ipAddr    string // private IPv6 within Fly network
+    state     SessionState
+    created   time.Time
+    labels    map[string]string
+
+    // SSH config for connecting to machines for tool execution
     sshKey     []byte
     sshTimeout time.Duration
 }
 
-type flySession struct {
-    machineID string
-    volumeID  string
-    ipAddr    string // private IPv6 within Fly network
-    state     provider.SessionState
-    created   time.Time
-    turnCount int
-    labels    map[string]string
-}
-
-// FlyOptions carries Fly.io-specific session creation parameters.
+// FlyOptions carries Fly.io-specific environment creation parameters.
 type FlyOptions struct {
     Image    string            // Docker image (must include sshd/agent)
     Region   string            // Fly region (e.g., "iad", "lhr")
@@ -879,16 +876,13 @@ type FlyOptions struct {
     EnvVars  map[string]string // environment variables
 }
 
-func (p *FlyMachineSandboxProvider) Name() string { return "fly" }
-
-func (p *FlyMachineSandboxProvider) Capabilities() provider.Capabilities {
-    return provider.FlyMachineCapabilities
+func (e *FlySandboxEnvironment) Capabilities() environment.Capabilities {
+    return environment.FlyCapabilities
 }
 
-func (p *FlyMachineSandboxProvider) ExecuteTool(ctx context.Context, sessionID string, req provider.ToolRequest, onProgress func(provider.ToolProgress)) (*provider.ToolResponse, error) {
-    sess, err := p.getSession(sessionID)
-    if err != nil {
-        return nil, err
+func (e *FlySandboxEnvironment) ExecuteTool(ctx context.Context, req environment.ToolRequest, onProgress func(environment.ToolProgress)) (*environment.ToolResponse, error) {
+    if e.state != StateActive {
+        return nil, environment.ErrNotActive
     }
 
     // All tool execution goes through SSH.
@@ -897,293 +891,318 @@ func (p *FlyMachineSandboxProvider) ExecuteTool(ctx context.Context, sessionID s
     // The machine image must include an agent binary or sshd.
     switch {
     case isFileOp(req.ToolName):
-        return p.executeFileOpSSH(ctx, sess, req)
+        return e.executeFileOpSSH(ctx, req)
     default:
-        return p.executeCommandSSH(ctx, sess, req, onProgress)
+        return e.executeCommandSSH(ctx, req, onProgress)
     }
 }
 
-func (p *FlyMachineSandboxProvider) PauseSession(ctx context.Context, sessionID string) error {
-    sess, err := p.getSession(sessionID)
-    if err != nil {
-        return err
+func (e *FlySandboxEnvironment) Pause(ctx context.Context) error {
+    if e.state != StateActive {
+        return environment.ErrNotActive
     }
     // PUT /apps/{app}/machines/{machine_id}/suspend
-    if err := p.apiSuspendMachine(ctx, sess.machineID); err != nil {
-        return fmt.Errorf("fly provider: suspend: %w", err)
+    if err := e.apiSuspendMachine(ctx, e.machineID); err != nil {
+        return fmt.Errorf("fly: suspend: %w", err)
     }
-    sess.state = provider.SessionStatePaused
+    e.state = StatePaused
     return nil
 }
 
-// CreateSession, ResumeSession, DestroySession, GetSession, TurnComplete,
-// CreateSnapshot, RollbackSession, ListSnapshots follow same patterns.
+func (e *FlySandboxEnvironment) CreateSnapshot(ctx context.Context, name string) (*environment.SnapshotInfo, error) {
+    return nil, environment.ErrCapabilityNotSupported
+}
+
+func (e *FlySandboxEnvironment) Rollback(ctx context.Context, snapshotID string) error {
+    return environment.ErrCapabilityNotSupported
+}
+
+// Create, Resume, Destroy follow the same Machine API patterns.
 ```
 
 ---
 
-## 6. Migration Path
+## 6. Provider Research Summary
 
-### 6.1 Current Call Chain
+### 6.1 E2B (Best Fit)
+
+| Aspect | Details |
+|--------|---------|
+| **Model** | Cloud sandboxes from templates, REST API |
+| **Create** | `POST /sandboxes` with template_id, timeout, metadata |
+| **Execute** | `sandbox.commands.run(cmd)` for process ops, `sandbox.filesystem` for file ops |
+| **Pause/Resume** | `sandbox.pause()` / `Sandbox.resume(sandbox_id)` — full state preserved |
+| **Snapshots** | None — no snapshot/rollback API |
+| **Max lifetime** | 24 hours |
+| **Streaming** | Yes, `commands.run()` supports streaming output |
+| **Pricing** | Per-second compute billing |
+
+### 6.2 Daytona (Medium Fit)
+
+| Aspect | Details |
+|--------|---------|
+| **Model** | Workspace-based development environments |
+| **Create** | `workspace.create(target, source)` |
+| **Execute** | `code_run()` for process ops, filesystem API for file ops |
+| **Pause/Resume** | Auto-stop only (lossy — disk preserved, processes lost) |
+| **Snapshots** | Template-based — too slow for per-turn use (minutes, not ms) |
+| **Max lifetime** | Unlimited (but auto-stop after idle) |
+| **Streaming** | Yes, `code_run()` supports streaming |
+| **Pricing** | Self-hosted or SaaS, varies |
+
+### 6.3 Fly.io (Hardest Fit)
+
+| Aspect | Details |
+|--------|---------|
+| **Model** | Lightweight VMs (Machines) with persistent volumes |
+| **Create** | `machine.create(image, volume)` — custom image required |
+| **Execute** | SSH into machine (no direct exec API) — requires sshd or agent in image |
+| **Pause/Resume** | `machine.suspend()` / `machine.start()` — memory saved to disk, ~1-3s resume |
+| **Snapshots** | Volume snapshots — coarse-grained, not per-turn |
+| **Max lifetime** | Unlimited |
+| **Streaming** | No native streaming — must be implemented over SSH |
+| **Pricing** | Per-second compute + volume storage |
+
+---
+
+## 7. Migration Path
+
+### 7.1 Current Call Chain
 
 ```
 Agent Loop
-  → SandboxBackend.ExecuteTool(ctx, ToolRequest, onProgress)
-    → SandboxToolClient.ExecuteTool(ctx, sessionID, ToolRequest, onProgress)
-      → SandboxClient (internal/rpc/client) speaks ConnectRPC
-        → SandboxHostService (internal/sandbox)
+  → ToolBackend.ExecuteTool(ctx, ToolRequest, onProgress)
+    → LocalBackend.ExecuteTool (All Local, Agent in Sandbox)
+      → direct filesystem/process execution
+    → SandboxBackend.ExecuteTool (Agent outside Sandbox)
+      → SandboxToolClient.ExecuteTool(ctx, sessionID, ToolRequest, onProgress)
+        → SandboxClient (internal/rpc/client) speaks ConnectRPC
+          → SandboxHostService (internal/sandbox)
 ```
 
-### 6.2 New Call Chain
+### 7.2 New Call Chain
 
 ```
 Agent Loop
-  → SandboxBackend.ExecuteTool(ctx, ToolRequest, onProgress)
-    → SandboxProvider.ExecuteTool(ctx, sessionID, ToolRequest, onProgress)
-      → NativeSandboxProvider → SandboxClient → SandboxHostService
-      → E2BSandboxProvider → E2B REST API
-      → DaytonaSandboxProvider → Daytona REST API
-      → FlyMachineSandboxProvider → Fly Machines API + SSH
+  → ExecutionEnvironment.ExecuteTool(ctx, ToolRequest, onProgress)
+    → LocalEnvironment (All Local, Agent in Sandbox internal)
+      → direct filesystem/process execution
+    → NativeSandboxEnvironment (Agent outside Sandbox with our stack)
+      → SandboxClient → SandboxHostService
+    → E2BSandboxEnvironment (Agent outside Sandbox with E2B)
+      → E2B REST API
+    → DaytonaSandboxEnvironment (Agent outside Sandbox with Daytona)
+      → Daytona REST API
+    → FlySandboxEnvironment (Agent outside Sandbox with Fly)
+      → Fly Machines API + SSH
 ```
 
-### 6.3 Changes to Existing Code
+### 7.3 What Gets Removed
 
-**`internal/tools/sandbox_backend.go`** — Replace `SandboxToolClient` with `SandboxProvider`:
+**`ToolBackend` interface** -- Replaced entirely by `ExecutionEnvironment`. Agent loop code that calls `ToolBackend.ExecuteTool()` now calls `ExecutionEnvironment.ExecuteTool()`.
 
-```go
-// BEFORE:
-type SandboxBackend struct {
-    client    SandboxToolClient
-    sessionID string
-}
+**`LocalBackend`** -- Replaced by `LocalEnvironment`. Same direct-execution logic, now implementing `ExecutionEnvironment` with no-op lifecycle methods.
 
-func NewSandboxBackend(client SandboxToolClient, sessionID string) *SandboxBackend
+**`SandboxBackend`** -- Eliminated. There is no wrapper layer. The sandbox environments (NativeSandboxEnvironment, etc.) implement `ExecutionEnvironment` directly. The agent loop calls them directly.
 
-// AFTER:
-type SandboxBackend struct {
-    provider  provider.SandboxProvider
-    sessionID string
-}
+**`SandboxToolClient` interface** -- Eliminated. `NativeSandboxEnvironment` uses `api.SandboxService` directly.
 
-func NewSandboxBackend(p provider.SandboxProvider, sessionID string) *SandboxBackend
-```
+### 7.4 RuntimeController Updates
 
-The `ExecuteTool` method body is nearly identical — it just calls `b.provider.ExecuteTool()` instead of `b.client.ExecuteTool()`.
-
-**`internal/tools/sandbox_backend.go`** — Remove `SandboxToolClient` interface:
+The RuntimeController selects the right `ExecutionEnvironment` at startup based on configuration:
 
 ```go
-// REMOVE (superseded by SandboxProvider):
-type SandboxToolClient interface {
-    ExecuteTool(ctx context.Context, sessionID string, req ToolRequest, onProgress func(ToolProgress)) (*ToolResponse, error)
-}
-```
-
-**`internal/tools/sandbox_backend.go`** — Update `NewSandboxTools`:
-
-```go
-// BEFORE:
-func NewSandboxTools(client SandboxToolClient, sessionID string) []agent.AgentTool
-
-// AFTER:
-func NewSandboxTools(p provider.SandboxProvider, sessionID string) []agent.AgentTool
-```
-
-**`internal/rpc/client/sandbox_client.go`** — `SandboxClient` no longer needs to implement `SandboxToolClient`. It is used internally by `NativeSandboxProvider` through the `api.SandboxService` interface.
-
-**Orchestrator / RuntimeController** — Session lifecycle calls migrate from direct `api.SandboxService` RPC calls to `SandboxProvider` method calls. The orchestrator selects the provider at startup based on configuration:
-
-```go
-// Example: orchestrator selects provider
-func selectProvider(cfg Config) (provider.SandboxProvider, error) {
-    switch cfg.SandboxProvider {
+// Example: RuntimeController creates environment
+func createEnvironment(cfg Config) (environment.ExecutionEnvironment, error) {
+    switch cfg.EnvironmentType {
     case "local":
+        return local.NewLocalEnvironment(cfg.WorkDir, logger), nil
+    case "native":
         svc := connectrpc.NewSandboxServiceClient(cfg.SandboxHostURL)
-        return local.NewNativeSandboxProvider(svc, logger), nil
+        return native.NewNativeSandboxEnvironment(svc, logger), nil
     case "e2b":
-        return e2b.NewE2BSandboxProvider(cfg.E2BAPIKey), nil
+        return e2b.NewE2BSandboxEnvironment(cfg.E2BAPIKey), nil
     case "daytona":
-        return daytona.NewDaytonaSandboxProvider(cfg.DaytonaAPIKey, cfg.DaytonaURL), nil
+        return daytona.NewDaytonaSandboxEnvironment(cfg.DaytonaAPIKey, cfg.DaytonaURL), nil
     case "fly":
-        return fly.NewFlyMachineSandboxProvider(cfg.FlyAPIToken, cfg.FlyAppName, cfg.FlySSHKey), nil
+        return fly.NewFlySandboxEnvironment(cfg.FlyAPIToken, cfg.FlyAppName, cfg.FlySSHKey), nil
     default:
-        return nil, fmt.Errorf("unknown sandbox provider: %s", cfg.SandboxProvider)
+        return nil, fmt.Errorf("unknown environment type: %s", cfg.EnvironmentType)
     }
 }
 ```
 
-### 6.4 Tier 1/2 Distinction
+### 7.5 Tier 1/2 Distinction
 
-For the local provider, Tier 1/2 routing is handled server-side by `SandboxHostService` — the provider just forwards the request. For remote providers, there is no tier distinction from the provider's perspective. However, remote providers still need to know how to execute different tool types:
+For `NativeSandboxEnvironment`, Tier 1/2 routing is handled server-side by `SandboxHostService` -- the environment just forwards the request. For remote environments, there is no tier distinction. However, remote environments still need to know how to execute different tool types:
 
-- **File ops** (read, write, edit, grep, glob): Use the provider's filesystem API
-- **Process ops** (bash, git commands): Use the provider's command execution API
+- **File ops** (read, write, edit, grep, glob): Use the environment's filesystem API
+- **Process ops** (bash, git commands): Use the environment's command execution API
 
-This is an internal concern of each provider implementation, not an interface-level distinction. The `isFileOp()` helper (shared utility) helps providers route internally, but is NOT exposed in the `SandboxProvider` interface.
+This is an internal concern of each environment implementation, not an interface-level distinction. The `isFileOp()` helper (shared utility) helps environments route internally.
 
 ---
 
-## 7. Snapshot Handling by Provider
+## 8. Snapshot Handling by Environment
 
-| Operation | Local | E2B | Daytona | Fly.io |
-|-----------|-------|-----|---------|--------|
-| `TurnComplete()` | ZFS snapshot (instant, COW) | No-op (turn count only) | No-op (turn count only) | No-op (turn count only) |
-| `CreateSnapshot()` | ZFS named snapshot | `ErrCapabilityNotSupported` | `ErrCapabilityNotSupported` | `ErrCapabilityNotSupported` |
-| `RollbackSession()` | ZFS rollback (<100ms) | `ErrCapabilityNotSupported` | `ErrCapabilityNotSupported` | `ErrCapabilityNotSupported` |
-| `ListSnapshots()` | ZFS snapshot list | Empty list | Empty list | Empty list |
-| Per-tool snapshots | Opt-in via config | Not supported | Not supported | Not supported |
+| Operation | LocalEnvironment | NativeSandbox | E2BSandbox | DaytonaSandbox | FlySandbox |
+|-----------|-----------------|---------------|------------|----------------|------------|
+| `CreateSnapshot()` | `ErrCapabilityNotSupported` | ZFS snapshot (instant, COW) | `ErrCapabilityNotSupported` | `ErrCapabilityNotSupported` | `ErrCapabilityNotSupported` |
+| `Rollback()` | `ErrCapabilityNotSupported` | ZFS rollback (<100ms) | `ErrCapabilityNotSupported` | `ErrCapabilityNotSupported` | `ErrCapabilityNotSupported` |
 
-The orchestrator MUST check `provider.Capabilities()` before relying on snapshot operations. The pattern:
+The orchestrator MUST check `env.Capabilities()` before relying on snapshot operations:
 
 ```go
-if sp.Capabilities().Rollback {
-    err := sp.RollbackSession(ctx, sessionID, snapshotID)
+if env.Capabilities().Rollback {
+    err := env.Rollback(ctx, snapshotID)
     // handle rollback
 } else {
-    // provider doesn't support rollback — use alternative recovery strategy
-    // (e.g., destroy + recreate session)
+    // environment doesn't support rollback — use alternative recovery strategy
+    // (e.g., destroy + recreate environment)
 }
 ```
 
 ---
 
-## 8. Connected Components / Seam Impacts
+## 9. Connected Components / Seam Impacts
 
-### 8.1 New Seams
+### 9.1 New Seams
 
 | Component A | Component B | Interface | Notes |
 |-------------|-------------|-----------|-------|
-| `internal/tools` (SandboxBackend) | `internal/sandbox/provider` | `SandboxProvider` | Replaces `SandboxToolClient` |
-| `internal/sandbox/provider/local` | `internal/rpc/client` | `api.SandboxService` | Local provider delegates to existing RPC client |
-| `internal/sandbox/provider/local` | `internal/sandbox` | (indirect, via RPC) | Local provider → RPC → SandboxHostService |
-| `internal/sandbox/provider/e2b` | E2B REST API | HTTP | External API dependency |
-| `internal/sandbox/provider/daytona` | Daytona REST API | HTTP | External API dependency |
-| `internal/sandbox/provider/fly` | Fly Machines API + SSH | HTTP + SSH | External API + SSH dependency |
-| RuntimeController / Orchestrator | `internal/sandbox/provider` | `SandboxProvider` | Session lifecycle management |
+| `internal/agent` | `internal/sandbox/environment` | `ExecutionEnvironment` | Replaces `ToolBackend` |
+| `internal/sandbox/environment/native` | `internal/rpc/client` | `api.SandboxService` | Native environment delegates to existing RPC client |
+| `internal/sandbox/environment/native` | `internal/sandbox` | (indirect, via RPC) | Native environment -> RPC -> SandboxHostService |
+| `internal/sandbox/environment/e2b` | E2B REST API | HTTP | External API dependency |
+| `internal/sandbox/environment/daytona` | Daytona REST API | HTTP | External API dependency |
+| `internal/sandbox/environment/fly` | Fly Machines API + SSH | HTTP + SSH | External API + SSH dependency |
+| RuntimeController | `internal/sandbox/environment` | `ExecutionEnvironment` | Lifecycle management (Create/Pause/Resume/Destroy) |
 
-### 8.2 Modified Seams
+### 9.2 Modified Seams
 
 | Original Seam | Change |
 |---------------|--------|
-| `internal/tools (SandboxBackend)` → `SandboxToolClient` | Replaced by `SandboxBackend` → `SandboxProvider` |
-| `internal/tools (NewSandboxTools)` signature | `SandboxToolClient` parameter → `SandboxProvider` parameter |
-| Orchestrator → `api.SandboxService` (direct RPC) | Orchestrator → `SandboxProvider` (provider-abstracted) |
+| `internal/agent` -> `internal/tools (ToolBackend)` | Replaced by `internal/agent` -> `ExecutionEnvironment` |
+| `internal/tools (SandboxBackend)` -> `SandboxToolClient` | Eliminated; NativeSandboxEnvironment uses `api.SandboxService` directly |
+| Orchestrator -> `api.SandboxService` (direct RPC) | Orchestrator -> `ExecutionEnvironment` (environment-abstracted) |
 
-### 8.3 Unchanged Seams
+### 9.3 Unchanged Seams
 
 | Seam | Why Unchanged |
 |------|---------------|
-| `internal/sandbox (SandboxHostService)` → `ZFSManager` / `GVisorManager` | Internal to local provider path |
-| `internal/rpc` → `internal/sandbox` | RPC server still calls SandboxHostService directly |
-| `internal/tools (ToolBackend)` interface | SandboxBackend still implements ToolBackend — no change |
-| `internal/agent` → `internal/tools` (AgentTool) | Agent loop still sees ToolBackend.ExecuteTool() |
-| `internal/tools (ClassifyTool)` | Tier classification is still shared; remote providers may use it internally |
+| `internal/sandbox (SandboxHostService)` -> `ZFSManager` / `GVisorManager` | Internal to native environment path |
+| `internal/rpc` -> `internal/sandbox` | RPC server still calls SandboxHostService directly |
+| `internal/tools (ClassifyTool)` | Tier classification is still shared; remote environments may use it internally |
 
-### 8.4 Implementation Guide Updates
+### 9.4 Implementation Guide Updates
 
 The following sections of `00-implementation-guide.md` need updates:
 
-- **Section 1.6** (ToolBackend): Add note about `SandboxBackend` now accepting `SandboxProvider` instead of `SandboxToolClient`
-- **Section 2.5** (RPC SandboxBackend Lifecycle): Update to reflect provider abstraction; `SandboxBackend` construction takes `SandboxProvider` not `SandboxToolClient`
-- **Section 5** (Seam Reference Table): Add new seam entries from section 8.1 above
-- **Section 5.1** (Import Flow): Add `internal/sandbox/provider` and sub-packages
+- **Section 1.6** (ToolBackend): Replace with ExecutionEnvironment; document that ToolBackend is removed
+- **Section 2.5** (RPC SandboxBackend Lifecycle): Update to reflect environment abstraction; SandboxBackend is eliminated
+- **Section 5** (Seam Reference Table): Replace ToolBackend seam entries with ExecutionEnvironment entries from section 9.1 above
+- **Section 5.1** (Import Flow): Add `internal/sandbox/environment` and sub-packages
 
 ---
 
-## 9. Testing Strategy
+## 10. Testing Strategy
 
-### 9.1 Unit Tests (per provider)
+### 10.1 Unit Tests (per environment)
 
-**T1: NativeSandboxProvider adapter correctness**
+**T1: LocalEnvironment behavior**
+- Verify Create/Pause/Resume/Destroy are all no-ops (return nil)
+- Verify ExecuteTool dispatches to local tool execution
+- Verify Capabilities returns `LocalCapabilities`
+- Verify CreateSnapshot/Rollback return `ErrCapabilityNotSupported`
+
+**T2: NativeSandboxEnvironment adapter correctness**
 - Mock `api.SandboxService`, verify all methods delegate with correct type conversion
-- Verify `ToolRequest` → `api.ExecuteToolRequest` field mapping
-- Verify `api.Session` → `provider.SessionInfo` field mapping
+- Verify `ToolRequest` -> `api.ExecuteToolRequest` field mapping
 - Verify streaming progress callbacks are propagated
+- Verify Create stores sessionID, subsequent calls use it
 
-**T2: E2BSandboxProvider API mapping**
+**T3: E2BSandboxEnvironment API mapping**
 - Use HTTP test server (`httptest.Server`) to mock E2B API
-- Verify CreateSession sends correct POST /sandboxes payload
+- Verify Create sends correct POST /sandboxes payload
 - Verify ExecuteTool routes file ops to filesystem API, commands to commands API
-- Verify PauseSession calls POST /sandboxes/{id}/pause
-- Verify TurnComplete returns empty SnapshotResult (no API call)
+- Verify Pause calls POST /sandboxes/{id}/pause
 - Verify CreateSnapshot returns `ErrCapabilityNotSupported`
 
-**T3: DaytonaSandboxProvider API mapping**
-- Same pattern as T2 against Daytona API mock
-- Verify PauseSession returns `ErrCapabilityNotSupported`
+**T4: DaytonaSandboxEnvironment API mapping**
+- Same pattern as T3 against Daytona API mock
+- Verify Pause returns `ErrCapabilityNotSupported`
 - Verify all snapshot operations return `ErrCapabilityNotSupported`
 
-**T4: FlyMachineSandboxProvider API mapping**
+**T5: FlySandboxEnvironment API mapping**
 - Mock Fly Machines API + SSH server for command execution
-- Verify CreateSession creates machine + volume
+- Verify Create creates machine + volume
 - Verify ExecuteTool connects via SSH
-- Verify PauseSession calls machine suspend
+- Verify Pause calls machine suspend
 
-**T5: Capabilities correctness**
-- Each provider's `Capabilities()` returns the expected static values
-- Verify capability constants match documented provider limitations
+**T6: Capabilities correctness**
+- Each environment's `Capabilities()` returns the expected static values
+- Verify capability constants match documented environment limitations
 
-### 9.2 Integration Tests
+### 10.2 Integration Tests
 
-**T6: SandboxBackend + SandboxProvider integration**
-- Wire `SandboxBackend` to each provider (mocked APIs)
-- Verify the full `ToolBackend.ExecuteTool()` path works end-to-end
+**T7: Agent loop + ExecutionEnvironment integration**
+- Wire agent loop to each environment (mocked APIs)
+- Verify the full `ExecuteTool()` path works end-to-end
 - Verify `onProgress` callbacks flow through the full chain
 
-**T7: Provider selection / factory**
-- Verify provider factory returns correct provider type for each config value
-- Verify unknown provider name returns error
+**T8: Environment selection / factory**
+- Verify environment factory returns correct type for each config value
+- Verify unknown environment type returns error
 
-**T8: Capability-gated behavior**
-- Wire orchestrator-level code to each provider
-- Verify TurnComplete skipped when `PerTurnSnapshots` is false
+**T9: Capability-gated behavior**
+- Wire orchestrator-level code to each environment
+- Verify snapshot calls skipped when `Snapshots` is false
 - Verify Rollback skipped when `Rollback` is false
-- Verify PauseSession returns `ErrCapabilityNotSupported` for Daytona
+- Verify Pause returns `ErrCapabilityNotSupported` for Daytona
 
-### 9.3 Backward Compatibility Tests
+### 10.3 Backward Compatibility Tests
 
-**T9: Local provider parity with direct SandboxClient**
+**T10: NativeSandboxEnvironment parity with direct SandboxClient**
 - Run the same tool execution sequence through:
   1. Direct `SandboxClient` (old path)
-  2. `NativeSandboxProvider` wrapping `SandboxClient` (new path)
+  2. `NativeSandboxEnvironment` wrapping `SandboxClient` (new path)
 - Verify identical `ToolResponse` values (content, snapshot ID, exit code)
 - Use `MemorySandboxService` from plan 14 as the backend
 
-**T10: NewSandboxTools migration**
-- Verify `NewSandboxTools(provider, sessionID)` produces tools with identical names, schemas, and behavior to the old `NewSandboxTools(client, sessionID)`
+### 10.4 Contract Tests
 
-### 9.4 Contract Tests
-
-**T11: SandboxProvider interface compliance**
-- Write a shared test suite that any `SandboxProvider` implementation must pass
-- Tests exercise full lifecycle: Create → Execute → TurnComplete → Pause → Resume → Destroy
-- For providers that don't support certain operations, verify correct `ErrCapabilityNotSupported` errors
-- Run the shared suite against all four providers (with mocked backends)
+**T11: ExecutionEnvironment interface compliance**
+- Write a shared test suite that any `ExecutionEnvironment` must pass
+- Tests exercise full lifecycle: Create -> ExecuteTool -> CreateSnapshot -> Pause -> Resume -> Destroy
+- For environments that don't support certain operations, verify correct `ErrCapabilityNotSupported`
+- Run the shared suite against all five environments (with mocked backends)
 
 ---
 
-## 10. Implementation Sequence
+## 11. Implementation Sequence
 
-1. **Phase 1: Interface + Types** — Create `internal/sandbox/provider` package with interface, types, capabilities, errors. No implementations yet.
+1. **Phase 1: Interface + Types** -- Create `internal/sandbox/environment` package with interface, types, capabilities, errors. No implementations yet.
 
-2. **Phase 2: NativeSandboxProvider** — Implement the local adapter wrapping `api.SandboxService`. Write unit tests. Verify parity with direct `SandboxClient` path.
+2. **Phase 2: LocalEnvironment** -- Implement the local environment with no-op lifecycle and direct tool execution. Write unit tests. This validates the interface design with the simplest case.
 
-3. **Phase 3: SandboxBackend Migration** — Update `SandboxBackend` to accept `SandboxProvider` instead of `SandboxToolClient`. Remove `SandboxToolClient` interface. Update `NewSandboxTools`. Verify all existing tests pass.
+3. **Phase 3: NativeSandboxEnvironment** -- Implement the native adapter wrapping `api.SandboxService`. Write unit tests. Verify parity with direct `SandboxClient` path.
 
-4. **Phase 4: E2B Provider** — Implement `E2BSandboxProvider` with full API integration. Write unit tests with HTTP mock. This is the highest-value remote provider.
+4. **Phase 4: Agent Loop Migration** -- Update agent loop to use `ExecutionEnvironment` instead of `ToolBackend`. Remove `ToolBackend`, `LocalBackend`, `SandboxBackend`, and `SandboxToolClient`. Verify all existing tests pass.
 
-5. **Phase 5: Daytona + Fly Providers** — Implement remaining providers. These can be done in parallel since they share no code dependencies.
+5. **Phase 5: E2BSandboxEnvironment** -- Implement E2B with full API integration. Write unit tests with HTTP mock. This is the highest-value remote environment.
 
-6. **Phase 6: Integration Tests** — Contract test suite, capability-gated behavior tests, backward compatibility verification.
+6. **Phase 6: Daytona + Fly Environments** -- Implement remaining environments. These can be done in parallel since they share no code dependencies.
+
+7. **Phase 7: Integration Tests** -- Contract test suite, capability-gated behavior tests, backward compatibility verification.
 
 ---
 
-## 11. Open Questions
+## 12. Open Questions
 
-1. **Provider-specific tool implementations:** Remote providers need to translate tool requests (e.g., `read_file` with path parameter) into provider-specific API calls (e.g., E2B filesystem API). Should this translation live in each provider, or should we define a `RemoteToolExecutor` helper that providers can share?
+1. **Environment-specific tool implementations:** Remote environments need to translate tool requests (e.g., `read_file` with path parameter) into environment-specific API calls (e.g., E2B filesystem API). Should this translation live in each environment, or should we define a `RemoteToolExecutor` helper that environments can share?
 
-2. **Session persistence across provider restarts:** If the provider process restarts, the in-memory session map is lost. For remote providers, we could reconstruct state from the provider API (e.g., list E2B sandboxes). Should we define a `RecoverSessions()` method on the interface?
+2. **State recovery:** If the process hosting an environment restarts, the in-memory state is lost. For remote environments, we could reconstruct state from the API (e.g., list E2B sandboxes). Should we define a `Recover()` method on the interface?
 
-3. **Provider health checks:** Should `SandboxProvider` include a `HealthCheck()` method? The local provider delegates to `SandboxHostService.HealthCheck()`, but remote providers would need their own health semantics.
+3. **Health checks:** Should `ExecutionEnvironment` include a `HealthCheck()` method? The native environment delegates to `SandboxHostService.HealthCheck()`, but remote environments would need their own health semantics.
 
-4. **Multi-provider sessions:** Should the system support using different providers for different sessions simultaneously (e.g., some agents on local, some on E2B)? The current design supports this naturally since the provider is selected at session creation time, but orchestrator-level routing logic would need to be designed.
+4. **Multi-environment sessions:** The current design naturally supports using different environments for different sessions (e.g., some agents on native sandbox, some on E2B). The RuntimeController creates the right environment per session. Orchestrator-level routing logic would need to be designed but is out of scope for this addendum.
