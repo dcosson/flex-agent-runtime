@@ -512,7 +512,7 @@ If runtime agent-loop validation is needed in the future, the recommended approa
 - **No shared state:** The orchestrator and agent loop do not share memory, caches, or connection pools. Each `NativeSandboxEnvironment` is fully independent.
 - **Session ID is the contract:** The session ID is the sole coordination mechanism. The server is the source of truth for session state.
 - **Independent failure:** Either process can crash and restart independently. The orchestrator can `Pause` or `Destroy` a session even if the agent loop has disconnected. The agent loop can reconnect and resume `ExecuteTool` calls against an existing session.
-- **Config consistency:** Both processes must be configured with the same `NativeSandboxConfig` (same `StorageBackend`, same `ContainerRuntime`). Capability negotiation on both connections guards against drift, but operators should ensure config consistency at deployment time.
+- **Config consistency:** Both processes must be configured with the same `NativeSandboxConfig` (same `StorageBackend`, same `ContainerRuntime`). Capability negotiation on the orchestrator's connection guards against drift at session creation time. Operators must ensure config consistency for the agent loop at deployment time (see §7.2).
 
 ---
 
@@ -655,7 +655,7 @@ Attempt to create a session with IDs containing `../`, `..\\`, absolute paths, n
 
 ---
 
-## Review Disposition
+## Round 1 Review Disposition
 
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
@@ -671,3 +671,9 @@ Attempt to create a session with IDs containing `../`, `..\\`, absolute paths, n
 | 10 | reviewer-sea | P3 | Agent-loop capability validation underspecified | Incorporated | §7.2 commits to deployment-time consistency, defers runtime validation |
 | 11 | reviewer-sea | P3 | Periodic capability re-validation is speculative | Incorporated | §6.1 "consider" replaced with explicit deferral |
 | 12 | reviewer-sea | P3 | PerToolSnapshots under General config but ZFS-specific | Incorporated | §2.2 moved to ZFS behavioral config section |
+
+## Round 2 Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P3 | §7.3 claims negotiation on both connections but §7.2 defers agent-loop validation | Incorporated | §7.3 updated to reference orchestrator-only negotiation and §7.2 deployment-time consistency |
