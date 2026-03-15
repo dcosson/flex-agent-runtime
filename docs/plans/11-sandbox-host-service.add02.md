@@ -2,7 +2,7 @@
 
 **Parent plan:** [11-sandbox-host-service.md](./11-sandbox-host-service.md)
 **Depends on:** [11-sandbox-host-service.add01.md](./11-sandbox-host-service.add01.md) (ExecutionEnvironment interface)
-**Status:** Draft
+**Status:** Approved
 **Scope:** Make `NativeSandboxEnvironment` and `SandboxHostService` operate with or without ZFS and with or without gVisor, controlled by explicit configuration. No auto-detection.
 
 ---
@@ -715,3 +715,19 @@ Attempt to create a session with IDs containing `../`, `..\\`, absolute paths, n
 |---|----------|----------|---------|-------------|-------|
 | 1 | reviewer-sea | P2 | SandboxHostService lacks Capabilities() method for RPC handler | Incorporated | §4.8 added with public Capabilities() method and RPC handler usage |
 | 2 | reviewer-sea | P3 | Capabilities type at RPC boundary is ambiguous | Incorporated | §9.2 clarified: separate api.Capabilities transport type with codec mapping |
+
+---
+
+## Plan Review Signoff
+
+- **Status:** Approved
+- **Date:** 2026-03-15
+- **Branch:** main
+- **Commit:** 8235be8f1247ef805c8551a4974ae433c3a62466
+- **Review rounds:** 2
+  - R1: 12 findings from 2 reviewers — 3 P1, 6 P2, 3 P3
+  - R2: 1 finding — 1 P3
+- **Seam review:** 2 findings (1 P2, 1 P3), all incorporated
+- **Total findings:** 15
+- **Incorporation rate:** 100%
+- **Reviewers:** coder-1-sea, reviewer-sea
