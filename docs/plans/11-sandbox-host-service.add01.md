@@ -1,7 +1,7 @@
 # 11 Addendum 01: ExecutionEnvironment Abstraction
 
 **Parent plan:** [11-sandbox-host-service.md](./11-sandbox-host-service.md)
-**Status:** Draft
+**Status:** Approved
 **Scope:** Unified `ExecutionEnvironment` interface replacing both `ToolBackend` (LocalBackend + SandboxBackend) and the sandbox provider layer. Implementations for local, native sandbox (ZFS/gVisor), E2B, Daytona, and Fly.io. Migration path from current `ToolBackend` split.
 **Integrates with:** Plan 06 (ToolBackend), Plan 11 (SandboxHostService), Plan 13 (RPC Layer), Architecture (Placement Modes)
 
@@ -1394,13 +1394,15 @@ When the RuntimeController process crashes after creating a remote environment b
 
 ## 14. Open Questions
 
-1. **Environment-specific tool implementations:** Remote environments need to translate tool requests (e.g., `read_file` with path parameter) into environment-specific API calls (e.g., E2B filesystem API). Should this translation live in each environment, or should we define a `RemoteToolExecutor` helper that environments can share?
+All open questions have been resolved or deferred to implementation:
 
-2. **State recovery:** If the process hosting an environment restarts, the in-memory state is lost. For remote environments, we could reconstruct state from the API (e.g., list E2B sandboxes). Should we define a `Recover()` method on the interface?
+1. **Environment-specific tool implementations:** Resolved — translation lives in each environment implementation (§7.5 defines IsFileOp() helper shared across remote envs). If common patterns emerge during implementation, a `RemoteToolExecutor` helper can be extracted as a refactor.
 
-3. **Health checks:** Should `ExecutionEnvironment` include a `HealthCheck()` method? The native environment delegates to `SandboxHostService.HealthCheck()`, but remote environments would need their own health semantics.
+2. **State recovery:** Deferred — not needed for initial implementation. Remote environments can be reconstructed from their APIs if needed. A `Recover()` method can be added to the interface in a future addendum if experience shows it is necessary.
 
-4. **Multi-environment sessions:** The current design naturally supports using different environments for different sessions (e.g., some agents on native sandbox, some on E2B). The RuntimeController creates the right environment per session. Orchestrator-level routing logic would need to be designed but is out of scope for this addendum.
+3. **Health checks:** Deferred — not part of this addendum's interface. The native environment delegates to `SandboxHostService.HealthCheck()`. Remote environment health checks will be designed when operational monitoring requirements are defined.
+
+4. **Multi-environment sessions:** Resolved as out of scope — the design supports this naturally. Orchestrator-level routing is a separate concern to be addressed in a future plan.
 
 ---
 
@@ -1432,7 +1434,7 @@ When the RuntimeController process crashes after creating a remote environment b
 | 3 | reviewer-sea | P3 | SEC2 inconsistent with required SessionID | Incorporated | Test harness SEC2 updated to require error on empty SessionID |
 | 4 | reviewer-sea | P3 | LocalEnvironment destroyed field type contradicts §3.4 | Incorporated | Changed to atomic.Bool with Store/Load in §5.1 |
 
-## Seam Review Disposition
+## Seam Review Disposition (Complete: 5 findings — 1 P1, 2 P2, 2 P3 — all incorporated)
 
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
@@ -1441,3 +1443,55 @@ When the RuntimeController process crashes after creating a remote environment b
 | 3 | reviewer-sea | P2 | ToolRequest.SessionID becomes dead field | Incorporated | Documented as vestigial in §3.2 and §7.3; cleanup deferred to post-migration |
 | 4 | reviewer-sea | P3 | Architecture doc terminology drift | Incorporated | §9.4 updated: apply updates during Phase 4, not deferred |
 | 5 | reviewer-sea | P3 | Quota and TurnComplete not exposed | Incorporated | §9.6 added: Quota via NativeOptions or server default; TurnComplete via CreateSnapshot("turn-N") |
+
+---
+
+## Plan Review Signoff
+
+| Field | Value |
+|-------|-------|
+| **Status** | Approved |
+| **Date** | 2026-03-14 |
+| **Branch** | main |
+| **Commit** | 1179700a45a895eda92c921c1baddd8e0d6ec7d4 |
+| **Review rounds** | 2 |
+
+### Finding Summary
+
+| Round | Source | Total | P0 | P1 | P2 | P3 |
+|-------|--------|-------|-----|-----|-----|-----|
+| R1 | coder-1-sea | 4 | 0 | 2 | 2 | 0 |
+| R1 | reviewer-sea | 10 | 0 | 2 | 4 | 4 |
+| **R1 Total** | | **14** | **0** | **4** | **6** | **4** |
+| R2 | reviewer-sea | 4 | 0 | 0 | 0 | 4 |
+| **R2 Total** | | **4** | **0** | **0** | **0** | **4** |
+| Seam | reviewer-sea | 5 | 0 | 1 | 2 | 2 |
+| **Grand Total** | | **23** | **0** | **5** | **8** | **10** |
+
+### Incorporation Rate
+
+- **R1:** 14/14 incorporated (100%)
+- **R2:** 4/4 incorporated (100%)
+- **Seam Review:** 5/5 incorporated (100%)
+- **Overall:** 23/23 incorporated (100%)
+
+### Not Incorporated Items
+
+None. All findings across both review rounds and seam review were incorporated.
+
+### Open Questions Status
+
+All 4 open questions resolved:
+1. Environment-specific tool implementations — resolved (translation in each env, shared helper via §7.5 IsFileOp())
+2. State recovery — deferred to future addendum (not needed for initial implementation)
+3. Health checks — deferred (separate operational concern)
+4. Multi-environment sessions — resolved as out of scope (design supports naturally)
+
+### Seam Review Status
+
+Seam review completed with 5 findings (1 P1, 2 P2, 2 P3). All 5 incorporated into the plan. Cross-plan dependency on plan 13 (CreateSnapshot RPC) tracked in §9.5.
+
+### Reviewers
+
+- coder-1-sea
+- reviewer-sea
