@@ -25,6 +25,14 @@
     "batch=4b",
     "plan-doc=17-external-testing"
   ],
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implementation complete locally: added stubserver.NewHandler + unit tests, new cmd/stubserver binary with fixture loading and /health, Dockerfile.stubserver, compose service across minimal/gvisor/full profiles, and initial anthropic fixtures under testdata/fixtures. make test passes. Preparing commit/push and handoff for R1 review.",
+      "created_at": "2026-03-15T18:53:32.196589-07:00"
+    }
+  ],
   "created_at": "2026-03-15T18:49:55.495761-07:00",
-  "updated_at": "2026-03-15T18:49:55.495761-07:00"
+  "updated_at": "2026-03-15T18:53:32.196796-07:00"
 }

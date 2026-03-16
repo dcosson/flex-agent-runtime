@@ -1,4 +1,17 @@
 services:
+  stubserver:
+    build:
+      context: ../../../
+      dockerfile: e2etests/external/docker/Dockerfile.stubserver
+    ports:
+      - "9090:9090"
+    profiles: ["minimal", "gvisor", "full"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+
   sandbox-host-minimal:
     build:
       context: ../../../

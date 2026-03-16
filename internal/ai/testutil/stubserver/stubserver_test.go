@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -132,6 +133,79 @@ func TestClearRequests(t *testing.T) {
 	s.ClearRequests()
 	if len(s.Requests()) != 0 {
 		t.Fatal("expected 0 requests after clear")
+	}
+}
+
+func TestNewHandler_DefaultHandler(t *testing.T) {
+	ts := httptest.NewServer(NewHandler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", resp.StatusCode)
+	}
+}
+
+func TestNewHandler_WithFixtureSelection(t *testing.T) {
+	fixtures := map[string]string{
+		"default": "data: default\n\n",
+		"tool":    "data: tool\n\n",
+	}
+
+	ts := httptest.NewServer(NewHandler(WithFixtureFunc(func(r *http.Request) string {
+		name := r.Header.Get("X-Fixture")
+		if name == "" {
+			name = "default"
+		}
+		return fixtures[name]
+	})))
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("X-Fixture", "tool")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if !strings.Contains(string(body), "tool") {
+		t.Fatalf("expected tool fixture, got %s", string(body))
+	}
+}
+
+func TestNewHandler_WithFault(t *testing.T) {
+	ts := httptest.NewServer(NewHandler(WithFault("", Fault{
+		Mode:       Throttle,
+		StatusCode: http.StatusTooManyRequests,
+		RetryAfter: "3",
+	})))
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Retry-After"); got != "3" {
+		t.Fatalf("expected Retry-After=3, got %q", got)
 	}
 }
 

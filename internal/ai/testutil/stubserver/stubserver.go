@@ -84,7 +84,7 @@ type Server struct {
 	httpServer *httptest.Server
 	mu         sync.Mutex
 	requests   []CapturedRequest
-	handler    http.HandlerFunc
+	handler    http.Handler
 }
 
 // Option configures a Server.
@@ -94,16 +94,31 @@ type Option func(*Server)
 // The server starts immediately and must be closed with Close().
 func New(opts ...Option) *Server {
 	s := &Server{}
+	handler := s.configureHandler(opts...)
+
+	s.httpServer = httptest.NewServer(handler)
+	s.URL = s.httpServer.URL
+	return s
+}
+
+// NewHandler creates an http.Handler using the same option behavior as New,
+// but without starting an httptest.Server. The caller owns listener lifecycle.
+func NewHandler(opts ...Option) http.Handler {
+	s := &Server{}
+	return s.configureHandler(opts...)
+}
+
+func (s *Server) configureHandler(opts ...Option) http.Handler {
 	for _, opt := range opts {
 		opt(s)
 	}
 	if s.handler == nil {
-		s.handler = func(w http.ResponseWriter, r *http.Request) {
+		s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "no handler configured", http.StatusInternalServerError)
-		}
+		})
 	}
 
-	s.httpServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Capture request.
 		body, _ := io.ReadAll(r.Body)
 		s.mu.Lock()
@@ -115,10 +130,8 @@ func New(opts ...Option) *Server {
 		})
 		s.mu.Unlock()
 
-		s.handler(w, r)
-	}))
-	s.URL = s.httpServer.URL
-	return s
+		s.handler.ServeHTTP(w, r)
+	})
 }
 
 // Close shuts down the test server.
@@ -146,9 +159,9 @@ func (s *Server) ClearRequests() {
 // The fixture should be raw SSE text (e.g., "event: message_start\ndata: {...}\n\n").
 func WithFixture(fixture string) Option {
 	return func(s *Server) {
-		s.handler = func(w http.ResponseWriter, r *http.Request) {
+		s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			serveSSE(w, fixture, NoFault, Fault{})
-		}
+		})
 	}
 }
 
@@ -156,16 +169,16 @@ func WithFixture(fixture string) Option {
 // the fixture to serve. Useful for per-request fixture selection.
 func WithFixtureFunc(fn func(r *http.Request) string) Option {
 	return func(s *Server) {
-		s.handler = func(w http.ResponseWriter, r *http.Request) {
+		s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			serveSSE(w, fn(r), NoFault, Fault{})
-		}
+		})
 	}
 }
 
 // WithFault configures the server to inject a fault while serving the fixture.
 func WithFault(fixture string, fault Fault) Option {
 	return func(s *Server) {
-		s.handler = func(w http.ResponseWriter, r *http.Request) {
+		s.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch fault.Mode {
 			case Throttle:
 				serveThrottle(w, fault)
@@ -176,7 +189,7 @@ func WithFault(fixture string, fault Fault) Option {
 			default:
 				serveSSE(w, fixture, fault.Mode, fault)
 			}
-		}
+		})
 	}
 }
 
