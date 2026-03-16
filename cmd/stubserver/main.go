@@ -27,7 +27,7 @@ func main() {
 		log.Fatalf("load fixtures: %v", err)
 	}
 
-	handler := stubserver.NewHandler(stubserver.WithFixtureFunc(func(r *http.Request) string {
+	sseHandler := stubserver.NewHandler(stubserver.WithFixtureFunc(func(r *http.Request) string {
 		name := strings.TrimSpace(r.Header.Get("X-Fixture"))
 		if name == "" {
 			name = "default"
@@ -38,12 +38,42 @@ func main() {
 		return fixtures["default"]
 	}))
 
+	jsonHandler := stubserver.NewHandler(stubserver.WithJSONFixtureFunc(func(r *http.Request) string {
+		name := strings.TrimSpace(r.Header.Get("X-Fixture"))
+		if name == "" {
+			// Default JSON fixture based on path.
+			switch {
+			case strings.Contains(r.URL.Path, "batchEmbedContents"):
+				name = "google-embedding"
+			case strings.Contains(r.URL.Path, "/embed"):
+				name = "cohere-embedding"
+			default:
+				name = "openai-embedding"
+			}
+		}
+		if fixture, ok := fixtures[name]; ok {
+			return fixture
+		}
+		return `{"error":"fixture not found"}`
+	}))
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintln(w, "ok")
 	})
-	mux.Handle("/", handler)
+	// Embedding endpoints serve JSON.
+	mux.Handle("/embeddings", jsonHandler)
+	mux.Handle("/v1/embeddings", jsonHandler)
+	mux.Handle("/v2/embed", jsonHandler)
+	// Google embedding uses dynamic paths — match with a handler func.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "batchEmbedContents") || strings.Contains(r.URL.Path, "/embed") {
+			jsonHandler.ServeHTTP(w, r)
+			return
+		}
+		sseHandler.ServeHTTP(w, r)
+	})
 
 	log.Printf("stubserver listening on %s with %d fixtures from %s", *addr, len(fixtures), *fixtureDir)
 	log.Fatal(http.ListenAndServe(*addr, mux))
