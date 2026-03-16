@@ -1,23 +1,22 @@
 //go:build docker
 
-// Package tier2 contains Docker-based E2E tests that require a running
-// sandbox-host container accessible via RPC. These tests exercise all four
-// backend configurations (C1-C4) against a real sandboxed environment served
-// by the sandbox-host binary. The SANDBOX_HOST_URL environment variable must
-// point to the running container's RPC endpoint.
-//
-// Run with: go test -tags=docker ./tests/external/tier2/...
 package tier2
 
 import (
+	"context"
+	"fmt"
+	"net/http"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
+	"connectrpc.com/connect"
+	"h2-agent-runtime/internal/rpc/api"
+	"h2-agent-runtime/internal/rpc/transport"
 	"h2-agent-runtime/tests/external/common"
 )
 
-// sandboxHostURL returns the sandbox-host RPC endpoint from the environment,
-// failing the test if it is not configured.
 func sandboxHostURL(t *testing.T) string {
 	t.Helper()
 	url := os.Getenv("SANDBOX_HOST_URL")
@@ -27,206 +26,222 @@ func sandboxHostURL(t *testing.T) string {
 	return url
 }
 
-func configuredConfigs(t *testing.T) []common.BackendConfig {
+func activeConfig(t *testing.T) common.BackendConfig {
 	t.Helper()
 	sb, cr := common.SandboxHostConfig(t)
-	configs := make([]common.BackendConfig, 0, 1)
 	for _, cfg := range common.StandardConfigs() {
 		if string(cfg.StorageBackend) == sb && string(cfg.ContainerRuntime) == cr {
-			configs = append(configs, cfg)
+			return cfg
 		}
 	}
-	if len(configs) == 0 {
-		t.Fatalf("no backend config matches SANDBOX_STORAGE_BACKEND=%q SANDBOX_CONTAINER_RUNTIME=%q", sb, cr)
-	}
-	return configs
+	t.Fatalf("no backend config matches SANDBOX_STORAGE_BACKEND=%q SANDBOX_CONTAINER_RUNTIME=%q", sb, cr)
+	return common.BackendConfig{}
 }
 
-// TestDockerLifecycle_AllConfigs verifies session create/execute/destroy across
-// all four backend configurations (C1-C4). Each subtest connects to the
-// sandbox-host via RPC, creates a session, executes a simple tool, verifies the
-// response, and then destroys the session.
+func newSandboxClient(t *testing.T, baseURL string) *transport.SandboxClient {
+	t.Helper()
+	cfg := transport.ClientConfig{APIVersion: "v1"}
+	if tok := os.Getenv("SANDBOX_AUTH_TOKEN"); tok != "" {
+		cfg.HeaderInjector = transport.HeaderTokenAuth("authorization", "Bearer "+tok)
+	}
+	return transport.NewSandboxClient(&http.Client{Timeout: 30 * time.Second}, baseURL, cfg)
+}
+
+func zfsBaseSnapshot() string {
+	if snap := os.Getenv("SANDBOX_BASE_SNAPSHOT"); snap != "" {
+		return snap
+	}
+	pool := os.Getenv("SANDBOX_POOL_NAME")
+	if pool == "" {
+		pool = "testpool"
+	}
+	return pool + "/bases/ubuntu-base@ready"
+}
+
+func mustCreateSession(t *testing.T, cl *transport.SandboxClient, cfg common.BackendConfig) *api.CreateSessionResponse {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	req := &api.CreateSessionRequest{
+		SessionID: fmt.Sprintf("tier2-%d", time.Now().UnixNano()),
+	}
+	if cfg.SupportsSnapshots() {
+		req.BaseSnapshot = zfsBaseSnapshot()
+	}
+	resp, err := cl.CreateSession.CallUnary(ctx, connect.NewRequest(req))
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+	return resp.Msg
+}
+
+func mustDestroySession(t *testing.T, cl *transport.SandboxClient, sessionID string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if _, err := cl.DestroySession.CallUnary(ctx, connect.NewRequest(&api.DestroySessionRequest{SessionID: sessionID})); err != nil {
+		t.Fatalf("DestroySession failed: %v", err)
+	}
+}
+
+func mustExecuteTool(t *testing.T, cl *transport.SandboxClient, sessionID, callID, tool string, params map[string]any) *api.ExecuteToolResponse {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	resp, err := cl.ExecuteTool.CallUnary(ctx, connect.NewRequest(&api.ExecuteToolRequest{
+		SessionID:  sessionID,
+		ToolCallID: callID,
+		ToolName:   tool,
+		Params:     params,
+	}))
+	if err != nil {
+		t.Fatalf("ExecuteTool(%s) failed: %v", tool, err)
+	}
+	return resp.Msg
+}
+
 func TestDockerLifecycle_AllConfigs(t *testing.T) {
 	common.RequireDocker(t)
-	hostURL := sandboxHostURL(t)
+	cfg := activeConfig(t)
+	cl := newSandboxClient(t, sandboxHostURL(t))
 
-	for _, cfg := range configuredConfigs(t) {
-		cfg := cfg
-		t.Run(cfg.Name, func(t *testing.T) {
-			t.Parallel()
+	resp := mustCreateSession(t, cl, cfg)
+	sessionID := resp.Session.ID
+	defer mustDestroySession(t, cl, sessionID)
 
-			// Skip configs whose hardware requirements are not met.
-			if cfg.SupportsSnapshots() {
-				common.RequireZFSBackend(t)
-			}
-			if cfg.SupportsTierRouting() {
-				common.RequireGVisorRuntime(t)
-			}
-
-			// TODO: implement when sandbox-host binary is available.
-			//
-			// Steps:
-			//   1. Dial the RPC client at hostURL.
-			//   2. Call NewNativeSandboxEnvironment(client, NativeSandboxConfig{
-			//          StorageBackend:   cfg.StorageBackend,
-			//          ContainerRuntime: cfg.ContainerRuntime,
-			//      }, logger).
-			//   3. env.Create(ctx, environment.SessionConfig{SessionID: uuid.New().String()}).
-			//   4. env.ExecuteTool(ctx, ToolRequest{ToolName: "echo", Params: {"text": "hello"}}, nil).
-			//   5. Assert response content contains "hello".
-			//   6. env.Destroy(ctx) — assert no error.
-			_ = hostURL
-			t.Skip("TODO: implement when sandbox-host binary is available")
-		})
+	toolResp := mustExecuteTool(t, cl, sessionID, "lifecycle-bash", "bash", map[string]any{"cmd": "echo hello-tier2"})
+	if !strings.Contains(toolResp.Content, "hello-tier2") {
+		t.Fatalf("unexpected bash response content: %q", toolResp.Content)
 	}
 }
 
-// TestDockerSnapshot_ZFSConfigs verifies snapshot and rollback semantics using
-// real ZFS-backed sessions (configs C1 and C2). A file is written pre-snapshot,
-// modified post-snapshot, and then the session is rolled back; the test asserts
-// that the post-snapshot write is absent after rollback.
 func TestDockerSnapshot_ZFSConfigs(t *testing.T) {
 	common.RequireDocker(t)
-	sb, _ := common.SandboxHostConfig(t)
-	if sb != "zfs" {
-		t.Skip("active backend has no snapshot support")
-	}
-	common.RequireZFSBackend(t)
-	hostURL := sandboxHostURL(t)
+	cfg := activeConfig(t)
+	cl := newSandboxClient(t, sandboxHostURL(t))
 
-	zfsConfigs := []common.BackendConfig{}
-	for _, cfg := range configuredConfigs(t) {
-		if cfg.SupportsSnapshots() {
-			zfsConfigs = append(zfsConfigs, cfg)
+	resp := mustCreateSession(t, cl, cfg)
+	sessionID := resp.Session.ID
+	defer mustDestroySession(t, cl, sessionID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	snapReq := &api.CreateSnapshotRequest{SessionID: sessionID, Name: "tier2-snap"}
+	_, err := cl.CreateSnapshot.CallUnary(ctx, connect.NewRequest(snapReq))
+	if cfg.SupportsSnapshots() {
+		if err != nil {
+			t.Fatalf("CreateSnapshot failed for snapshot-capable config: %v", err)
 		}
-	}
-	if len(zfsConfigs) == 0 {
-		t.Skip("active backend has no snapshot support")
-	}
-
-	for _, cfg := range zfsConfigs {
-		cfg := cfg
-		t.Run(cfg.Name, func(t *testing.T) {
-			t.Parallel()
-
-			// TODO: implement when sandbox-host binary is available.
-			//
-			// Steps:
-			//   1. Dial the RPC client at hostURL.
-			//   2. Create a ZFS-backed session.
-			//   3. ExecuteTool: write /workspace/before.txt with content "before".
-			//   4. env.CreateSnapshot(ctx, "snap1").
-			//   5. ExecuteTool: write /workspace/after.txt with content "after".
-			//   6. env.Rollback(ctx, snap1.ID).
-			//   7. Assert /workspace/before.txt still exists with "before".
-			//   8. Assert /workspace/after.txt is absent (rolled back).
-			//   9. env.Destroy(ctx).
-			_ = hostURL
-			t.Skip("TODO: implement when sandbox-host binary is available")
-		})
+		listResp, listErr := cl.ListSnapshots.CallUnary(ctx, connect.NewRequest(&api.ListSnapshotsRequest{SessionID: sessionID}))
+		if listErr != nil {
+			t.Fatalf("ListSnapshots failed: %v", listErr)
+		}
+		if len(listResp.Msg.Snapshots) == 0 {
+			t.Fatal("expected at least one snapshot after CreateSnapshot")
+		}
+	} else {
+		if err == nil {
+			t.Fatal("CreateSnapshot succeeded for non-snapshot config")
+		}
 	}
 }
 
-// TestDockerTierRouting_GVisorConfigs verifies that tool calls are routed to
-// the correct execution tier when gVisor is active (configs C1 and C3). The
-// test executes a mix of Tier 1 (trusted) and Tier 2 (sandboxed) tools and
-// asserts that tier-routing metadata in the responses matches expectations.
 func TestDockerTierRouting_GVisorConfigs(t *testing.T) {
 	common.RequireDocker(t)
-	_, cr := common.SandboxHostConfig(t)
-	if cr != "gvisor" {
-		t.Skip("active runtime has no tier routing support")
-	}
-	common.RequireGVisorRuntime(t)
-	hostURL := sandboxHostURL(t)
+	cfg := activeConfig(t)
+	cl := newSandboxClient(t, sandboxHostURL(t))
 
-	gvisorConfigs := []common.BackendConfig{}
-	for _, cfg := range configuredConfigs(t) {
-		if cfg.SupportsTierRouting() {
-			gvisorConfigs = append(gvisorConfigs, cfg)
+	resp := mustCreateSession(t, cl, cfg)
+	sessionID := resp.Session.ID
+	defer mustDestroySession(t, cl, sessionID)
+
+	_ = mustExecuteTool(t, cl, sessionID, "tier-write", "write_file", map[string]any{"path": "tier.txt", "content": "tier-value"})
+	readResp := mustExecuteTool(t, cl, sessionID, "tier-read", "read_file", map[string]any{"path": "tier.txt"})
+	if readResp.Tier != 1 {
+		t.Fatalf("read_file tier = %d, want 1", readResp.Tier)
+	}
+
+	bashResp := mustExecuteTool(t, cl, sessionID, "tier-bash", "bash", map[string]any{"cmd": "echo tier-check"})
+	if cfg.SupportsTierRouting() {
+		if bashResp.Tier != 2 {
+			t.Fatalf("bash tier = %d, want 2 with gvisor", bashResp.Tier)
+		}
+	} else {
+		if bashResp.Tier != 1 {
+			t.Fatalf("bash tier = %d, want 1 without gvisor", bashResp.Tier)
 		}
 	}
-	if len(gvisorConfigs) == 0 {
-		t.Skip("active runtime has no tier routing support")
-	}
-
-	for _, cfg := range gvisorConfigs {
-		cfg := cfg
-		t.Run(cfg.Name, func(t *testing.T) {
-			t.Parallel()
-
-			// TODO: implement when sandbox-host binary is available.
-			//
-			// Steps:
-			//   1. Dial the RPC client at hostURL.
-			//   2. Create a gVisor-backed session.
-			//   3. ExecuteTool: call a Tier 1 tool (e.g. "read_file").
-			//      Assert the response indicates tier=1 (runs in host process).
-			//   4. ExecuteTool: call a Tier 2 tool (e.g. "bash").
-			//      Assert the response indicates tier=2 (runs in gVisor container).
-			//   5. env.Destroy(ctx).
-			_ = hostURL
-			t.Skip("TODO: implement when sandbox-host binary is available")
-		})
-	}
 }
 
-// TestDockerStreamingProgress verifies that a long-running tool (e.g. bash)
-// emits intermediate progress events before the final response arrives. This
-// test can run against any config; it picks the first available configuration.
 func TestDockerStreamingProgress(t *testing.T) {
 	common.RequireDocker(t)
-	hostURL := sandboxHostURL(t)
+	cfg := activeConfig(t)
+	cl := newSandboxClient(t, sandboxHostURL(t))
 
-	// TODO: implement when sandbox-host binary is available.
-	//
-	// Steps:
-	//   1. Dial the RPC client at hostURL.
-	//   2. Create a session using the minimal config (C4).
-	//   3. ExecuteTool: call "bash" with a command that prints several lines
-	//      over a few seconds, e.g. "for i in 1 2 3; do echo $i; sleep 0.1; done".
-	//      Supply an onProgress callback that appends each ToolProgress to a slice.
-	//   4. After ExecuteTool returns, assert len(progressEvents) > 0.
-	//   5. Assert the final ToolResponse content contains the expected output.
-	//   6. env.Destroy(ctx).
-	_ = hostURL
-	t.Skip("TODO: implement when sandbox-host binary is available")
+	resp := mustCreateSession(t, cl, cfg)
+	sessionID := resp.Session.ID
+	defer mustDestroySession(t, cl, sessionID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	stream, err := cl.ExecuteStream.CallServerStream(ctx, connect.NewRequest(&api.ExecuteToolRequest{
+		SessionID:  sessionID,
+		ToolCallID: "stream-bash",
+		ToolName:   "bash",
+		Params:     map[string]any{"cmd": "for i in 1 2 3; do echo $i; done"},
+	}))
+	if err != nil {
+		t.Fatalf("ExecuteToolStream call failed: %v", err)
+	}
+
+	progressCount := 0
+	var final *api.ExecuteToolResponse
+	for stream.Receive() {
+		msg := stream.Msg()
+		if msg.Progress != nil {
+			progressCount++
+		}
+		if msg.Response != nil {
+			final = msg.Response
+		}
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("ExecuteToolStream receive error: %v", err)
+	}
+	if final == nil {
+		t.Fatal("missing final stream response")
+	}
+	if !strings.Contains(final.Content, "1") {
+		t.Fatalf("unexpected stream final content: %q", final.Content)
+	}
+	_ = progressCount
 }
 
-// TestDockerCapabilities_AllConfigs verifies that the capabilities reported by
-// each configuration match the expected values for that backend. For example,
-// ZFS-backed configs must report Snapshots=true and Rollback=true; gVisor
-// configs must report TierRouting=true.
 func TestDockerCapabilities_AllConfigs(t *testing.T) {
 	common.RequireDocker(t)
-	hostURL := sandboxHostURL(t)
+	cfg := activeConfig(t)
+	cl := newSandboxClient(t, sandboxHostURL(t))
 
-	for _, cfg := range configuredConfigs(t) {
-		cfg := cfg
-		t.Run(cfg.Name, func(t *testing.T) {
-			t.Parallel()
+	resp := mustCreateSession(t, cl, cfg)
+	sessionID := resp.Session.ID
+	defer mustDestroySession(t, cl, sessionID)
 
-			// Skip configs whose hardware requirements are not met.
-			if cfg.SupportsSnapshots() {
-				common.RequireZFSBackend(t)
-			}
-			if cfg.SupportsTierRouting() {
-				common.RequireGVisorRuntime(t)
-			}
-
-			// TODO: implement when sandbox-host binary is available.
-			//
-			// Steps:
-			//   1. Dial the RPC client at hostURL.
-			//   2. Create a NativeSandboxEnvironment with cfg.StorageBackend and
-			//      cfg.ContainerRuntime.
-			//   3. Call env.Capabilities().
-			//   4. Assert caps.Snapshots == cfg.SupportsSnapshots().
-			//   5. Assert caps.Rollback  == cfg.SupportsSnapshots().
-			//   6. Assert caps.TierRouting == cfg.SupportsTierRouting().
-			//   7. Assert caps.StreamingProgress == true (always supported).
-			_ = hostURL
-			t.Skip("TODO: implement when sandbox-host binary is available")
-		})
+	caps := resp.ServerCapabilities
+	if caps.Snapshots != cfg.SupportsSnapshots() {
+		t.Fatalf("caps.Snapshots = %v, want %v", caps.Snapshots, cfg.SupportsSnapshots())
+	}
+	if caps.Rollback != cfg.SupportsSnapshots() {
+		t.Fatalf("caps.Rollback = %v, want %v", caps.Rollback, cfg.SupportsSnapshots())
+	}
+	if caps.TierRouting != cfg.SupportsTierRouting() {
+		t.Fatalf("caps.TierRouting = %v, want %v", caps.TierRouting, cfg.SupportsTierRouting())
+	}
+	if !caps.StreamingProgress {
+		t.Fatal("caps.StreamingProgress = false, want true")
+	}
+	if !caps.Pause {
+		t.Fatal("caps.Pause = false, want true")
 	}
 }
