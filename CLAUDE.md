@@ -22,9 +22,11 @@ There are NO known failures or flakes. Every test must pass, every time. If you 
 
 ## Before committing
 
-Always run `make check` before committing. This runs gofmt, go vet, and staticcheck. All must pass clean — no warnings, no unused code.
+You MUST run `make check` and `make test` before every commit. Do not commit if either fails.
 
-Run `make test` to verify tests pass. Use `make test-race` for race detection.
+- `make check` runs gofmt, go vet, and staticcheck. All must pass clean — no warnings, no unused code.
+- `make test` runs the test suite. All tests must pass.
+- Use `make test-race` for race detection when touching concurrent code.
 
 ## Make commands
 

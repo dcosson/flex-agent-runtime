@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"go.starlark.net/starlark"
 	"flex-agent-runtime/internal/agent"
 	"flex-agent-runtime/internal/ai"
 	"flex-agent-runtime/internal/tools/codeinterp/datastore"
+	"go.starlark.net/starlark"
 )
 
 func (s *executionState) builtinDiscover(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {

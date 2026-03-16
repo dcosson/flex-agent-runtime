@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"go.starlark.net/starlark"
-	"go.starlark.net/syntax"
 	"flex-agent-runtime/internal/agent"
 	"flex-agent-runtime/internal/ai"
 	"flex-agent-runtime/internal/tools/codeinterp/datastore"
+	"go.starlark.net/starlark"
+	"go.starlark.net/syntax"
 )
 
 type Runtime struct {

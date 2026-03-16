@@ -20,6 +20,7 @@ Primary package layout:
 
 ## Build/Test Workflow
 
+- You MUST run `make check` AND `make test` before every commit. Do not commit if either fails.
 - `make check` before commits (fmt, vet, staticcheck)
 - `make test` for quick verification
 - `make test-race` for concurrency safety
