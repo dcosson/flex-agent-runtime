@@ -5,7 +5,6 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"h2-agent-runtime/internal/rpc"
 	"h2-agent-runtime/internal/rpc/api"
@@ -14,7 +13,6 @@ import (
 	"h2-agent-runtime/internal/sandbox"
 	"h2-agent-runtime/internal/sandbox/gvisor"
 	"h2-agent-runtime/internal/sandbox/zfs"
-	"h2-agent-runtime/internal/tools"
 )
 
 const baseSnapshot = "tank/bases/repo@initial"
@@ -101,20 +99,6 @@ func createRPCSession(t *testing.T, srv api.SandboxService, id string) *api.Sess
 	return resp.Session
 }
 
-// executeTool is a convenience for tool execution via the RPC client.
-func executeTool(t *testing.T, cl *client.SandboxClient, sessionID string, toolCallID string, toolName string, params map[string]any) *tools.ToolResponse {
-	t.Helper()
-	resp, err := cl.ExecuteTool(context.Background(), sessionID, tools.ToolRequest{
-		ToolCallID: toolCallID,
-		ToolName:   toolName,
-		Params:     params,
-	}, nil)
-	if err != nil {
-		t.Fatalf("ExecuteTool(%q/%q) error: %v", sessionID, toolCallID, err)
-	}
-	return resp
-}
-
 // assertRPCError checks that err is an RPCError with the given code.
 func assertRPCError(t *testing.T, err error, code rpc.Code) {
 	t.Helper()
@@ -128,9 +112,4 @@ func assertRPCError(t *testing.T, err error, code rpc.Code) {
 	if rpcErr.Code != code {
 		t.Fatalf("rpc code = %s, want %s (msg: %s)", rpcErr.Code, code, rpcErr.Message)
 	}
-}
-
-// wallClock returns a time suitable for ordering assertions.
-func wallClock() time.Time {
-	return time.Now()
 }

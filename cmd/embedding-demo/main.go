@@ -48,6 +48,14 @@ func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "embedding-demo",
 		Short: "Embed documents and rank by query similarity",
+		Long: strings.Join([]string{
+			"Embed documents and rank by query similarity.",
+			"",
+			"API key env vars:",
+			"  OPENAI_API_KEY",
+			"  GOOGLE_API_KEY",
+			"  COHERE_API_KEY",
+		}, "\n"),
 	}
 	root.SilenceUsage = true
 	root.CompletionOptions.DisableDefaultCmd = false
@@ -66,6 +74,14 @@ func newRankCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rank",
 		Short: "Embed query + texts and print cosine-similarity ranking",
+		Long: strings.Join([]string{
+			"Embed a query and document texts, then print cosine-similarity ranking.",
+			"",
+			"API key env vars:",
+			"  OPENAI_API_KEY",
+			"  GOOGLE_API_KEY",
+			"  COHERE_API_KEY",
+		}, "\n"),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return runRank(texts, query, modelID, timeout)
 		},

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.starlark.net/starlark"
+	"go.starlark.net/syntax"
 	"h2-agent-runtime/internal/agent"
 	"h2-agent-runtime/internal/ai"
 	"h2-agent-runtime/internal/tools/codeinterp/datastore"
@@ -139,7 +140,7 @@ func (r *Runtime) Execute(ctx context.Context, req ExecuteRequest) (ExecuteResul
 	}
 
 	globals := st.builtins()
-	fileGlobals, err := starlark.ExecFile(thread, "script.star", req.Code, globals)
+	fileGlobals, err := starlark.ExecFileOptions(syntax.LegacyFileOptions(), thread, "script.star", req.Code, globals)
 	if err != nil {
 		return st.finish(nil, err, tier), nil
 	}

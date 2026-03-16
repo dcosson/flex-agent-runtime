@@ -215,9 +215,9 @@ func TestO2_APIVersionPropagation(t *testing.T) {
 		t.Fatalf("API version = %q, want v2", version)
 	}
 
-	// Nil context
-	if v := rpc.APIVersionFromContext(nil); v != "" {
-		t.Fatalf("nil context version = %q, want empty", v)
+	// TODO context
+	if v := rpc.APIVersionFromContext(context.TODO()); v != "" {
+		t.Fatalf("todo context version = %q, want empty", v)
 	}
 
 	// No version set

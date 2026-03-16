@@ -42,6 +42,14 @@ func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "llm-demo",
 		Short: "Interactive LLM demo with calculator tool-use",
+		Long: strings.Join([]string{
+			"Interactive LLM demo with calculator tool-use.",
+			"",
+			"API key env vars:",
+			"  ANTHROPIC_API_KEY",
+			"  OPENAI_API_KEY",
+			"  GOOGLE_API_KEY",
+		}, "\n"),
 	}
 	root.SilenceUsage = true
 	root.CompletionOptions.DisableDefaultCmd = false
@@ -59,6 +67,14 @@ func newChatCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "chat",
 		Short: "Run interactive stdin chat loop",
+		Long: strings.Join([]string{
+			"Run an interactive stdin chat loop with a built-in calculator tool.",
+			"",
+			"API key env vars:",
+			"  ANTHROPIC_API_KEY",
+			"  OPENAI_API_KEY",
+			"  GOOGLE_API_KEY",
+		}, "\n"),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg := chatConfig{
 				Provider: strings.ToLower(strings.TrimSpace(provider)),

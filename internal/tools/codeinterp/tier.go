@@ -26,7 +26,7 @@ func ClassifyTier(code string, req ExecuteRequest) Tier {
 }
 
 func containsRLMCalls(code string) bool {
-	file, err := syntax.Parse("script.star", code, 0)
+	file, err := syntax.LegacyFileOptions().Parse("script.star", code, 0)
 	if err != nil {
 		return strings.Contains(code, "llm_call(") || strings.Contains(code, "llm_batch(")
 	}
