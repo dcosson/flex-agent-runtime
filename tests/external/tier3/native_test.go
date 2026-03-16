@@ -1,11 +1,11 @@
 //go:build native
 
-// Package tier3 contains native-host E2E tests that require a dedicated Linux
-// machine with real ZFS, gVisor (runsc), and optionally live provider API keys.
-// Tests in this package are run nightly on dedicated infrastructure and are
-// gated by the "native" build tag.
+// Package tier3 contains compose-backed external E2E tests that require a
+// dedicated Linux machine with real ZFS, gVisor (runsc), and optionally live
+// provider API keys. The test harness is gated by the "native" build tag and
+// is expected to run with the full compose profile so sandbox-host is available.
 //
-// Run with: go test -tags=native ./tests/external/tier3/...
+// Run with: make test-external-tier3
 package tier3
 
 import (
