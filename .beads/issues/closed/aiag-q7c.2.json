@@ -2,7 +2,7 @@
   "id": "aiag-q7c.2",
   "title": "External testing: Docker environment, E2E scenarios, CI integration",
   "description": "Implement external testing infrastructure from docs/plans/17-external-testing.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nKey deliverables:\n- Docker test environment: multi-stage Dockerfile (minimal/gvisor/full targets)\n- Docker Compose with profile-based services (sandbox-host-minimal/gvisor/full)\n- Usage example code: All Local, Agent in Sandbox, Agent outside Sandbox\n- E2E test scenarios across all placement modes\n- Backend config combination tests (C1-C4)\n- CI tier integration (PR-fast mock-based, PR-standard Docker, Nightly dedicated)\n- Test helpers: requireZFS, requireGVisor, sandboxHostConfig\n- Build tag gating (docker, native, provider_integration)\n\nDepends on: T1 (configurable backends must exist first)\n\nAC: Docker-based E2E tests run for minimal config, all placement modes tested, CI tiers defined.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-q7c",
@@ -30,8 +30,16 @@
       "author": "Danny Cosson",
       "text": "Implementation complete at dea037b. All deliverables done: common helpers (prereq.go, report.go, scenario.go, parity.go), Docker infra (Dockerfile.sandbox-host, docker-compose.e2e.yaml, init-pool.sh), Tier 1 tests (12 tests, all passing), Tier 2 Docker-gated stubs, Tier 3 native-gated stubs, CI workflow (.github/workflows/e2e.yml), Makefile targets (test-external-tier1/2/3). Waiting on R1 review.",
       "created_at": "2026-03-15T17:25:32.138763-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R2 approved at b42c922. All findings addressed. Closing bead.",
+      "created_at": "2026-03-15T17:31:10.921449-07:00"
     }
   ],
   "created_at": "2026-03-15T16:43:10.710564-07:00",
-  "updated_at": "2026-03-15T17:25:32.139707-07:00"
+  "updated_at": "2026-03-15T17:31:10.921621-07:00",
+  "closed_at": "2026-03-15T17:31:10.890821-07:00",
+  "close_reason": "Closed"
 }
