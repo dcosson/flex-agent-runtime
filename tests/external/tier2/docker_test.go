@@ -101,7 +101,7 @@ func mustExecuteTool(t *testing.T, cl *transport.SandboxClient, sessionID, callI
 	return resp.Msg
 }
 
-func TestDockerLifecycle_AllConfigs(t *testing.T) {
+func TestDockerLifecycle_ActiveConfig(t *testing.T) {
 	common.RequireDocker(t)
 	cfg := activeConfig(t)
 	cl := newSandboxClient(t, sandboxHostURL(t))
@@ -116,7 +116,7 @@ func TestDockerLifecycle_AllConfigs(t *testing.T) {
 	}
 }
 
-func TestDockerSnapshot_ZFSConfigs(t *testing.T) {
+func TestDockerSnapshot_ActiveConfig(t *testing.T) {
 	common.RequireDocker(t)
 	cfg := activeConfig(t)
 	cl := newSandboxClient(t, sandboxHostURL(t))
@@ -148,7 +148,7 @@ func TestDockerSnapshot_ZFSConfigs(t *testing.T) {
 	}
 }
 
-func TestDockerTierRouting_GVisorConfigs(t *testing.T) {
+func TestDockerTierRouting_ActiveConfig(t *testing.T) {
 	common.RequireDocker(t)
 	cfg := activeConfig(t)
 	cl := newSandboxClient(t, sandboxHostURL(t))
@@ -175,7 +175,7 @@ func TestDockerTierRouting_GVisorConfigs(t *testing.T) {
 	}
 }
 
-func TestDockerStreamingProgress(t *testing.T) {
+func TestDockerStreaming_ActiveConfig(t *testing.T) {
 	common.RequireDocker(t)
 	cfg := activeConfig(t)
 	cl := newSandboxClient(t, sandboxHostURL(t))
@@ -219,7 +219,7 @@ func TestDockerStreamingProgress(t *testing.T) {
 	_ = progressCount
 }
 
-func TestDockerCapabilities_AllConfigs(t *testing.T) {
+func TestDockerCapabilities_ActiveConfig(t *testing.T) {
 	common.RequireDocker(t)
 	cfg := activeConfig(t)
 	cl := newSandboxClient(t, sandboxHostURL(t))
