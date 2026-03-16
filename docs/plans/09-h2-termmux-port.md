@@ -3,8 +3,6 @@
 **Status:** Approved
 **Depends on:** 01-ai-core (event types), 05-agent (AgentEvent definitions)
 **Depended on by:** 14-mode2-e2e
-**Source:** `~/h2home/projects/h2/internal/session/`
-
 ---
 
 ## 1. Overview

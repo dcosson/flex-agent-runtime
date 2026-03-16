@@ -1,9 +1,0 @@
-actor: ${USER}
-beads_variant: beads-lite
-create.require-description: "false"
-defaults.priority: "2"
-defaults.type: task
-graph.auto_close_parent: "true"
-graph.cascade_parent_blocking: "true"
-hierarchy.max_depth: "3"
-issue_prefix: aiag

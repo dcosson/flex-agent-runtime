@@ -8,3 +8,6 @@ stubserver
 
 # IDE / tool config
 .claude/
+
+# Task tracking (contains personal info)
+.beads/
