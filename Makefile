@@ -74,8 +74,8 @@ help:
 	@echo ""
 	@echo "=== External Tests ==="
 	@echo "  test-external-tier1              Tier 1: mock + stubserver-based, runs anywhere (<30s)"
-	@echo "  test-external-tier2              Tier 2: auto-start Docker compose, run docker-tag tests, auto-teardown"
-	@echo "  test-external-tier3              Tier 3: auto-start Docker compose, run native-tag tests, auto-teardown"
+	@echo "  test-external-tier2              Tier 2: auto-start Docker compose (minimal), run docker-tag tests, auto-teardown"
+	@echo "  test-external-tier3              Tier 3: auto-start Docker compose (full), run native-tag tests, auto-teardown"
 	@echo ""
 	@echo "=== Cleanup ==="
 	@echo "  clean                            Remove temporary test artifacts"
@@ -253,7 +253,14 @@ test-external-tier2:
 		$(GO) test $(GO_TEST_RACE) -v -tags=docker -timeout=5m ./tests/external/tier2/...
 
 test-external-tier3:
-	$(GO) test $(GO_TEST_RACE) -v -tags=native -timeout=20m ./tests/external/tier3/...
+	@set -e; \
+		docker compose -f $(EXTERNAL_COMPOSE_FILE) --profile full up -d --build --wait; \
+		trap 'docker compose -f $(EXTERNAL_COMPOSE_FILE) --profile full down -v' EXIT; \
+		SANDBOX_HOST_URL="http://localhost:8080" \
+		SANDBOX_AUTH_TOKEN="e2e-test-token" \
+		SANDBOX_STORAGE_BACKEND="zfs" \
+		SANDBOX_CONTAINER_RUNTIME="gvisor" \
+		$(GO) test $(GO_TEST_RACE) -v -tags=native -timeout=20m ./tests/external/tier3/...
 
 # ---------------------------------------------------------------------------
 # Cleanup
