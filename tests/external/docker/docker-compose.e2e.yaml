@@ -4,7 +4,7 @@ services:
       context: ../../../
       dockerfile: tests/external/docker/Dockerfile.stubserver
     ports:
-      - "9090:9090"
+      - "19090:9090"
     profiles: ["minimal", "gvisor", "full"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/health"]
