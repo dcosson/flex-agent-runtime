@@ -1,0 +1,31 @@
+# Stage 1: Build the sandbox-host binary
+FROM golang:1.23-bookworm AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /sandbox-host ./cmd/sandbox-host
+
+# Stage 2: Minimal — local-disk + no container runtime
+FROM ubuntu:22.04 AS base-minimal
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=builder /sandbox-host /usr/local/bin/sandbox-host
+EXPOSE 8080
+ENTRYPOINT ["sandbox-host"]
+
+# Stage 3: gVisor — adds runsc
+FROM base-minimal AS base-gvisor
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget gnupg2 && \
+    wget -qO - https://gvisor.dev/archive.key | gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" > /etc/apt/sources.list.d/gvisor.list && \
+    apt-get update && apt-get install -y --no-install-recommends runsc && \
+    rm -rf /var/lib/apt/lists/*
+
+# Stage 4: Full — adds ZFS utilities
+FROM base-gvisor AS base-full
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    zfsutils-linux kmod && \
+    rm -rf /var/lib/apt/lists/*

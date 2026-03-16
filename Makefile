@@ -1,7 +1,7 @@
 GO ?= go
 PKGS := $(shell $(GO) list ./...)
 
-.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-harness-openai test-harness-google test-harness-codeinterp test-harness-e2e-codeinterp test-harness-mode3-fast test-harness-mode3-standard test-harness-mode3-nightly test-harness-runtime-fast test-harness-runtime-standard test-harness-runtime-nightly test-harness-runtime-weekly test-bench test-bench-ai-core test-bench-openai test-bench-google test-bench-codeinterp test-stress-openai test-stress-google test-stress-codeinterp test-stress-e2e-codeinterp test-fuzz test-fuzz-t2 test-anthropic-harness-fast test-anthropic-harness-race test-anthropic-harness-bench test-e2e clean
+.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-harness test-harness-t2 test-harness-openai test-harness-google test-harness-codeinterp test-harness-e2e-codeinterp test-harness-mode3-fast test-harness-mode3-standard test-harness-mode3-nightly test-harness-runtime-fast test-harness-runtime-standard test-harness-runtime-nightly test-harness-runtime-weekly test-bench test-bench-ai-core test-bench-openai test-bench-google test-bench-codeinterp test-stress-openai test-stress-google test-stress-codeinterp test-stress-e2e-codeinterp test-fuzz test-fuzz-t2 test-anthropic-harness-fast test-anthropic-harness-race test-anthropic-harness-bench test-e2e test-external-tier1 test-external-tier2 test-external-tier3 clean
 
 help: ## Show available make targets
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_.-]+:.*##/ {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -127,6 +127,15 @@ test-anthropic-harness-bench: ## Anthropic provider harness benchmark lanes B1-B
 
 test-e2e: ## Run E2E agent + tools scenarios
 	$(GO) test -race ./e2etests/... -count=1 -timeout 120s
+
+test-external-tier1: ## Tier 1 external E2E: mock-based, runs anywhere (<30s)
+	$(GO) test -v -timeout=2m ./e2etests/external/tier1/...
+
+test-external-tier2: ## Tier 2 external E2E: Docker-based sandbox-host tests (requires docker build tag)
+	$(GO) test -v -tags=docker -timeout=5m ./e2etests/external/tier2/...
+
+test-external-tier3: ## Tier 3 external E2E: native host tests (requires native build tag + ZFS/gVisor)
+	$(GO) test -v -tags=native -timeout=20m ./e2etests/external/tier3/...
 
 clean: ## Remove temporary test artifacts
 	rm -f coverage.out coverage.html
