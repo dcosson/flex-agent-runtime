@@ -97,9 +97,19 @@ func TestOptionsHelpers(t *testing.T) {
 	if ClampReasoning(ThinkingXHigh) != ThinkingHigh {
 		t.Fatalf("xhigh should clamp to high")
 	}
+	if ClampReasoning("") != ThinkingMedium {
+		t.Fatalf("empty reasoning should default to medium")
+	}
+	if ClampReasoning(ThinkingLevel("unexpected")) != ThinkingMedium {
+		t.Fatalf("unknown reasoning should default to medium")
+	}
 	max, budget := AdjustMaxTokensForThinking(2000, 3000, ThinkingHigh, nil)
 	if max != 3000 || budget != 1976 {
 		t.Fatalf("unexpected adjust result: max=%d budget=%d", max, budget)
+	}
+	max, budget = AdjustMaxTokensForThinking(2000, 3000, "", nil)
+	if budget < 1024 {
+		t.Fatalf("default reasoning budget should be >= 1024, got %d (max=%d)", budget, max)
 	}
 
 	custom := 500

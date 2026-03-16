@@ -66,10 +66,14 @@ func BuildBaseOptions(model Model, opts *SimpleStreamOptions, apiKey string) Str
 
 // ClampReasoning reduces xhigh to high for providers that do not support xhigh.
 func ClampReasoning(level ThinkingLevel) ThinkingLevel {
-	if level == ThinkingXHigh {
+	switch level {
+	case ThinkingMinimal, ThinkingLow, ThinkingMedium, ThinkingHigh:
+		return level
+	case ThinkingXHigh:
 		return ThinkingHigh
+	default:
+		return ThinkingMedium
 	}
-	return level
 }
 
 // AdjustMaxTokensForThinking computes output max tokens and thinking budget.

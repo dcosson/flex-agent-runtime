@@ -5,16 +5,24 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"h2-agent-runtime/internal/ai"
 	"h2-agent-runtime/internal/ai/provider/anthropic"
 	"h2-agent-runtime/internal/ai/provider/google"
 	"h2-agent-runtime/internal/ai/provider/openai"
+)
+
+const (
+	anthropicProvider = "anthropic"
+	openaiProvider    = "openai"
+	googleProvider    = "google"
 )
 
 type chatConfig struct {
@@ -24,16 +32,65 @@ type chatConfig struct {
 }
 
 func main() {
-	cfg := parseFlags()
+	if err := newRootCmd().Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
 
-	registerChatProviders()
+func newRootCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:   "llm-demo",
+		Short: "Interactive LLM demo with calculator tool-use",
+	}
+	root.SilenceUsage = true
+	root.CompletionOptions.DisableDefaultCmd = false
+
+	root.AddCommand(newChatCmd())
+	root.InitDefaultCompletionCmd()
+	return root
+}
+
+func newChatCmd() *cobra.Command {
+	provider := envOrDefault("LLM_PROVIDER", anthropicProvider)
+	model := strings.TrimSpace(os.Getenv("LLM_MODEL"))
+	timeout := 90 * time.Second
+
+	cmd := &cobra.Command{
+		Use:   "chat",
+		Short: "Run interactive stdin chat loop",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			cfg := chatConfig{
+				Provider: strings.ToLower(strings.TrimSpace(provider)),
+				Model:    strings.TrimSpace(model),
+				Timeout:  timeout,
+			}
+			return runChat(cfg)
+		},
+	}
+	cmd.Flags().StringVar(&provider, "provider", provider, "provider: anthropic|openai|google")
+	cmd.Flags().StringVar(&model, "model", model, "model ID (optional)")
+	cmd.Flags().DurationVar(&timeout, "timeout", timeout, "per-request timeout")
+	return cmd
+}
+
+func runChat(cfg chatConfig) error {
+	available := registerChatProviders()
+	if len(available) == 0 {
+		return fmt.Errorf("no API keys found; set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY")
+	}
+
+	if !contains(available, cfg.Provider) {
+		return fmt.Errorf("provider %q requested but key is not set; available providers: %s", cfg.Provider, strings.Join(available, ", "))
+	}
 
 	model, err := resolveChatModel(cfg.Provider, cfg.Model)
 	if err != nil {
-		fatalf("resolve model: %v", err)
+		return fmt.Errorf("resolve model: %w", err)
 	}
 
 	fmt.Printf("llm-demo started (provider=%s model=%s)\n", model.Provider, model.ID)
+	fmt.Printf("available providers: %s\n", strings.Join(available, ", "))
 	fmt.Println("Type a prompt and press enter. Use /exit to quit.")
 
 	history := make([]ai.Message, 0, 64)
@@ -42,17 +99,17 @@ func main() {
 		fmt.Print("you> ")
 		if !scanner.Scan() {
 			if err := scanner.Err(); err != nil {
-				fatalf("read stdin: %v", err)
+				return fmt.Errorf("read stdin: %w", err)
 			}
 			fmt.Println()
-			return
+			return nil
 		}
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
 		if line == "/exit" || line == "/quit" {
-			return
+			return nil
 		}
 
 		history = append(history, &ai.UserMessage{
@@ -64,16 +121,6 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		}
 	}
-}
-
-func parseFlags() chatConfig {
-	provider := envOrDefault("LLM_PROVIDER", "anthropic")
-	model := os.Getenv("LLM_MODEL")
-	timeout := flag.Duration("timeout", 90*time.Second, "per-request timeout")
-	flag.StringVar(&provider, "provider", provider, "provider: anthropic|openai|google")
-	flag.StringVar(&model, "model", model, "model ID (optional)")
-	flag.Parse()
-	return chatConfig{Provider: strings.TrimSpace(provider), Model: strings.TrimSpace(model), Timeout: *timeout}
 }
 
 func runAssistantTurn(model ai.Model, history *[]ai.Message, timeout time.Duration) error {
@@ -177,7 +224,7 @@ func assistantText(msg ai.AssistantMessage) string {
 func resolveChatModel(provider, modelID string) (ai.Model, error) {
 	p := strings.ToLower(strings.TrimSpace(provider))
 	if p == "" {
-		p = "anthropic"
+		p = anthropicProvider
 	}
 	if modelID == "" {
 		modelID = defaultChatModelID(p)
@@ -193,9 +240,9 @@ func resolveChatModel(provider, modelID string) (ai.Model, error) {
 
 func defaultChatModelID(provider string) string {
 	switch provider {
-	case "openai":
+	case openaiProvider:
 		return "gpt-4o"
-	case "google":
+	case googleProvider:
 		return "gemini-2.5-flash"
 	default:
 		return "claude-sonnet-4-20250514"
@@ -204,47 +251,70 @@ func defaultChatModelID(provider string) string {
 
 func fallbackChatModels() map[string]map[string]ai.Model {
 	return map[string]map[string]ai.Model{
-		"anthropic": {
+		anthropicProvider: {
 			"claude-sonnet-4-20250514": {
 				ID:       "claude-sonnet-4-20250514",
 				API:      "anthropic-messages",
-				Provider: "anthropic",
+				Provider: anthropicProvider,
 			},
 		},
-		"openai": {
+		openaiProvider: {
 			"gpt-4o": {
 				ID:       "gpt-4o",
 				API:      "openai-completions",
-				Provider: "openai",
+				Provider: openaiProvider,
 			},
 		},
-		"google": {
+		googleProvider: {
 			"gemini-2.5-flash": {
 				ID:       "gemini-2.5-flash",
 				API:      "google-genai",
-				Provider: "google",
+				Provider: googleProvider,
 			},
 		},
 	}
 }
 
-func registerChatProviders() {
-	openai.Register(openai.Config{
-		APIKey:  os.Getenv("OPENAI_API_KEY"),
-		BaseURL: os.Getenv("OPENAI_BASE_URL"),
-	}, "cmd-llm-demo")
+func registerChatProviders() []string {
+	available := make([]string, 0, 3)
 
-	google.Register(google.Config{
-		APIKey:  os.Getenv("GOOGLE_API_KEY"),
-		BaseURL: os.Getenv("GOOGLE_BASE_URL"),
-		Version: os.Getenv("GOOGLE_API_VERSION"),
-	}, "cmd-llm-demo")
+	if key := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); key != "" {
+		anthropic.Register(anthropic.Config{
+			APIKey:  key,
+			BaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
+			Version: os.Getenv("ANTHROPIC_VERSION"),
+		}, "cmd-llm-demo")
+		available = append(available, anthropicProvider)
+	}
 
-	anthropic.Register(anthropic.Config{
-		APIKey:  os.Getenv("ANTHROPIC_API_KEY"),
-		BaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
-		Version: os.Getenv("ANTHROPIC_VERSION"),
-	}, "cmd-llm-demo")
+	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
+		openai.Register(openai.Config{
+			APIKey:  key,
+			BaseURL: os.Getenv("OPENAI_BASE_URL"),
+		}, "cmd-llm-demo")
+		available = append(available, openaiProvider)
+	}
+
+	if key := strings.TrimSpace(os.Getenv("GOOGLE_API_KEY")); key != "" {
+		google.Register(google.Config{
+			APIKey:  key,
+			BaseURL: os.Getenv("GOOGLE_BASE_URL"),
+			Version: os.Getenv("GOOGLE_API_VERSION"),
+		}, "cmd-llm-demo")
+		available = append(available, googleProvider)
+	}
+
+	sort.Strings(available)
+	return available
+}
+
+func contains(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }
 
 func envOrDefault(name, fallback string) string {
@@ -253,9 +323,4 @@ func envOrDefault(name, fallback string) string {
 		return fallback
 	}
 	return v
-}
-
-func fatalf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	os.Exit(1)
 }
