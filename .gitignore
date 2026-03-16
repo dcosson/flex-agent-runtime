@@ -1,1 +1,10 @@
 node_modules/
+
+# Build artifacts
+bin/
+llm-demo
+embedding-demo
+stubserver
+
+# IDE / tool config
+.claude/
