@@ -24,6 +24,14 @@
     "plan-doc=17-external-testing"
   ],
   "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implementation complete at dea037b. All deliverables done: common helpers (prereq.go, report.go, scenario.go, parity.go), Docker infra (Dockerfile.sandbox-host, docker-compose.e2e.yaml, init-pool.sh), Tier 1 tests (12 tests, all passing), Tier 2 Docker-gated stubs, Tier 3 native-gated stubs, CI workflow (.github/workflows/e2e.yml), Makefile targets (test-external-tier1/2/3). Waiting on R1 review.",
+      "created_at": "2026-03-15T17:25:32.138763-07:00"
+    }
+  ],
   "created_at": "2026-03-15T16:43:10.710564-07:00",
-  "updated_at": "2026-03-15T17:05:15.429729-07:00"
+  "updated_at": "2026-03-15T17:25:32.139707-07:00"
 }
