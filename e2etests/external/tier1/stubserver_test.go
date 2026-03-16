@@ -173,21 +173,9 @@ func TestStubserver_MultiTurn(t *testing.T) {
 	events := env.Events()
 
 	// Verify we went through the full agent loop.
-	hasToolStarted := false
-	hasToolCompleted := false
 	hasMessageCompleted := false
 	for _, e := range events {
-		switch e.Type {
-		case agent.EventToolStarted:
-			hasToolStarted = true
-			if e.ToolName != "lookup_weather" {
-				// The tool isn't registered so it won't be executed, but
-				// the provider should have emitted a tool call event.
-				// The agent loop handles unknown tools gracefully.
-			}
-		case agent.EventToolCompleted:
-			hasToolCompleted = true
-		case agent.EventAgentMessageCompleted:
+		if e.Type == agent.EventAgentMessageCompleted {
 			hasMessageCompleted = true
 		}
 	}
@@ -204,12 +192,6 @@ func TestStubserver_MultiTurn(t *testing.T) {
 	if len(reqs) == 0 {
 		t.Fatal("stubserver received no requests")
 	}
-
-	// At minimum we should see the provider error or tool error since
-	// lookup_weather isn't a registered tool. But the SSE parsing pipeline
-	// exercised successfully either way.
-	_ = hasToolStarted
-	_ = hasToolCompleted
 }
 
 // --- Auth header propagation test ---
@@ -510,16 +492,20 @@ func TestStubserver_RetrySequence(t *testing.T) {
 
 	events := env.Events()
 
-	// Verify the stubserver received multiple requests (retry attempts).
-	reqs := srv.Requests()
-	if len(reqs) < 2 {
-		t.Logf("stubserver received %d requests", len(reqs))
-		// Even if retry isn't implemented yet, the test documents the expected
-		// behavior. If only 1 request was made, the first 429 caused a
-		// provider error — which is also acceptable behavior to assert on.
+	// The provider does not implement automatic retry, so the first 429
+	// causes a provider error. Assert on the error event.
+	hasProviderError := false
+	for _, e := range events {
+		if e.Type == agent.EventProviderError {
+			hasProviderError = true
+			break
+		}
+	}
+	if !hasProviderError {
+		t.Error("expected provider_error event from first 429 in sequence")
 	}
 
-	// Agent should reach idle either way (after success or error).
+	// Agent should reach idle after the error.
 	hasIdle := false
 	for _, e := range events {
 		if e.Type == agent.EventStateChange && e.State == agent.StateIdle {
