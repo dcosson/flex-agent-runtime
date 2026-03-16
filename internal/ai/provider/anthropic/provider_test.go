@@ -208,6 +208,54 @@ func TestStreamThinkingFixture(t *testing.T) {
 	}
 }
 
+func TestStreamThinkingSignatureDeltaCarriesToNextTurn(t *testing.T) {
+	fixture := "event: message_start\n" +
+		"data: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":10}}}\n\n" +
+		"event: content_block_start\n" +
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n" +
+		"event: content_block_delta\n" +
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Reasoning trace\"}}\n\n" +
+		"event: content_block_delta\n" +
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig-abc123\"}}\n\n" +
+		"event: content_block_stop\n" +
+		"data: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+		"event: message_delta\n" +
+		"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\n" +
+		"event: message_stop\n" +
+		"data: {\"type\":\"message_stop\"}\n\n"
+
+	srv := stubserver.New(stubserver.WithFixture(fixture))
+	defer srv.Close()
+
+	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
+	es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}}}, ai.StreamOptions{})
+	msg, err := es.Drain()
+	if err != nil {
+		t.Fatalf("stream err: %v", err)
+	}
+	if len(msg.Content) != 1 {
+		t.Fatalf("content count: %d", len(msg.Content))
+	}
+	tc, ok := msg.Content[0].(*ai.ThinkingContent)
+	if !ok {
+		t.Fatalf("expected thinking block, got %T", msg.Content[0])
+	}
+	if tc.ThinkingSignature != "sig-abc123" {
+		t.Fatalf("thinking signature mismatch: %q", tc.ThinkingSignature)
+	}
+
+	wire, err := toWireMessage(&msg)
+	if err != nil {
+		t.Fatalf("toWireMessage error: %v", err)
+	}
+	if len(wire.Content) != 1 {
+		t.Fatalf("wire content count: %d", len(wire.Content))
+	}
+	if wire.Content[0].Signature != "sig-abc123" {
+		t.Fatalf("wire signature mismatch: %q", wire.Content[0].Signature)
+	}
+}
+
 func TestStreamAPIErrorFixture(t *testing.T) {
 	fixture := "event: error\n" +
 		"data: {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"rate limited\"}}\n\n"

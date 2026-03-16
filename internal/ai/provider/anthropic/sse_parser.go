@@ -191,6 +191,15 @@ func (p *sseProcessor) onBlockDelta(e wireContentBlockDeltaEvent) error {
 			b.ThinkingSignature = e.Delta.Signature
 		}
 		p.es.Send(ai.AssistantMessageEvent{Type: ai.EventThinkingDelta, ContentIndex: e.Index, Delta: e.Delta.Thinking, Partial: p.acc.partial()})
+	case "signature_delta":
+		b, ok := p.acc.blocks[e.Index].(*ai.ThinkingContent)
+		if !ok {
+			b = &ai.ThinkingContent{}
+			p.acc.blocks[e.Index] = b
+		}
+		if e.Delta.Signature != "" {
+			b.ThinkingSignature = e.Delta.Signature
+		}
 	case "input_json_delta":
 		state, ok := p.acc.toolStates[e.Index]
 		if !ok {
