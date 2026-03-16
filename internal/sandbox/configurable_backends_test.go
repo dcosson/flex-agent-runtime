@@ -79,6 +79,22 @@ func TestNewSandboxHostService_BackendCombinations(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "invalid unknown storage backend",
+			cfg: ServiceConfig{
+				StorageBackend:   StorageBackend("invalid"),
+				ContainerRuntime: ContainerRuntimeNone,
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid empty container runtime",
+			cfg: ServiceConfig{
+				StorageBackend:  StorageBackendLocalDisk,
+				SessionsRootDir: t.TempDir(),
+			},
+			wantErr: true,
+		},
+		{
 			name: "invalid gvisor without manager",
 			cfg: func() ServiceConfig {
 				c := DefaultServiceConfig()

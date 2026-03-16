@@ -91,7 +91,7 @@ func TestST3_RapidEnvironmentSwitching(t *testing.T) {
 		envs = append(envs, localEnv)
 	}
 	for i := 0; i < perType; i++ {
-		nativeEnv := native.NewNativeSandboxEnvironment(newComplianceMockService(), slog.Default())
+		nativeEnv := native.NewNativeSandboxEnvironment(newComplianceMockService(), native.DefaultConfig(), slog.Default())
 		if err := nativeEnv.Create(ctx, environment.SessionConfig{SessionID: fmt.Sprintf("native-%d", i)}); err != nil {
 			t.Fatalf("native create: %v", err)
 		}
@@ -127,7 +127,7 @@ func TestST4_SessionLimitEnforcement(t *testing.T) {
 	if environment.LocalCapabilities.ConcurrentSessions != 0 {
 		t.Fatalf("LocalCapabilities.ConcurrentSessions = %d, want 0", environment.LocalCapabilities.ConcurrentSessions)
 	}
-	nativeEnv := native.NewNativeSandboxEnvironment(newComplianceMockService(), slog.Default())
+	nativeEnv := native.NewNativeSandboxEnvironment(newComplianceMockService(), native.DefaultConfig(), slog.Default())
 	if nativeEnv.Capabilities().ConcurrentSessions != 0 {
 		t.Fatalf("native capabilities ConcurrentSessions = %d, want 0", nativeEnv.Capabilities().ConcurrentSessions)
 	}

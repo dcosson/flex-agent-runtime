@@ -30,11 +30,7 @@ type NativeSandboxEnvironment struct {
 	destroyed atomic.Bool
 }
 
-func NewNativeSandboxEnvironment(service api.SandboxService, logger *slog.Logger, cfg ...NativeSandboxConfig) *NativeSandboxEnvironment {
-	config := DefaultConfig()
-	if len(cfg) > 0 {
-		config = cfg[0]
-	}
+func NewNativeSandboxEnvironment(service api.SandboxService, config NativeSandboxConfig, logger *slog.Logger) *NativeSandboxEnvironment {
 	return &NativeSandboxEnvironment{service: service, logger: logger, config: config}
 }
 

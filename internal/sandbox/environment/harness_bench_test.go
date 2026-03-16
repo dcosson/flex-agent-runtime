@@ -22,7 +22,7 @@ func BenchmarkB1_EnvironmentSelectionLatency(b *testing.B) {
 
 func BenchmarkB2_NativeAdapterOverhead(b *testing.B) {
 	svc := newComplianceMockService()
-	env := native.NewNativeSandboxEnvironment(svc, slog.Default())
+	env := native.NewNativeSandboxEnvironment(svc, native.DefaultConfig(), slog.Default())
 	if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "bench-native"}); err != nil {
 		b.Fatalf("create env: %v", err)
 	}

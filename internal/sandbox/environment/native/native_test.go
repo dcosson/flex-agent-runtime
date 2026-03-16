@@ -218,7 +218,7 @@ func (r *mockStreamReceiver) Close() error {
 
 func TestCreate_Success(t *testing.T) {
 	svc := newMockService()
-	env := NewNativeSandboxEnvironment(svc, slog.Default())
+	env := NewNativeSandboxEnvironment(svc, DefaultConfig(), slog.Default())
 
 	err := env.Create(context.Background(), environment.SessionConfig{
 		SessionID: "sess-1",
@@ -244,7 +244,7 @@ func TestCreate_Success(t *testing.T) {
 
 func TestCreate_EmptySessionID(t *testing.T) {
 	svc := newMockService()
-	env := NewNativeSandboxEnvironment(svc, slog.Default())
+	env := NewNativeSandboxEnvironment(svc, DefaultConfig(), slog.Default())
 	err := env.Create(context.Background(), environment.SessionConfig{})
 	if err == nil {
 		t.Fatal("Create() with empty SessionID should fail")
@@ -257,7 +257,7 @@ func TestCreate_EmptySessionID(t *testing.T) {
 func TestCreate_RPCError(t *testing.T) {
 	svc := newMockService()
 	svc.createErr = fmt.Errorf("connection refused")
-	env := NewNativeSandboxEnvironment(svc, slog.Default())
+	env := NewNativeSandboxEnvironment(svc, DefaultConfig(), slog.Default())
 
 	err := env.Create(context.Background(), environment.SessionConfig{SessionID: "sess-1"})
 	if err == nil {
@@ -376,7 +376,7 @@ func TestDestroy_RPCError(t *testing.T) {
 
 func TestState_BeforeCreate(t *testing.T) {
 	svc := newMockService()
-	env := NewNativeSandboxEnvironment(svc, slog.Default())
+	env := NewNativeSandboxEnvironment(svc, DefaultConfig(), slog.Default())
 
 	if got := env.State(); got != environment.StateCreating {
 		t.Fatalf("State() before Create = %q, want %q", got, environment.StateCreating)
@@ -427,7 +427,7 @@ func TestState_RPCError_ReturnsFailed(t *testing.T) {
 // =====================================================================
 
 func TestCapabilities(t *testing.T) {
-	env := NewNativeSandboxEnvironment(newMockService(), slog.Default())
+	env := NewNativeSandboxEnvironment(newMockService(), DefaultConfig(), slog.Default())
 	caps := env.Capabilities()
 
 	if !caps.Snapshots {
@@ -460,10 +460,10 @@ func TestCapabilities(t *testing.T) {
 }
 
 func TestCapabilities_FromConfig(t *testing.T) {
-	env := NewNativeSandboxEnvironment(newMockService(), slog.Default(), NativeSandboxConfig{
+	env := NewNativeSandboxEnvironment(newMockService(), NativeSandboxConfig{
 		StorageBackend:   StorageBackendLocalDisk,
 		ContainerRuntime: ContainerRuntimeNone,
-	})
+	}, slog.Default())
 	caps := env.Capabilities()
 	if caps.Snapshots {
 		t.Fatal("Snapshots should be false for local-disk")
@@ -483,10 +483,10 @@ func TestCreate_CapabilityNegotiationMismatchSnapshots(t *testing.T) {
 	svc := newMockService()
 	svc.serverCaps.Snapshots = false
 	svc.serverCaps.Rollback = false
-	env := NewNativeSandboxEnvironment(svc, slog.Default(), NativeSandboxConfig{
+	env := NewNativeSandboxEnvironment(svc, NativeSandboxConfig{
 		StorageBackend:   StorageBackendZFS,
 		ContainerRuntime: ContainerRuntimeGVisor,
-	})
+	}, slog.Default())
 	err := env.Create(context.Background(), environment.SessionConfig{SessionID: "sess-1"})
 	if err == nil {
 		t.Fatal("expected mismatch error")
@@ -499,10 +499,10 @@ func TestCreate_CapabilityNegotiationMismatchSnapshots(t *testing.T) {
 func TestCreate_CapabilityNegotiationMismatchTierRouting(t *testing.T) {
 	svc := newMockService()
 	svc.serverCaps.TierRouting = false
-	env := NewNativeSandboxEnvironment(svc, slog.Default(), NativeSandboxConfig{
+	env := NewNativeSandboxEnvironment(svc, NativeSandboxConfig{
 		StorageBackend:   StorageBackendZFS,
 		ContainerRuntime: ContainerRuntimeGVisor,
-	})
+	}, slog.Default())
 	err := env.Create(context.Background(), environment.SessionConfig{SessionID: "sess-1"})
 	if err == nil {
 		t.Fatal("expected mismatch error")
@@ -773,10 +773,10 @@ func TestCreateSnapshot_RPCError(t *testing.T) {
 
 func TestCreateSnapshot_NonZFSCapability(t *testing.T) {
 	svc := newMockService()
-	env := NewNativeSandboxEnvironment(svc, slog.Default(), NativeSandboxConfig{
+	env := NewNativeSandboxEnvironment(svc, NativeSandboxConfig{
 		StorageBackend:   StorageBackendLocalDisk,
 		ContainerRuntime: ContainerRuntimeNone,
-	})
+	}, slog.Default())
 	if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "sess-1"}); err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
@@ -814,10 +814,10 @@ func TestRollback_RPCError(t *testing.T) {
 
 func TestRollback_NonZFSCapability(t *testing.T) {
 	svc := newMockService()
-	env := NewNativeSandboxEnvironment(svc, slog.Default(), NativeSandboxConfig{
+	env := NewNativeSandboxEnvironment(svc, NativeSandboxConfig{
 		StorageBackend:   StorageBackendLocalDisk,
 		ContainerRuntime: ContainerRuntimeNone,
-	})
+	}, slog.Default())
 	if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "sess-1"}); err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
@@ -835,7 +835,7 @@ func TestFullLifecycle(t *testing.T) {
 	svc.streamMessages = []*api.ExecuteToolStreamMessage{
 		{Response: &api.ExecuteToolResponse{Content: "tool result"}},
 	}
-	env := NewNativeSandboxEnvironment(svc, slog.Default())
+	env := NewNativeSandboxEnvironment(svc, DefaultConfig(), slog.Default())
 	ctx := context.Background()
 
 	// Create
@@ -905,7 +905,7 @@ func TestErrorWrapping_PreservesOriginal(t *testing.T) {
 	origErr := fmt.Errorf("original error")
 	svc := newMockService()
 	svc.createErr = origErr
-	env := NewNativeSandboxEnvironment(svc, slog.Default())
+	env := NewNativeSandboxEnvironment(svc, DefaultConfig(), slog.Default())
 
 	err := env.Create(context.Background(), environment.SessionConfig{SessionID: "sess-1"})
 	if err == nil {
@@ -922,7 +922,7 @@ func TestErrorWrapping_PreservesOriginal(t *testing.T) {
 
 func createTestEnv(t *testing.T, svc *mockSandboxService, sessionID string) *NativeSandboxEnvironment {
 	t.Helper()
-	env := NewNativeSandboxEnvironment(svc, slog.Default())
+	env := NewNativeSandboxEnvironment(svc, DefaultConfig(), slog.Default())
 	if err := env.Create(context.Background(), environment.SessionConfig{SessionID: sessionID}); err != nil {
 		t.Fatalf("setup Create: %v", err)
 	}

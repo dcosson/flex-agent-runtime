@@ -92,8 +92,17 @@ func NewSandboxHostService(cfg ServiceConfig, z zfs.ZFSManager, g gvisor.GVisorM
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if cfg.SnapshotPrefix == "" {
-		cfg = mergeDefaultConfig(cfg)
+	cfg = mergeDefaultConfig(cfg)
+
+	switch cfg.StorageBackend {
+	case StorageBackendZFS, StorageBackendLocalDisk:
+	default:
+		return nil, fmt.Errorf("sandbox: unknown storage_backend: %q", cfg.StorageBackend)
+	}
+	switch cfg.ContainerRuntime {
+	case ContainerRuntimeGVisor, ContainerRuntimeNone:
+	default:
+		return nil, fmt.Errorf("sandbox: unknown container_runtime: %q", cfg.ContainerRuntime)
 	}
 	if cfg.StorageBackend == StorageBackendZFS && z == nil {
 		return nil, fmt.Errorf("sandbox: storage_backend is %q but ZFSManager is nil", cfg.StorageBackend)
@@ -109,12 +118,6 @@ func NewSandboxHostService(cfg ServiceConfig, z zfs.ZFSManager, g gvisor.GVisorM
 
 func mergeDefaultConfig(cfg ServiceConfig) ServiceConfig {
 	d := DefaultServiceConfig()
-	if cfg.StorageBackend == "" {
-		cfg.StorageBackend = d.StorageBackend
-	}
-	if cfg.ContainerRuntime == "" {
-		cfg.ContainerRuntime = d.ContainerRuntime
-	}
 	if cfg.SnapshotPrefix == "" {
 		cfg.SnapshotPrefix = d.SnapshotPrefix
 	}

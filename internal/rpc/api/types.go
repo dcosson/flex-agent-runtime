@@ -20,13 +20,11 @@ type CreateSessionResponse struct {
 }
 
 type Capabilities struct {
-	Snapshots          bool
-	Rollback           bool
-	Pause              bool
-	StreamingProgress  bool
-	TierRouting        bool
-	MaxSessionDuration time.Duration
-	ConcurrentSessions int
+	Snapshots         bool
+	Rollback          bool
+	Pause             bool
+	StreamingProgress bool
+	TierRouting       bool
 }
 
 type GetSessionRequest struct {

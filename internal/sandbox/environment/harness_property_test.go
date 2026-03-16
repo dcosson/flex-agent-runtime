@@ -29,7 +29,7 @@ func newLocalHarnessEnv(t *testing.T) (environment.ExecutionEnvironment, string)
 func newNativeHarnessEnv(t *testing.T) environment.ExecutionEnvironment {
 	t.Helper()
 	svc := newComplianceMockService()
-	env := native.NewNativeSandboxEnvironment(svc, slog.Default())
+	env := native.NewNativeSandboxEnvironment(svc, native.DefaultConfig(), slog.Default())
 	if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "native-harness"}); err != nil {
 		t.Fatalf("create native env: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestP4_CapabilitiesStatic(t *testing.T) {
 func TestP5_NativeSandboxParityWithDirectServicePath(t *testing.T) {
 	ctx := context.Background()
 	svc := newComplianceMockService()
-	env := native.NewNativeSandboxEnvironment(svc, slog.Default())
+	env := native.NewNativeSandboxEnvironment(svc, native.DefaultConfig(), slog.Default())
 	if err := env.Create(ctx, environment.SessionConfig{SessionID: "native-parity"}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}

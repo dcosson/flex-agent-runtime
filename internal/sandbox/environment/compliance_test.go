@@ -286,7 +286,7 @@ func (s *complianceMockStream) Close() error { return nil }
 
 func TestNativeEnvironmentComplianceSuite(t *testing.T) {
 	factory := func(t *testing.T) environment.ExecutionEnvironment {
-		return native.NewNativeSandboxEnvironment(newComplianceMockService(), slog.Default())
+		return native.NewNativeSandboxEnvironment(newComplianceMockService(), native.DefaultConfig(), slog.Default())
 	}
 	config := environment.SessionConfig{SessionID: "native-compliance"}
 	readReq := environment.ToolRequest{

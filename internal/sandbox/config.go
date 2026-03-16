@@ -25,7 +25,8 @@ const (
 
 var sessionIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 
-func validateSessionIDForPath(sessionID string) error {
+// ValidateSessionID validates session ids used in filesystem-backed storage.
+func ValidateSessionID(sessionID string) error {
 	if !sessionIDPattern.MatchString(sessionID) {
 		return fmt.Errorf("invalid session_id %q: must match %s", sessionID, sessionIDPattern.String())
 	}
@@ -36,7 +37,7 @@ func validateSessionIDForPath(sessionID string) error {
 }
 
 func safeSessionPath(rootDir, sessionID string) (string, error) {
-	if err := validateSessionIDForPath(sessionID); err != nil {
+	if err := ValidateSessionID(sessionID); err != nil {
 		return "", err
 	}
 	cleanRoot := filepath.Clean(rootDir)

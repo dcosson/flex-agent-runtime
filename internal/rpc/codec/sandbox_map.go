@@ -26,13 +26,11 @@ func ToCreateSessionRequest(req *api.CreateSessionRequest) sandbox.CreateSession
 
 func FromEnvironmentCapabilities(c environment.Capabilities) api.Capabilities {
 	return api.Capabilities{
-		Snapshots:          c.Snapshots,
-		Rollback:           c.Rollback,
-		Pause:              c.Pause,
-		StreamingProgress:  c.StreamingProgress,
-		TierRouting:        c.TierRouting,
-		MaxSessionDuration: c.MaxSessionDuration,
-		ConcurrentSessions: c.ConcurrentSessions,
+		Snapshots:         c.Snapshots,
+		Rollback:          c.Rollback,
+		Pause:             c.Pause,
+		StreamingProgress: c.StreamingProgress,
+		TierRouting:       c.TierRouting,
 	}
 }
 

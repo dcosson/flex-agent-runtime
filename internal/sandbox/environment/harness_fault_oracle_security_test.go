@@ -19,7 +19,7 @@ func TestF1_NativeRPCFailureHandling(t *testing.T) {
 	t.Run("stream open failure", func(t *testing.T) {
 		svc := newComplianceMockService()
 		svc.streamErr = fmt.Errorf("connection refused")
-		env := native.NewNativeSandboxEnvironment(svc, slog.Default())
+		env := native.NewNativeSandboxEnvironment(svc, native.DefaultConfig(), slog.Default())
 		if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "f1-open"}); err != nil {
 			t.Fatalf("create env: %v", err)
 		}
@@ -33,7 +33,7 @@ func TestF1_NativeRPCFailureHandling(t *testing.T) {
 		svc := newComplianceMockService()
 		svc.streamRecvErr = fmt.Errorf("stream interrupted")
 		svc.streamProgressOnly = true
-		env := native.NewNativeSandboxEnvironment(svc, slog.Default())
+		env := native.NewNativeSandboxEnvironment(svc, native.DefaultConfig(), slog.Default())
 		if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "f1-recv"}); err != nil {
 			t.Fatalf("create env: %v", err)
 		}
@@ -47,7 +47,7 @@ func TestF1_NativeRPCFailureHandling(t *testing.T) {
 func TestF2_CreateFailureRecovery(t *testing.T) {
 	svc := newComplianceMockService()
 	svc.streamErr = fmt.Errorf("unavailable")
-	env := native.NewNativeSandboxEnvironment(svc, slog.Default())
+	env := native.NewNativeSandboxEnvironment(svc, native.DefaultConfig(), slog.Default())
 	if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "f2"}); err != nil {
 		t.Fatalf("create should succeed with compliance service: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestF2_CreateFailureRecovery(t *testing.T) {
 func TestF3_ContextCancellationMidExecution(t *testing.T) {
 	svc := newComplianceMockService()
 	svc.streamErr = context.Canceled
-	env := native.NewNativeSandboxEnvironment(svc, slog.Default())
+	env := native.NewNativeSandboxEnvironment(svc, native.DefaultConfig(), slog.Default())
 	if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "f3"}); err != nil {
 		t.Fatalf("create env: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestF4_ResponseTypeMappingErrorPath(t *testing.T) {
 	svc := newComplianceMockService()
 	svc.streamRecvErr = fmt.Errorf("eof")
 	svc.streamProgressOnly = true
-	env := native.NewNativeSandboxEnvironment(svc, slog.Default())
+	env := native.NewNativeSandboxEnvironment(svc, native.DefaultConfig(), slog.Default())
 	if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "f4"}); err != nil {
 		t.Fatalf("create env: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestF4_ResponseTypeMappingErrorPath(t *testing.T) {
 
 func TestO1_O2_NativeTypeMappingGolden(t *testing.T) {
 	svc := newComplianceMockService()
-	env := native.NewNativeSandboxEnvironment(svc, slog.Default())
+	env := native.NewNativeSandboxEnvironment(svc, native.DefaultConfig(), slog.Default())
 	if err := env.Create(context.Background(), environment.SessionConfig{
 		SessionID: "golden",
 		BaseImage: "pool/base@v1",
@@ -119,7 +119,7 @@ func TestSEC1_SessionIDValidation(t *testing.T) {
 		t.Fatal("local Create() should reject empty SessionID")
 	}
 
-	nativeEnv := native.NewNativeSandboxEnvironment(newComplianceMockService(), slog.Default())
+	nativeEnv := native.NewNativeSandboxEnvironment(newComplianceMockService(), native.DefaultConfig(), slog.Default())
 	if err := nativeEnv.Create(context.Background(), environment.SessionConfig{}); err == nil {
 		t.Fatal("native Create() should reject empty SessionID")
 	}

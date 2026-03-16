@@ -14,7 +14,10 @@ import (
 
 func TestMergeDefaultConfig(t *testing.T) {
 	// mergeDefaultConfig is called when SnapshotPrefix is empty
-	cfg := ServiceConfig{} // all zero values
+	cfg := ServiceConfig{
+		StorageBackend:   StorageBackendZFS,
+		ContainerRuntime: ContainerRuntimeGVisor,
+	}
 	svc, err := NewSandboxHostService(cfg, zfs.NewMockManager(), newMockGVisor(), nil)
 	if err != nil {
 		t.Fatalf("NewSandboxHostService: %v", err)
