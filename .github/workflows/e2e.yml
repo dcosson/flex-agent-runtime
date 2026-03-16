@@ -13,8 +13,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
-      - run: go test -v -timeout=2m ./e2etests/external/tier1/...
+          go-version: '1.24'
+      - run: go test -v -timeout=2m ./tests/external/tier1/...
 
   tier2-docker-minimal:
     name: "Tier 2: Docker E2E (local-disk + none)"
@@ -25,13 +25,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
       - name: Start sandbox-host container (minimal)
         run: |
-          docker compose -f e2etests/external/docker/docker-compose.e2e.yaml --profile minimal \
+          docker compose -f tests/external/docker/docker-compose.e2e.yaml --profile minimal \
             up -d --build --wait
       - name: Run Tier 2 tests against container
-        run: go test -v -tags=docker -timeout=5m ./e2etests/external/tier2/...
+        run: go test -v -tags=docker -timeout=5m ./tests/external/tier2/...
         env:
           SANDBOX_HOST_URL: "http://localhost:8080"
           SANDBOX_AUTH_TOKEN: "e2e-test-token"
@@ -40,7 +40,7 @@ jobs:
       - name: Stop containers
         if: always()
         run: |
-          docker compose -f e2etests/external/docker/docker-compose.e2e.yaml --profile minimal down -v
+          docker compose -f tests/external/docker/docker-compose.e2e.yaml --profile minimal down -v
 
   tier2-docker-full:
     name: "Tier 2: Docker E2E (ZFS + gVisor)"
@@ -51,16 +51,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
       - name: Load ZFS kernel module
         run: sudo modprobe zfs || echo "ZFS module not available; skipping"
       - name: Run full Docker E2E
         run: |
           if lsmod | grep -q zfs; then
-            docker compose -f e2etests/external/docker/docker-compose.e2e.yaml --profile full \
+            docker compose -f tests/external/docker/docker-compose.e2e.yaml --profile full \
               up -d --build --wait
-            go test -v -tags=docker -timeout=5m ./e2etests/external/tier2/... || EXIT=$?
-            docker compose -f e2etests/external/docker/docker-compose.e2e.yaml --profile full down -v
+            go test -v -tags=docker -timeout=5m ./tests/external/tier2/... || EXIT=$?
+            docker compose -f tests/external/docker/docker-compose.e2e.yaml --profile full down -v
             exit ${EXIT:-0}
           else
             echo "::warning::ZFS kernel module not available. Skipping full Tier 2 tests."
@@ -80,9 +80,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
       - name: Run native E2E
-        run: go test -v -tags=native -timeout=20m ./e2etests/external/tier3/...
+        run: go test -v -tags=native -timeout=20m ./tests/external/tier3/...
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -91,4 +91,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-report
-          path: e2etests/external/reports/
+          path: tests/external/reports/
