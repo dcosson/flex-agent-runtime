@@ -13,10 +13,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/ai/provider/anthropic"
-	"flex-agent-runtime/internal/ai/provider/google"
-	"flex-agent-runtime/internal/ai/provider/openai"
+	"flex-agent-runtime/ai"
+	provideranthropic "flex-agent-runtime/ai/provider/anthropic"
+	providergoogle "flex-agent-runtime/ai/provider/google"
+	provideropenai "flex-agent-runtime/ai/provider/openai"
 )
 
 const (
@@ -49,6 +49,12 @@ func newRootCmd() *cobra.Command {
 			"  ANTHROPIC_API_KEY",
 			"  OPENAI_API_KEY",
 			"  GOOGLE_API_KEY",
+			"",
+			"Base URL env vars (optional, for compatible endpoints):",
+			"  ANTHROPIC_BASE_URL",
+			"  OPENAI_BASE_URL",
+			"  GOOGLE_BASE_URL",
+			"  GOOGLE_API_VERSION",
 		}, "\n"),
 	}
 	root.SilenceUsage = true
@@ -74,6 +80,12 @@ func newChatCmd() *cobra.Command {
 			"  ANTHROPIC_API_KEY",
 			"  OPENAI_API_KEY",
 			"  GOOGLE_API_KEY",
+			"",
+			"Base URL env vars (optional, for compatible endpoints):",
+			"  ANTHROPIC_BASE_URL",
+			"  OPENAI_BASE_URL",
+			"  GOOGLE_BASE_URL",
+			"  GOOGLE_API_VERSION",
 		}, "\n"),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg := chatConfig{
@@ -331,7 +343,7 @@ func registerChatProviders() []string {
 	available := make([]string, 0, 3)
 
 	if key := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); key != "" {
-		anthropic.Register(anthropic.Config{
+		provideranthropic.Register(provideranthropic.Config{
 			APIKey:  key,
 			BaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
 			Version: os.Getenv("ANTHROPIC_VERSION"),
@@ -340,7 +352,7 @@ func registerChatProviders() []string {
 	}
 
 	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
-		openai.Register(openai.Config{
+		provideropenai.Register(provideropenai.Config{
 			APIKey:  key,
 			BaseURL: os.Getenv("OPENAI_BASE_URL"),
 		}, "cmd-llm-demo")
@@ -348,7 +360,7 @@ func registerChatProviders() []string {
 	}
 
 	if key := strings.TrimSpace(os.Getenv("GOOGLE_API_KEY")); key != "" {
-		google.Register(google.Config{
+		providergoogle.Register(providergoogle.Config{
 			APIKey:  key,
 			BaseURL: os.Getenv("GOOGLE_BASE_URL"),
 			Version: os.Getenv("GOOGLE_API_VERSION"),

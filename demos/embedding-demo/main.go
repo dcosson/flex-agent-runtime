@@ -12,10 +12,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/ai/provider/cohere"
-	"flex-agent-runtime/internal/ai/provider/google"
-	"flex-agent-runtime/internal/ai/provider/openai"
+	"flex-agent-runtime/ai"
+	providercohere "flex-agent-runtime/ai/provider/cohere"
+	providergoogle "flex-agent-runtime/ai/provider/google"
+	provideropenai "flex-agent-runtime/ai/provider/openai"
 )
 
 const (
@@ -55,6 +55,12 @@ func newRootCmd() *cobra.Command {
 			"  OPENAI_API_KEY",
 			"  GOOGLE_API_KEY",
 			"  COHERE_API_KEY",
+			"",
+			"Base URL env vars (optional, for compatible endpoints):",
+			"  OPENAI_BASE_URL",
+			"  GOOGLE_BASE_URL",
+			"  GOOGLE_API_VERSION",
+			"  COHERE_BASE_URL",
 		}, "\n"),
 	}
 	root.SilenceUsage = true
@@ -81,6 +87,12 @@ func newRankCmd() *cobra.Command {
 			"  OPENAI_API_KEY",
 			"  GOOGLE_API_KEY",
 			"  COHERE_API_KEY",
+			"",
+			"Base URL env vars (optional, for compatible endpoints):",
+			"  OPENAI_BASE_URL",
+			"  GOOGLE_BASE_URL",
+			"  GOOGLE_API_VERSION",
+			"  COHERE_BASE_URL",
 		}, "\n"),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return runRank(texts, query, modelID, timeout)
@@ -165,7 +177,7 @@ func registerEmbeddingProviders() []string {
 	available := make([]string, 0, 3)
 
 	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
-		openai.RegisterEmbedding(openai.Config{
+		provideropenai.RegisterEmbedding(provideropenai.Config{
 			APIKey:  key,
 			BaseURL: os.Getenv("OPENAI_BASE_URL"),
 		}, "cmd-embedding-demo")
@@ -173,7 +185,7 @@ func registerEmbeddingProviders() []string {
 	}
 
 	if key := strings.TrimSpace(os.Getenv("GOOGLE_API_KEY")); key != "" {
-		google.RegisterEmbedding(google.Config{
+		providergoogle.RegisterEmbedding(providergoogle.Config{
 			APIKey:  key,
 			BaseURL: os.Getenv("GOOGLE_BASE_URL"),
 			Version: os.Getenv("GOOGLE_API_VERSION"),
@@ -182,7 +194,7 @@ func registerEmbeddingProviders() []string {
 	}
 
 	if key := strings.TrimSpace(os.Getenv("COHERE_API_KEY")); key != "" {
-		cohere.RegisterEmbedding(cohere.Config{
+		providercohere.RegisterEmbedding(providercohere.Config{
 			APIKey:  key,
 			BaseURL: os.Getenv("COHERE_BASE_URL"),
 		}, "cmd-embedding-demo")

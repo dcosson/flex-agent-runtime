@@ -3,7 +3,7 @@
 **Status:** Complete
 **Parent plan:** [01-ai-core](./01-ai-core.md)
 **Depends on:** [01-ai-core.add01](./01-ai-core.add01.md), provider implementations in 02/03/04
-**Implements:** `cmd/llm-demo`, `cmd/embedding-demo`, demo build targets in `Makefile`
+**Implements:** `demos/llm-demo`, `demos/embedding-demo`, demo build targets in `Makefile`
 
 ---
 
@@ -26,7 +26,7 @@ These demos are for manual validation and developer smoke testing, not product U
 
 ---
 
-## 3. `llm-demo` Design
+## 3. `llm-demo` Design (`demos/llm-demo`)
 
 ### 3.1 Runtime Flow
 
@@ -57,7 +57,7 @@ Error behavior:
 
 ---
 
-## 4. `embedding-demo` Design
+## 4. `embedding-demo` Design (`demos/embedding-demo`)
 
 ### 4.1 Runtime Flow
 
@@ -80,8 +80,8 @@ Error behavior:
 
 `Makefile` adds:
 
-- `build-llm-demo`: `go build -o bin/llm-demo ./cmd/llm-demo`
-- `build-embedding-demo`: `go build -o bin/embedding-demo ./cmd/embedding-demo`
+- `build-llm-demo`: `go build -o bin/llm-demo ./demos/llm-demo`
+- `build-embedding-demo`: `go build -o bin/embedding-demo ./demos/embedding-demo`
 
 Help output includes both targets.
 
@@ -89,7 +89,7 @@ Help output includes both targets.
 
 ## 6. Acceptance Criteria
 
-- `cmd/llm-demo` compiles and can complete a multi-turn conversation with calculator tool-use against configured provider.
-- `cmd/embedding-demo` compiles and ranks input texts by similarity to query using configured embedding model.
+- `demos/llm-demo` compiles and can complete a multi-turn conversation with calculator tool-use against configured provider.
+- `demos/embedding-demo` compiles and ranks input texts by similarity to query using configured embedding model.
 - Demo code includes focused unit tests for arithmetic evaluation and cosine/ranking helpers.
 - `Makefile help` documents both new build targets.

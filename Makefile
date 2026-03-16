@@ -92,11 +92,11 @@ build: build-llm-demo build-embedding-demo build-stubserver build-sandbox-host
 
 build-llm-demo:
 	@mkdir -p bin
-	$(GO) build -o bin/llm-demo ./cmd/llm-demo
+	$(GO) build -o bin/llm-demo ./demos/llm-demo
 
 build-embedding-demo:
 	@mkdir -p bin
-	$(GO) build -o bin/embedding-demo ./cmd/embedding-demo
+	$(GO) build -o bin/embedding-demo ./demos/embedding-demo
 
 build-stubserver:
 	@mkdir -p bin
