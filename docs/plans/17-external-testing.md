@@ -1,6 +1,6 @@
 # 17: External / End-to-End Testing Plan
 
-**Status:** Complete
+**Status:** Partial (Sections 1-11 complete; Section 12 planned, not yet implemented)
 **Depends on:** 08-agent-tools-e2e, 14-mode3-e2e, 15-mode2-e2e, 16-runtime-test-harness, 11-sandbox-host-service.add01, 11-sandbox-host-service.add02
 **Depended on by:** --
 **Scope:** External E2E testing strategy covering usage examples, Docker-based CI, dedicated host testing, mock-based testing, and CI integration across all placement modes.
@@ -1139,7 +1139,11 @@ For Docker-based Tier 2 and Tier 3 tests, the stubserver must run as its own con
 
 #### Standalone Binary
 
-Create a `cmd/stubserver/main.go` that wraps the library stubserver in a standalone HTTP server:
+Create a `cmd/stubserver/main.go` that wraps the library stubserver in a standalone HTTP server.
+
+Note: `stubserver.Server` does not implement `http.Handler` -- it wraps an `httptest.Server` internally and stores the handler in an unexported field. The standalone binary must use a new `NewHandler(opts ...Option) http.Handler` constructor that returns just the capture-wrapping handler without starting an `httptest.Server`. This cleanly separates test use (`New()` with auto-start) from standalone use (`NewHandler()` with explicit `http.ListenAndServe`).
+
+The binary reads its fixture directory from the `-fixtures` flag, falling back to the `STUBSERVER_FIXTURE_DIR` environment variable if the flag is not set. This ensures consistency between flag-based invocation and Docker Compose environment variable configuration.
 
 ```go
 // cmd/stubserver/main.go
@@ -1147,6 +1151,7 @@ package main
 
 import (
     "flag"
+    "fmt"
     "log"
     "net/http"
     "os"
@@ -1157,14 +1162,20 @@ import (
 
 func main() {
     addr := flag.String("addr", ":9090", "listen address")
-    fixtureDir := flag.String("fixtures", "./testdata/fixtures", "fixture directory")
+    fixtureDir := flag.String("fixtures", os.Getenv("STUBSERVER_FIXTURE_DIR"), "fixture directory (default: $STUBSERVER_FIXTURE_DIR or ./testdata/fixtures)")
     flag.Parse()
+
+    if *fixtureDir == "" {
+        *fixtureDir = "./testdata/fixtures"
+    }
 
     // Load fixtures from directory, keyed by filename.
     fixtures := loadFixtures(*fixtureDir)
 
-    // Create a stubserver that selects fixtures based on request path or header.
-    srv := stubserver.New(stubserver.WithFixtureFunc(func(r *http.Request) string {
+    // Use NewHandler to get an http.Handler without starting an httptest.Server.
+    // NewHandler returns the same capture-wrapping handler that New() uses internally,
+    // but the caller owns the listener.
+    handler := stubserver.NewHandler(stubserver.WithFixtureFunc(func(r *http.Request) string {
         name := r.Header.Get("X-Fixture")
         if name == "" {
             name = "default"
@@ -1175,10 +1186,20 @@ func main() {
         return fixtures["default"]
     }))
 
+    // Wrap in a mux to add /health endpoint for Docker healthchecks.
+    mux := http.NewServeMux()
+    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+        fmt.Fprintln(w, "ok")
+    })
+    mux.Handle("/", handler)
+
     log.Printf("stubserver listening on %s with %d fixtures", *addr, len(fixtures))
-    log.Fatal(http.ListenAndServe(*addr, srv))
+    log.Fatal(http.ListenAndServe(*addr, mux))
 }
 ```
+
+**Library change required:** Add `NewHandler(opts ...Option) http.Handler` to `stubserver` package. This constructor builds the capture-wrapping handler (same logic as lines 106-120 of `stubserver.go`) but returns it as an `http.Handler` instead of starting an `httptest.Server`. The existing `New()` continues to work as-is for in-process test use.
 
 #### Dockerfile
 
@@ -1210,8 +1231,6 @@ Add the following service to `docker-compose.e2e.yaml` (available in all profile
       dockerfile: e2etests/external/docker/Dockerfile.stubserver
     ports:
       - "9090:9090"
-    environment:
-      STUBSERVER_FIXTURE_DIR: "/fixtures"
     profiles: ["minimal", "gvisor", "full"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/health"]
@@ -1219,6 +1238,8 @@ Add the following service to `docker-compose.e2e.yaml` (available in all profile
       timeout: 3s
       retries: 5
 ```
+
+Note: The fixture directory is passed via the Dockerfile `ENTRYPOINT` flag (`-fixtures=/fixtures`). The binary also reads `STUBSERVER_FIXTURE_DIR` as an env var fallback, so either mechanism works -- but the flag in ENTRYPOINT is the primary configuration. The `/health` endpoint is served by the standalone binary's mux and returns `200 OK`.
 
 The sandbox-host and test-runner containers reach the stubserver at `http://stubserver:9090`. Tests override the provider base URL via environment variable:
 
@@ -1263,14 +1284,20 @@ testdata/fixtures/
 
 ### 12.5 Oracle Cross-Verification
 
-The `testdata/oracle/` harness (using `@mariozechner/pi-ai`) can be used to verify that the stubserver's SSE fixtures produce correct parsed output. The oracle currently supports `transformMessages`, `calculateCost`, and `isContextOverflow` commands. The workflow is:
+The `testdata/oracle/` harness (using `@mariozechner/pi-ai`) can be used to verify that the stubserver's SSE fixtures produce correct parsed output at the message level. The oracle currently supports three commands: `transformMessages`, `calculateCost`, and `isContextOverflow`. It does **not** have a raw SSE parsing command -- the `pi-ai` library handles SSE parsing internally but the oracle wrapper does not expose it.
 
-1. Record a real SSE response from a provider (or hand-craft one matching the provider's documented format).
-2. Feed it through the Go provider's SSE parser and collect the resulting `AssistantMessageEvent` stream.
-3. Feed the same raw SSE through the TypeScript oracle and collect its parsed output.
-4. Compare the two: message content, tool calls, usage metrics, stop reason, and error classification must match.
+Given this constraint, the oracle cross-verification workflow operates at the **parsed message level**, not the SSE transport level:
 
-This ensures that the fixtures used by the stubserver are faithful to the real provider wire format, and that the Go parser handles them identically to the reference TypeScript implementation. Any fixture that passes oracle cross-verification can be trusted as a reliable substitute for a real API call in E2E tests.
+1. Record a real SSE response from a provider (or hand-craft one matching the provider's documented format) and store it as a stubserver fixture.
+2. Feed the fixture through the Go provider's SSE parser and collect the resulting parsed messages (content, tool calls, usage, stop reason).
+3. Feed the Go-parsed messages through the oracle's `transformMessages` command to verify message structure and transformation correctness.
+4. Feed the Go-parsed usage metrics through the oracle's `calculateCost` command to verify cost calculation consistency.
+5. Feed relevant messages through the oracle's `isContextOverflow` command to verify overflow detection agreement.
+6. Compare the oracle's output against the Go implementation's output at each step.
+
+This does **not** verify SSE transport-level parsing equivalence (that would require adding a `parseSSEStream` command to the oracle, which is out of scope here). However, it does verify that the fixture content produces correct results when processed through the Go parser -- i.e., that the fixtures are faithful to the real provider wire format at the message/content level. This is still valuable: it catches schema mismatches, field mapping errors, and content transformation bugs even though the raw SSE-to-message parsing step is only verified on the Go side.
+
+Any fixture that passes oracle cross-verification at the message level can be trusted as a reliable substitute for a real API call in E2E tests, with the caveat that SSE framing bugs (e.g., incorrect event boundaries, missing `data:` prefixes) would only be caught by the Go SSE scanner tests, not by oracle comparison.
 
 ### 12.6 Integration with Existing Tiers
 
@@ -1308,13 +1335,15 @@ These fault scenarios should be added as stubserver-backed variants of the exist
 
 ## Completion Signoff
 
-- **Status:** Complete
+- **Status:** Partial — Sections 1-11 complete; Section 12 is a planned extension, not yet implemented
 - **Date:** 2026-03-15
 - **Epic:** aiag-q7c
 - **Task:** aiag-q7c.2 (assigned: coder-2-sea, status: closed)
 - **Implementation commits:** dea037b, 37052dc
 - **Code review:** R1 by reviewer-sea, findings incorporated, R2 approved at b42c922
 - **Branch:** main
+
+**Scope note:** The deliverables and acceptance criteria below cover Sections 1-11 only. Section 12 (Stubserver-Based E2E Testing) is a planned extension that requires additional implementation work: the `NewHandler()` constructor in the stubserver library, the standalone binary (`cmd/stubserver/main.go`), Docker infrastructure (`Dockerfile.stubserver`, compose service), fixture files, and stubserver-backed test variants. This work is tracked separately and does not affect the completeness of Sections 1-11.
 
 ### Deliverables Verification
 
@@ -1349,3 +1378,19 @@ These fault scenarios should be added as stubserver-backed variants of the exist
 ### Scope Notes
 
 Tier 2 and Tier 3 tests are implemented as structured stubs with detailed TODO comments. This matches the plan's phased implementation sequence (Section 9): Phase 1 (common helpers + Tier 1) is complete; Phases 2-4 (Docker implementation, native tests, failure injection) require the sandbox-host binary and dedicated CI infrastructure which are not yet available. The stubs compile, are correctly gated by build tags, and will skip gracefully until the prerequisites are met.
+
+---
+
+## R1 Review Disposition — Section 12 (reviewer-sea)
+
+**Review:** [17-external-testing-review-reviewer-sea.md](./17-external-testing-review-reviewer-sea.md)
+**Incorporated by:** claude-opus-4-6
+**Date:** 2026-03-15
+
+| Finding | Severity | Disposition | Notes |
+|---------|----------|-------------|-------|
+| Standalone binary sketch won't compile: Server doesn't implement http.Handler | P2 | Incorporated | Replaced `http.ListenAndServe(*addr, srv)` with `NewHandler()` constructor pattern (option b from review). Added documentation of required `NewHandler(opts ...Option) http.Handler` library addition. |
+| Oracle cross-verification assumes SSE parsing capability the oracle doesn't have | P2 | Incorporated | Scoped §12.5 workflow to message-level verification using existing oracle commands (`transformMessages`, `calculateCost`, `isContextOverflow`). Removed claim of raw SSE parsing equivalence. Added explicit caveat about SSE transport-level coverage. (Option b from review.) |
+| Completion Signoff says Complete but Section 12 is unimplemented | P2 | Incorporated | Updated status to "Partial" with scope note clarifying Sections 1-11 are complete and Section 12 is a planned extension not yet implemented. Updated both header status and signoff section. (Option a+b from review.) |
+| Missing /health endpoint in stubserver Docker service | P3 | Incorporated | Added `/health` handler to standalone binary sketch via `http.NewServeMux` wrapping the stubserver handler. Healthcheck in Dockerfile and compose now has a working endpoint. |
+| Env var vs flag inconsistency for fixture directory | P3 | Incorporated | Binary now reads `-fixtures` flag with `os.Getenv("STUBSERVER_FIXTURE_DIR")` as default value, falling back to `./testdata/fixtures` if neither is set. Removed redundant `STUBSERVER_FIXTURE_DIR` env var from compose config since ENTRYPOINT flag is the primary config. Added documentation note explaining the relationship. |
