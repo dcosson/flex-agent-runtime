@@ -26,30 +26,40 @@ func main() {
 		os.Exit(1)
 	}
 
-	zm, err := zfs.NewCLIManager(
-		zfs.WithZFSPath(cfg.ZFSPath),
-		zfs.WithZPoolPath(cfg.ZPoolPath),
-		zfs.WithSudo(cfg.UseSudo),
-		zfs.WithPool(cfg.PoolName),
-		zfs.WithLogger(logger),
-	)
-	if err != nil {
-		logger.Error("failed to initialize zfs manager", "error", err)
-		os.Exit(1)
+	var err error
+	var zm zfs.ZFSManager
+	if cfg.StorageBackend == sandbox.StorageBackendZFS {
+		zm, err = zfs.NewCLIManager(
+			zfs.WithZFSPath(cfg.ZFSPath),
+			zfs.WithZPoolPath(cfg.ZPoolPath),
+			zfs.WithSudo(cfg.UseSudo),
+			zfs.WithPool(cfg.PoolName),
+			zfs.WithLogger(logger),
+		)
+		if err != nil {
+			logger.Error("failed to initialize zfs manager", "error", err)
+			os.Exit(1)
+		}
 	}
-	gmCfg := gvisor.ManagerConfig{
-		RunscPath:     cfg.RunscPath,
-		RunscRoot:     cfg.RunscRoot,
-		BundleBaseDir: cfg.BundleBaseDir,
-		Logger:        logger,
-	}
-	gm, err := gvisor.NewManager(gmCfg)
-	if err != nil {
-		logger.Error("failed to initialize gvisor manager", "error", err)
-		os.Exit(1)
+
+	var gm gvisor.GVisorManager
+	if cfg.ContainerRuntime == sandbox.ContainerRuntimeGVisor {
+		gmCfg := gvisor.ManagerConfig{
+			RunscPath:     cfg.RunscPath,
+			RunscRoot:     cfg.RunscRoot,
+			BundleBaseDir: cfg.BundleBaseDir,
+			Logger:        logger,
+		}
+		gm, err = gvisor.NewManager(gmCfg)
+		if err != nil {
+			logger.Error("failed to initialize gvisor manager", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	svcCfg := sandbox.DefaultServiceConfig()
+	svcCfg.StorageBackend = cfg.StorageBackend
+	svcCfg.ContainerRuntime = cfg.ContainerRuntime
 	if cfg.PoolName != "" {
 		svcCfg.PoolName = cfg.PoolName
 	}
@@ -58,6 +68,9 @@ func main() {
 	}
 	if cfg.SessionsDataset != "" {
 		svcCfg.SessionsDataset = cfg.SessionsDataset
+	}
+	if cfg.SessionsRootDir != "" {
+		svcCfg.SessionsRootDir = cfg.SessionsRootDir
 	}
 	if cfg.MaxSessions > 0 {
 		svcCfg.MaxSessions = cfg.MaxSessions
@@ -100,10 +113,16 @@ func main() {
 		MinAPIVersion:   cfg.MinAPIVersion,
 		AuthHook:        authHook,
 	})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok\n"))
+	})
+	mux.Handle("/", rpcTransport.Handler())
 
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           rpcTransport.Handler(),
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

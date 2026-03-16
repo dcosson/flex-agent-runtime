@@ -27,6 +27,21 @@ func sandboxHostURL(t *testing.T) string {
 	return url
 }
 
+func configuredConfigs(t *testing.T) []common.BackendConfig {
+	t.Helper()
+	sb, cr := common.SandboxHostConfig(t)
+	configs := make([]common.BackendConfig, 0, 1)
+	for _, cfg := range common.StandardConfigs() {
+		if string(cfg.StorageBackend) == sb && string(cfg.ContainerRuntime) == cr {
+			configs = append(configs, cfg)
+		}
+	}
+	if len(configs) == 0 {
+		t.Fatalf("no backend config matches SANDBOX_STORAGE_BACKEND=%q SANDBOX_CONTAINER_RUNTIME=%q", sb, cr)
+	}
+	return configs
+}
+
 // TestDockerLifecycle_AllConfigs verifies session create/execute/destroy across
 // all four backend configurations (C1-C4). Each subtest connects to the
 // sandbox-host via RPC, creates a session, executes a simple tool, verifies the
@@ -35,7 +50,7 @@ func TestDockerLifecycle_AllConfigs(t *testing.T) {
 	common.RequireDocker(t)
 	hostURL := sandboxHostURL(t)
 
-	for _, cfg := range common.StandardConfigs() {
+	for _, cfg := range configuredConfigs(t) {
 		cfg := cfg
 		t.Run(cfg.Name, func(t *testing.T) {
 			t.Parallel()
@@ -72,14 +87,21 @@ func TestDockerLifecycle_AllConfigs(t *testing.T) {
 // that the post-snapshot write is absent after rollback.
 func TestDockerSnapshot_ZFSConfigs(t *testing.T) {
 	common.RequireDocker(t)
+	sb, _ := common.SandboxHostConfig(t)
+	if sb != "zfs" {
+		t.Skip("active backend has no snapshot support")
+	}
 	common.RequireZFSBackend(t)
 	hostURL := sandboxHostURL(t)
 
 	zfsConfigs := []common.BackendConfig{}
-	for _, cfg := range common.StandardConfigs() {
+	for _, cfg := range configuredConfigs(t) {
 		if cfg.SupportsSnapshots() {
 			zfsConfigs = append(zfsConfigs, cfg)
 		}
+	}
+	if len(zfsConfigs) == 0 {
+		t.Skip("active backend has no snapshot support")
 	}
 
 	for _, cfg := range zfsConfigs {
@@ -111,14 +133,21 @@ func TestDockerSnapshot_ZFSConfigs(t *testing.T) {
 // asserts that tier-routing metadata in the responses matches expectations.
 func TestDockerTierRouting_GVisorConfigs(t *testing.T) {
 	common.RequireDocker(t)
+	_, cr := common.SandboxHostConfig(t)
+	if cr != "gvisor" {
+		t.Skip("active runtime has no tier routing support")
+	}
 	common.RequireGVisorRuntime(t)
 	hostURL := sandboxHostURL(t)
 
 	gvisorConfigs := []common.BackendConfig{}
-	for _, cfg := range common.StandardConfigs() {
+	for _, cfg := range configuredConfigs(t) {
 		if cfg.SupportsTierRouting() {
 			gvisorConfigs = append(gvisorConfigs, cfg)
 		}
+	}
+	if len(gvisorConfigs) == 0 {
+		t.Skip("active runtime has no tier routing support")
 	}
 
 	for _, cfg := range gvisorConfigs {
@@ -172,7 +201,7 @@ func TestDockerCapabilities_AllConfigs(t *testing.T) {
 	common.RequireDocker(t)
 	hostURL := sandboxHostURL(t)
 
-	for _, cfg := range common.StandardConfigs() {
+	for _, cfg := range configuredConfigs(t) {
 		cfg := cfg
 		t.Run(cfg.Name, func(t *testing.T) {
 			t.Parallel()
