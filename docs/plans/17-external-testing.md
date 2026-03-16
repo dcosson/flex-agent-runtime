@@ -1081,6 +1081,231 @@ graph LR
 
 ---
 
+## 12. Stubserver-Based E2E Testing (Real HTTP Stack)
+
+### 12.1 Problem: ScriptedProvider Bypasses the Real Client Stack
+
+Current Tier 1 tests use `ScriptedProvider` (an in-process mock that implements the `ai.Provider` interface directly). While this is fast and deterministic, it bypasses a significant amount of production code:
+
+- **HTTP client code**: Real providers make HTTP requests with headers, auth tokens, and timeouts. ScriptedProvider never opens a socket.
+- **SSE parsing**: The `internal/ai/sse` scanner is never exercised -- ScriptedProvider emits `AssistantMessageEvent` values directly.
+- **JSON serialization/deserialization**: Provider responses are never serialized to JSON over the wire and never parsed back. Schema mismatches, encoding edge cases, and malformed payloads go undetected.
+- **Auth header propagation**: API key injection and bearer token handling are never tested end-to-end.
+- **Retry logic**: HTTP-level retry behavior (429 backoff, connection reset recovery) cannot be tested without a real HTTP server.
+- **Timeout behavior**: Client-side read timeouts and context deadlines against a real TCP connection behave differently than in-process cancellation.
+
+In short, ScriptedProvider tests verify the agent loop and tool orchestration logic, but not the provider client stack that connects the agent to the LLM API. This is a meaningful gap because that client stack is where most production incidents originate (network errors, malformed responses, auth failures, rate limiting).
+
+### 12.2 Solution: Wire the Existing Stubserver into E2E Tests
+
+The stubserver at `internal/ai/testutil/stubserver/` already provides everything needed: fixture replay, fault injection (TCP reset, malformed payloads, throttling, backpressure, empty bodies), request capture, and per-request fixture selection. It serves real SSE over real HTTP connections via `httptest.Server`.
+
+The strategy is to use the stubserver as the backend for E2E tests at all tiers, replacing ScriptedProvider where full-stack coverage is desired:
+
+**Tier 1 (PR-Fast, in-process):** Start the stubserver via `httptest.NewServer` in the test process. Override the provider's base URL to point at the stubserver (e.g., `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`). The provider code makes a real HTTP request, receives real SSE, parses real JSON -- all without leaving the test process or requiring Docker. This is the primary win: true end-to-end coverage with the speed and simplicity of Tier 1.
+
+```go
+// Tier 1 stubserver-backed test sketch
+func TestAgentLoop_RealHTTPStack(t *testing.T) {
+    // Load a fixture with a multi-turn conversation (tool call + response).
+    fixture := loadFixture(t, "testdata/fixtures/anthropic-tool-call.sse")
+
+    // Start stubserver in-process.
+    stub := stubserver.New(stubserver.WithFixtureFunc(func(r *http.Request) string {
+        // Verify auth header is propagated.
+        if r.Header.Get("x-api-key") == "" {
+            t.Error("missing x-api-key header")
+        }
+        return fixture
+    }))
+    defer stub.Close()
+
+    // Create a real Anthropic provider pointed at the stubserver.
+    provider := anthropic.NewProvider(anthropic.Config{
+        BaseURL: stub.URL,
+        APIKey:  "test-key-123",
+    })
+
+    // Wire into agent loop and run scenario.
+    // ... (same agent setup as existing Tier 1 tests)
+}
+```
+
+**Tier 2/3 (Docker-based):** The stubserver needs to be reachable by other containers over the Docker network. This requires a standalone stubserver binary and a Docker service.
+
+### 12.3 Docker Integration: Stubserver as a Service
+
+For Docker-based Tier 2 and Tier 3 tests, the stubserver must run as its own container so that the sandbox-host and agent containers can reach it over the Docker network.
+
+#### Standalone Binary
+
+Create a `cmd/stubserver/main.go` that wraps the library stubserver in a standalone HTTP server:
+
+```go
+// cmd/stubserver/main.go
+package main
+
+import (
+    "flag"
+    "log"
+    "net/http"
+    "os"
+    "path/filepath"
+
+    "h2-agent-runtime/internal/ai/testutil/stubserver"
+)
+
+func main() {
+    addr := flag.String("addr", ":9090", "listen address")
+    fixtureDir := flag.String("fixtures", "./testdata/fixtures", "fixture directory")
+    flag.Parse()
+
+    // Load fixtures from directory, keyed by filename.
+    fixtures := loadFixtures(*fixtureDir)
+
+    // Create a stubserver that selects fixtures based on request path or header.
+    srv := stubserver.New(stubserver.WithFixtureFunc(func(r *http.Request) string {
+        name := r.Header.Get("X-Fixture")
+        if name == "" {
+            name = "default"
+        }
+        if f, ok := fixtures[name]; ok {
+            return f
+        }
+        return fixtures["default"]
+    }))
+
+    log.Printf("stubserver listening on %s with %d fixtures", *addr, len(fixtures))
+    log.Fatal(http.ListenAndServe(*addr, srv))
+}
+```
+
+#### Dockerfile
+
+```dockerfile
+# Dockerfile.stubserver
+FROM golang:1.23-alpine AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o /stubserver ./cmd/stubserver
+
+FROM alpine:3.19
+COPY --from=builder /stubserver /usr/local/bin/stubserver
+COPY testdata/fixtures /fixtures
+ENTRYPOINT ["/usr/local/bin/stubserver", "-addr=:9090", "-fixtures=/fixtures"]
+EXPOSE 9090
+HEALTHCHECK CMD wget -qO- http://localhost:9090/health || exit 1
+```
+
+#### Docker Compose Addition
+
+Add the following service to `docker-compose.e2e.yaml` (available in all profiles):
+
+```yaml
+  stubserver:
+    build:
+      context: ../../../
+      dockerfile: e2etests/external/docker/Dockerfile.stubserver
+    ports:
+      - "9090:9090"
+    environment:
+      STUBSERVER_FIXTURE_DIR: "/fixtures"
+    profiles: ["minimal", "gvisor", "full"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+```
+
+The sandbox-host and test-runner containers reach the stubserver at `http://stubserver:9090`. Tests override the provider base URL via environment variable:
+
+```yaml
+  test-runner:
+    environment:
+      ANTHROPIC_BASE_URL: "http://stubserver:9090"
+      OPENAI_BASE_URL: "http://stubserver:9090"
+```
+
+#### Fixture Loading
+
+Fixtures are raw SSE text files in `testdata/fixtures/`, one per test scenario. The stubserver selects fixtures based on the `X-Fixture` request header, which the test runner sets per-scenario. Example fixture directory:
+
+```
+testdata/fixtures/
+  anthropic-simple-response.sse       # Single text response
+  anthropic-tool-call.sse             # Tool use with tool_use content block
+  anthropic-multi-turn.sse            # Multi-turn with tool results
+  anthropic-context-overflow.sse      # Overloaded error response
+  openai-simple-response.sse          # OpenAI chat completion chunks
+  openai-function-call.sse            # OpenAI function calling
+  google-simple-response.sse          # Google streaming response
+```
+
+### 12.4 What This Exercises That ScriptedProvider Does Not
+
+| Layer | ScriptedProvider | Stubserver |
+|-------|:---:|:---:|
+| Agent loop + tool orchestration | Yes | Yes |
+| Provider selection + model lookup | Yes | Yes |
+| HTTP client (net/http) | No | Yes |
+| TLS/connection handling | No | Yes (httptest handles TLS optionally) |
+| Request serialization (Go structs -> JSON body) | No | Yes |
+| Auth header injection (x-api-key, Authorization: Bearer) | No | Yes |
+| SSE scanner (`internal/ai/sse`) | No | Yes |
+| Response JSON deserialization | No | Yes |
+| Retry on 429 / connection reset | No | Yes (via fault injection) |
+| Client timeout / context deadline over TCP | No | Yes (via backpressure fault) |
+| Provider-specific error classification | No | Yes (via status code server) |
+| Content-Type validation | No | Yes |
+
+### 12.5 Oracle Cross-Verification
+
+The `testdata/oracle/` harness (using `@mariozechner/pi-ai`) can be used to verify that the stubserver's SSE fixtures produce correct parsed output. The oracle currently supports `transformMessages`, `calculateCost`, and `isContextOverflow` commands. The workflow is:
+
+1. Record a real SSE response from a provider (or hand-craft one matching the provider's documented format).
+2. Feed it through the Go provider's SSE parser and collect the resulting `AssistantMessageEvent` stream.
+3. Feed the same raw SSE through the TypeScript oracle and collect its parsed output.
+4. Compare the two: message content, tool calls, usage metrics, stop reason, and error classification must match.
+
+This ensures that the fixtures used by the stubserver are faithful to the real provider wire format, and that the Go parser handles them identically to the reference TypeScript implementation. Any fixture that passes oracle cross-verification can be trusted as a reliable substitute for a real API call in E2E tests.
+
+### 12.6 Integration with Existing Tiers
+
+The stubserver approach does not replace ScriptedProvider tests -- it supplements them. The recommended test structure is:
+
+- **ScriptedProvider tests** remain for fast, focused tests of agent loop logic (turn sequencing, tool dispatch, event emission, state transitions). These are pure unit-level E2E tests that don't need HTTP.
+- **Stubserver tests** are added for full-stack E2E tests that verify the complete path from agent prompt to provider HTTP request to SSE response parsing to event emission. These catch integration bugs at the HTTP/SSE/JSON boundary.
+
+In the tiered matrix:
+
+| Tier | ScriptedProvider | Stubserver (in-process) | Stubserver (Docker) |
+|------|:---:|:---:|:---:|
+| **Tier 1 (PR-Fast)** | Yes (existing) | Yes (new) | No |
+| **Tier 2 (Docker)** | No | No | Yes (new) |
+| **Tier 3 (Nightly)** | No | No | Yes (new) + real providers |
+
+Tier 1 stubserver tests run in-process via `httptest.Server` and add minimal overhead (<1s per scenario). Tier 2/3 stubserver tests use the Docker service and exercise cross-container networking in addition to the full HTTP stack.
+
+### 12.7 Fault Injection Scenarios via Stubserver
+
+The stubserver's existing fault modes map directly to failure scenarios that cannot be tested with ScriptedProvider:
+
+| Fault Mode | Stubserver API | What It Tests |
+|-----------|---------------|---------------|
+| **TCP reset mid-stream** (F1) | `NewTCPResetServer(fixture, afterEvents)` | Client recovery when connection drops after partial SSE delivery |
+| **Malformed SSE payload** (F2) | `NewMalformedServer(fixture, afterEvents, data)` | JSON parse error handling in the SSE scanner; partial message recovery |
+| **Rate limiting** (F3) | `NewThrottleServer(retryAfter)` | 429 handling, Retry-After parsing, exponential backoff |
+| **Slow server / backpressure** (F4) | `NewBackpressureServer(fixture, delay)` | Client read timeout, context deadline propagation over real TCP |
+| **Empty error body** (F6) | `NewEmptyBodyServer(statusCode)` | Error classification from HTTP status alone (no JSON body to parse) |
+| **Retry sequences** | `NewSequenceServer(responses)` | Multi-attempt retry: 429 -> 429 -> 200 success; verifies retry count and delay |
+
+These fault scenarios should be added as stubserver-backed variants of the existing Tier 1 failure tests (L7, F1-F8) and as Docker-based variants in Tier 2.
+
+---
+
 ## Completion Signoff
 
 - **Status:** Complete
