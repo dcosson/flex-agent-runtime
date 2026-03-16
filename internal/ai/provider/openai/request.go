@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 // requestParams holds parameters for building the wire request that don't

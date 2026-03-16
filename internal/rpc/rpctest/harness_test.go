@@ -6,13 +6,13 @@ import (
 	"sync"
 	"testing"
 
-	"h2-agent-runtime/internal/rpc"
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/rpc/client"
-	"h2-agent-runtime/internal/rpc/server"
-	"h2-agent-runtime/internal/sandbox"
-	"h2-agent-runtime/internal/sandbox/gvisor"
-	"h2-agent-runtime/internal/sandbox/zfs"
+	"flex-agent-runtime/internal/rpc"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/rpc/client"
+	"flex-agent-runtime/internal/rpc/server"
+	"flex-agent-runtime/internal/sandbox"
+	"flex-agent-runtime/internal/sandbox/gvisor"
+	"flex-agent-runtime/internal/sandbox/zfs"
 )
 
 const baseSnapshot = "tank/bases/repo@initial"

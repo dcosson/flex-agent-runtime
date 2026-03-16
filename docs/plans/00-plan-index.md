@@ -1,8 +1,8 @@
-# Plan Index — h2-agent-runtime
+# Plan Index — flex-agent-runtime
 
 ## Overview
 
-This plan index organizes the full h2-agent-runtime implementation into sub-plans grouped by dependency order. The runtime has seven major components spanning six batches, progressing from foundation types through the full distributed runtime and multi-provider sandbox support.
+This plan index organizes the full flex-agent-runtime implementation into sub-plans grouped by dependency order. The runtime has seven major components spanning six batches, progressing from foundation types through the full distributed runtime and multi-provider sandbox support.
 
 The existing reviewed plans for AI core (01-ai-core, 01-ai-core-test-harness) are incorporated as the foundation. New plans cover built-in tools, code interpreter, agent loop, terminal mux, sandbox host, and the RPC layer.
 

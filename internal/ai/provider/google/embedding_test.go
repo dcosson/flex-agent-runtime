@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 func TestEmbeddingProvider_APIAndRegister(t *testing.T) {

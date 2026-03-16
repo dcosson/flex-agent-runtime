@@ -7,10 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/rpc/codec"
-	"h2-agent-runtime/internal/sandbox/environment"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/rpc/codec"
+	"flex-agent-runtime/internal/sandbox/environment"
 )
 
 // NativeSandboxEnvironment adapts the ConnectRPC SandboxClient to the

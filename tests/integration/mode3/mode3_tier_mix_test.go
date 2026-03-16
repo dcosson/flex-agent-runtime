@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/tools"
-	mh "h2-agent-runtime/tests/integration/mode3/harness"
-	"h2-agent-runtime/tests/integration/testutil"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/tools"
+	mh "flex-agent-runtime/tests/integration/mode3/harness"
+	"flex-agent-runtime/tests/integration/testutil"
 )
 
 // S2: Tier routing with snapshot metadata (Tier 1+2 mix).

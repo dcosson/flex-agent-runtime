@@ -7,7 +7,7 @@ import (
 
 	streamingjson "github.com/karminski/streaming-json-go"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 type toolJSONParser struct {

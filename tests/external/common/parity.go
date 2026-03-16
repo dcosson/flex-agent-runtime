@@ -3,7 +3,7 @@ package common
 import (
 	"testing"
 
-	"h2-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/agent"
 )
 
 // EventTypeSequence extracts the event type sequence from a list of agent events.

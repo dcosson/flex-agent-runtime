@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/ai/sse"
-	"h2-agent-runtime/internal/ai/testutil/stubserver"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai/sse"
+	"flex-agent-runtime/internal/ai/testutil/stubserver"
 )
 
 // B1: SSE throughput benchmark target (>=50k events/sec).

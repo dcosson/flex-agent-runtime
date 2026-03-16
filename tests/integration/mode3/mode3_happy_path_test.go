@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	mh "h2-agent-runtime/tests/integration/mode3/harness"
-	"h2-agent-runtime/tests/integration/testutil"
+	mh "flex-agent-runtime/tests/integration/mode3/harness"
+	"flex-agent-runtime/tests/integration/testutil"
 )
 
 // S1: Happy-path remote workflow (RPC dispatch, multi-turn).

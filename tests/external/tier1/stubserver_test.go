@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/ai/provider/anthropic"
-	"h2-agent-runtime/internal/ai/testutil/stubserver"
-	"h2-agent-runtime/internal/tools"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai/provider/anthropic"
+	"flex-agent-runtime/internal/ai/testutil/stubserver"
+	"flex-agent-runtime/internal/tools"
 )
 
 // fixturesDir returns the path to testdata/fixtures from the project root.

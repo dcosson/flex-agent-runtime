@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/tests/integration/harness"
-	"h2-agent-runtime/tests/integration/testutil"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/tests/integration/harness"
+	"flex-agent-runtime/tests/integration/testutil"
 )
 
 // TestScenario_TerminalToolCompletion validates §4.6:

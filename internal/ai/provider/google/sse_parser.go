@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/ai/sse"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai/sse"
 )
 
 type toolCallState struct {

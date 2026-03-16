@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/rpc"
-	"h2-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/rpc"
+	"flex-agent-runtime/internal/rpc/api"
 )
 
 // S1. Session lifecycle FSM simulation — all valid and invalid transitions via RPC.

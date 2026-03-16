@@ -3,8 +3,8 @@ package local
 import (
 	"context"
 
-	"h2-agent-runtime/internal/sandbox/environment"
-	"h2-agent-runtime/internal/tools"
+	"flex-agent-runtime/internal/sandbox/environment"
+	"flex-agent-runtime/internal/tools"
 )
 
 // executeLocalTool is an implementation seam so LocalEnvironment does not

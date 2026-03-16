@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 
 	"connectrpc.com/connect"
-	"h2-agent-runtime/internal/rpc"
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/termmux"
+	"flex-agent-runtime/internal/rpc"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/termmux"
 )
 
 type ServerConfig struct {

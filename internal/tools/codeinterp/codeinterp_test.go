@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/tools/codeinterp/datastore"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/tools/codeinterp/datastore"
 )
 
 type fakeProvider struct{ api string }

@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"testing"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/ai/testutil/stubserver"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai/testutil/stubserver"
 )
 
 func testModel() ai.Model {

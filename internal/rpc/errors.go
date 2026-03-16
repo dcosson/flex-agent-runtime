@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"h2-agent-runtime/internal/sandbox"
-	"h2-agent-runtime/internal/sandbox/zfs"
+	"flex-agent-runtime/internal/sandbox"
+	"flex-agent-runtime/internal/sandbox/zfs"
 )
 
 type Code string

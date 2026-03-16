@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/sandbox/gvisor"
-	"h2-agent-runtime/internal/sandbox/zfs"
+	"flex-agent-runtime/internal/sandbox/gvisor"
+	"flex-agent-runtime/internal/sandbox/zfs"
 )
 
 // Coverage tests for functions/branches missed by the main test suite.

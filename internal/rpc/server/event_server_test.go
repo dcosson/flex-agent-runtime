@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/rpc/api"
 )
 
 func TestAgentEventServerStreamAndPublish(t *testing.T) {

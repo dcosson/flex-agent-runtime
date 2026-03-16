@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 func TestO1_NativeVsAdapterEventParity(t *testing.T) {

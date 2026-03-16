@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"h2-agent-runtime/internal/sandbox"
+	"flex-agent-runtime/internal/sandbox"
 )
 
 type Config struct {

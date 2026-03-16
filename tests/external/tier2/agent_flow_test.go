@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/ai/provider/anthropic"
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/rpc/codec"
-	"h2-agent-runtime/internal/tools"
-	"h2-agent-runtime/tests/external/common"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai/provider/anthropic"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/rpc/codec"
+	"flex-agent-runtime/internal/tools"
+	"flex-agent-runtime/tests/external/common"
 )
 
 func stubserverURL() string {

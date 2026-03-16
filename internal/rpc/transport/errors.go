@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"connectrpc.com/connect"
-	"h2-agent-runtime/internal/rpc"
+	"flex-agent-runtime/internal/rpc"
 )
 
 func toConnectError(err error) error {

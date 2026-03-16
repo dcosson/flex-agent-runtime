@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"sync/atomic"
 
-	"h2-agent-runtime/internal/sandbox/environment"
+	"flex-agent-runtime/internal/sandbox/environment"
 )
 
 // LocalEnvironment executes tools directly on the local filesystem/processes.

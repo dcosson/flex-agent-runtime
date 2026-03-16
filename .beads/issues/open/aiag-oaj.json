@@ -1,7 +1,7 @@
 {
   "id": "aiag-oaj",
-  "title": "Planning: h2-agent-runtime",
-  "description": "Full planning lifecycle for h2-agent-runtime. 16 sub-plans across 5 batches. Batch 1 (01-ai-core, 01-ai-core-test-harness) already reviewed. 13 plans to draft, 1 (09-h2-termmux-port) already drafted. Review cycles until convergence, seam review, then implementation guide.",
+  "title": "Planning: flex-agent-runtime",
+  "description": "Full planning lifecycle for flex-agent-runtime. 16 sub-plans across 5 batches. Batch 1 (01-ai-core, 01-ai-core-test-harness) already reviewed. 13 plans to draft, 1 (09-h2-termmux-port) already drafted. Review cycles until convergence, seam review, then implementation guide.",
   "status": "open",
   "priority": 2,
   "type": "epic",

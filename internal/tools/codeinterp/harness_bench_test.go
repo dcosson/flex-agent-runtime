@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/tools/codeinterp/datastore"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/tools/codeinterp/datastore"
 )
 
 func BenchmarkB1_ScriptStartupLatency(b *testing.B) {

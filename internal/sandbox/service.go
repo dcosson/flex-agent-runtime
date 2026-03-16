@@ -9,10 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/sandbox/environment"
-	"h2-agent-runtime/internal/sandbox/gvisor"
-	"h2-agent-runtime/internal/sandbox/zfs"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/sandbox/environment"
+	"flex-agent-runtime/internal/sandbox/gvisor"
+	"flex-agent-runtime/internal/sandbox/zfs"
 )
 
 type SandboxHostService struct {

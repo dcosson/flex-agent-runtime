@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/rpc"
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/sandbox"
-	"h2-agent-runtime/internal/sandbox/gvisor"
-	"h2-agent-runtime/internal/sandbox/zfs"
+	"flex-agent-runtime/internal/rpc"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/sandbox"
+	"flex-agent-runtime/internal/sandbox/gvisor"
+	"flex-agent-runtime/internal/sandbox/zfs"
 )
 
 type testGVisor struct{}

@@ -6,9 +6,9 @@ import (
 	"os"
 	"runtime/debug"
 
-	"h2-agent-runtime/internal/termmux/eventsrc/otelserver"
-	"h2-agent-runtime/internal/termmux/eventsrc/sessionlog"
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/termmux/eventsrc/otelserver"
+	"flex-agent-runtime/internal/termmux/eventsrc/sessionlog"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 // EventSourceConfig configures the event sources for a session.

@@ -1,7 +1,7 @@
 package common
 
 import (
-	"h2-agent-runtime/internal/sandbox/environment/native"
+	"flex-agent-runtime/internal/sandbox/environment/native"
 )
 
 // BackendConfig represents a named backend configuration for testing.

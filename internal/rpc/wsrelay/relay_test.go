@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/rpc/server"
-	"h2-agent-runtime/internal/termmux"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/rpc/server"
+	"flex-agent-runtime/internal/termmux"
 
 	"github.com/coder/websocket"
 )

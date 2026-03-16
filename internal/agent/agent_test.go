@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 type mockDriver struct {

@@ -19,7 +19,7 @@ PKGS := $(shell $(GO) list ./...)
 	clean
 
 help:
-	@echo "h2-agent-runtime build & test targets"
+	@echo "flex-agent-runtime build & test targets"
 	@echo ""
 	@echo "=== Build & Check ==="
 	@echo "  build                            Build all binaries into ./bin/"

@@ -4,12 +4,12 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/tests/external/common"
-	"h2-agent-runtime/tests/integration/harness"
-	mh "h2-agent-runtime/tests/integration/mode3/harness"
-	"h2-agent-runtime/tests/integration/testutil"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/tests/external/common"
+	"flex-agent-runtime/tests/integration/harness"
+	mh "flex-agent-runtime/tests/integration/mode3/harness"
+	"flex-agent-runtime/tests/integration/testutil"
 )
 
 // parityScript is the shared scripted response for file ops parity tests.

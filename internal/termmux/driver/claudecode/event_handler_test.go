@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 func TestHandleOtelLogs_APIRequest(t *testing.T) {

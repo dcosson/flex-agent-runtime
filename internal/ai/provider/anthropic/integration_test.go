@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 func TestIntegrationAnthropicSmoke(t *testing.T) {

@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-The primary UI for h2-agent-runtime uses structured `AgentEvent` streams — parsed, normalized events that drive dashboards, status displays, and automation. However, power users and debuggers need the raw terminal output: the full TUI rendering of Claude Code or Codex as it runs, visible in a browser via xterm.js.
+The primary UI for flex-agent-runtime uses structured `AgentEvent` streams — parsed, normalized events that drive dashboards, status displays, and automation. However, power users and debuggers need the raw terminal output: the full TUI rendering of Claude Code or Codex as it runs, visible in a browser via xterm.js.
 
 This addendum defines the "raw terminal fallback" path:
 

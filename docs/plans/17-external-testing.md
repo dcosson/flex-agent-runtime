@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-This plan defines how to test the h2-agent-runtime end-to-end from the outside -- as a consumer of the Go library and the `sandbox-host` binary would. It complements the existing internal E2E tests in `tests/integration/` (plans 08, 14, 15, 16) by adding:
+This plan defines how to test the flex-agent-runtime end-to-end from the outside -- as a consumer of the Go library and the `sandbox-host` binary would. It complements the existing internal E2E tests in `tests/integration/` (plans 08, 14, 15, 16) by adding:
 
 - **Concrete usage examples** showing how callers wire up agents in each placement mode.
 - **Docker-based CI** that can run the full ZFS + gVisor stack, gVisor-only, or neither -- without dedicated infrastructure (see addendum 02 for configurable backends).
@@ -40,10 +40,10 @@ import (
     "log/slog"
     "time"
 
-    "h2-agent-runtime/internal/agent"
-    "h2-agent-runtime/internal/ai"
-    "h2-agent-runtime/internal/sandbox/environment/local"
-    "h2-agent-runtime/internal/tools"
+    "flex-agent-runtime/internal/agent"
+    "flex-agent-runtime/internal/ai"
+    "flex-agent-runtime/internal/sandbox/environment/local"
+    "flex-agent-runtime/internal/tools"
 )
 
 func main() {
@@ -114,9 +114,9 @@ import (
     "fmt"
     "log/slog"
 
-    "h2-agent-runtime/internal/agent"
-    "h2-agent-runtime/internal/rpc/client"
-    "h2-agent-runtime/internal/termmux"
+    "flex-agent-runtime/internal/agent"
+    "flex-agent-runtime/internal/rpc/client"
+    "flex-agent-runtime/internal/termmux"
 )
 
 func main() {
@@ -179,11 +179,11 @@ import (
     "fmt"
     "log/slog"
 
-    "h2-agent-runtime/internal/agent"
-    "h2-agent-runtime/internal/ai"
-    "h2-agent-runtime/internal/rpc/client"
-    "h2-agent-runtime/internal/sandbox/environment/native"
-    "h2-agent-runtime/internal/tools"
+    "flex-agent-runtime/internal/agent"
+    "flex-agent-runtime/internal/ai"
+    "flex-agent-runtime/internal/rpc/client"
+    "flex-agent-runtime/internal/sandbox/environment/native"
+    "flex-agent-runtime/internal/tools"
 )
 
 func main() {
@@ -1157,7 +1157,7 @@ import (
     "os"
     "path/filepath"
 
-    "h2-agent-runtime/internal/ai/testutil/stubserver"
+    "flex-agent-runtime/internal/ai/testutil/stubserver"
 )
 
 func main() {

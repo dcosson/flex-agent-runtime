@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/termmux"
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/termmux"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 // TermmuxEnv wraps a termmux session with E2E test helpers for

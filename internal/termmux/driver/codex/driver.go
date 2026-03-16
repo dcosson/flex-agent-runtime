@@ -6,8 +6,8 @@ import (
 	"io"
 	"sync"
 
-	"h2-agent-runtime/internal/termmux/driver"
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/termmux/driver"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 const (

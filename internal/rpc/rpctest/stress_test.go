@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"h2-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/rpc/api"
 )
 
 // ST1. Continuous mixed traffic soak (short version for CI).

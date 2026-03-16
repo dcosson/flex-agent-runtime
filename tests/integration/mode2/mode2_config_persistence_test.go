@@ -3,7 +3,7 @@ package mode2
 import (
 	"testing"
 
-	"h2-agent-runtime/tests/integration/mode2/harness"
+	"flex-agent-runtime/tests/integration/mode2/harness"
 )
 
 // S5: Config directory persistence (path stability).

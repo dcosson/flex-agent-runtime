@@ -1,10 +1,10 @@
-# Architecture — h2-agent-runtime
+# Architecture — flex-agent-runtime
 
 ## Vision
 
 An LLM agent is an LLM paired with a computer. This runtime provides flexible ways to deploy that pairing — from a single process on a developer's laptop to hundreds of concurrent agents distributed across cloud infrastructure.
 
-Building an AI coding agent today requires choosing a rigid, all-in-one harness that bundles the agent loop, tools, and execution environment into a single monolithic process. This limits placement flexibility, provides no production-grade execution (no snapshots, rollback, or durability), and locks you into one harness. h2-agent-runtime solves this by decomposing the agent into three independently deployable layers with well-defined interfaces, pluggable LLM providers and tools, and production-grade execution with ZFS snapshots and gVisor containers.
+Building an AI coding agent today requires choosing a rigid, all-in-one harness that bundles the agent loop, tools, and execution environment into a single monolithic process. This limits placement flexibility, provides no production-grade execution (no snapshots, rollback, or durability), and locks you into one harness. flex-agent-runtime solves this by decomposing the agent into three independently deployable layers with well-defined interfaces, pluggable LLM providers and tools, and production-grade execution with ZFS snapshots and gVisor containers.
 
 ---
 
@@ -158,7 +158,7 @@ ZFS on EBS provides instant COW snapshots with EBS durability across host lifecy
 
 ```mermaid
 graph TB
-    subgraph "h2-agent-runtime"
+    subgraph "flex-agent-runtime"
         subgraph "AI Layer (internal/ai)"
             types[Core Types<br/>Message, Content, Model,<br/>Usage, Events, Tool]
             stream[Stream Manager<br/>Stream, StreamSimple,<br/>Complete]
@@ -964,7 +964,7 @@ The key design point is that the runtime produces all of this uniformly. A Nativ
 
 ### Everything-DB Integration
 
-everything-db imports `h2-agent-runtime` as a Go library to implement its deferred `ActivityAgentLoop` and `ActivityLLMCall` workflow activity types.
+everything-db imports `flex-agent-runtime` as a Go library to implement its deferred `ActivityAgentLoop` and `ActivityLLMCall` workflow activity types.
 
 The `AgentTool` interface is the integration seam between placement modes:
 
@@ -1010,7 +1010,7 @@ The RuntimeController layer wraps around the harness:
 ## Module Structure
 
 ```
-h2-agent-runtime/
+flex-agent-runtime/
 ├── go.mod
 ├── go.sum
 │
@@ -1195,7 +1195,7 @@ graph TD
 
 The project is split into two repositories with a clean dependency direction:
 
-**`h2-agent-runtime`** (this repo):
+**`flex-agent-runtime`** (this repo):
 - Core agent loop (our own LLM abstraction + tool dispatch, inspired by pi-mono)
 - Tool interfaces and built-in tool implementations (read, write, bash, grep, glob)
 - Terminal multiplexer / session manager (for running CLI-based 3rd party agents like Claude Code, Codex, Aider — they need a PTY)
@@ -1211,11 +1211,11 @@ The project is split into two repositories with a clean dependency direction:
 - Work ledger / beads-lite task system
 - External integrations (Linear, etc.)
 - Pluggable UI layer (headless by default — TUI, web, desktop/mobile, Slack/Telegram, pure API)
-- Imports `h2-agent-runtime` as a dependency
+- Imports `flex-agent-runtime` as a dependency
 
 **Why two repos:**
-- Clean dependency direction: `h2` depends on `h2-agent-runtime`, never the reverse
-- everything-db imports `h2-agent-runtime` without pulling in orchestration opinions
+- Clean dependency direction: `h2` depends on `flex-agent-runtime`, never the reverse
+- everything-db imports `flex-agent-runtime` without pulling in orchestration opinions
 - Runtime is a stable general-purpose library; orchestrator is an opinionated framework with faster evolution
 - Separate release cadences
 

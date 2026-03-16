@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 // Session represents a terminal multiplexer session with a PTY,

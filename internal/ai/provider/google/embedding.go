@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 const embeddingAPIName = "google-embeddings"

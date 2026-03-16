@@ -1,7 +1,7 @@
 package tools
 
 import (
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 // ToolRequest carries all parameters needed to dispatch a single tool call.

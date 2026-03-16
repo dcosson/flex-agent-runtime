@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 // ReplayMode controls how inter-event delays are handled.

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/sandbox/environment"
-	"h2-agent-runtime/internal/sandbox/environment/local"
-	"h2-agent-runtime/internal/sandbox/environment/native"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/sandbox/environment"
+	"flex-agent-runtime/internal/sandbox/environment/local"
+	"flex-agent-runtime/internal/sandbox/environment/native"
 )
 
 func TestF1_NativeRPCFailureHandling(t *testing.T) {

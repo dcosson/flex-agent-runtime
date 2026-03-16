@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 	"pgregory.net/rapid"
 )
 

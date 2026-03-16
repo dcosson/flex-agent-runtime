@@ -3,13 +3,13 @@ package codec
 import (
 	"fmt"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/sandbox"
-	"h2-agent-runtime/internal/sandbox/environment"
-	"h2-agent-runtime/internal/sandbox/gvisor"
-	"h2-agent-runtime/internal/sandbox/zfs"
-	"h2-agent-runtime/internal/tools"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/sandbox"
+	"flex-agent-runtime/internal/sandbox/environment"
+	"flex-agent-runtime/internal/sandbox/gvisor"
+	"flex-agent-runtime/internal/sandbox/zfs"
+	"flex-agent-runtime/internal/tools"
 )
 
 func ToCreateSessionRequest(req *api.CreateSessionRequest) sandbox.CreateSessionRequest {

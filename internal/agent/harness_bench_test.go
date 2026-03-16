@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 func BenchmarkB1EventFanoutThroughput(b *testing.B) {

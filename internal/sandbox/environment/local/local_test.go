@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/sandbox/environment"
-	"h2-agent-runtime/internal/tools"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/sandbox/environment"
+	"flex-agent-runtime/internal/tools"
 )
 
 func TestLocalEnvironmentLifecycleAndState(t *testing.T) {

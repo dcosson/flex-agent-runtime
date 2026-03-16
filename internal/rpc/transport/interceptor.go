@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"h2-agent-runtime/internal/rpc"
+	"flex-agent-runtime/internal/rpc"
 )
 
 type ServerAuthHook func(ctx context.Context, procedure string, headers http.Header) error

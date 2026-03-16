@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 // ScriptEntry defines one provider response in a scripted conversation.

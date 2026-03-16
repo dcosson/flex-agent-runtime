@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/tests/integration/mode2/harness"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/tests/integration/mode2/harness"
 )
 
 // S6: Recovery from driver exit/crash.

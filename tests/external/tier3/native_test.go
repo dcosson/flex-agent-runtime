@@ -12,7 +12,7 @@ import (
 	"os"
 	"testing"
 
-	"h2-agent-runtime/tests/external/common"
+	"flex-agent-runtime/tests/external/common"
 )
 
 // TestNativeZFSPool verifies end-to-end ZFS pool operations using a real

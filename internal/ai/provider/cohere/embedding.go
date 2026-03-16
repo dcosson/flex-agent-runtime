@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 const (

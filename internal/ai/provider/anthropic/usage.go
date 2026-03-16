@@ -1,6 +1,6 @@
 package anthropic
 
-import "h2-agent-runtime/internal/ai"
+import "flex-agent-runtime/internal/ai"
 
 func mapUsage(usage wireUsage) ai.Usage {
 	return ai.Usage{

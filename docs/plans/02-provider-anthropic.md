@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-This plan defines the first concrete provider implementation in `h2-agent-runtime`: Anthropic Messages API. It validates the `internal/ai` architecture from [01-ai-core](./01-ai-core.md) and establishes implementation patterns for later providers (OpenAI and Google).
+This plan defines the first concrete provider implementation in `flex-agent-runtime`: Anthropic Messages API. It validates the `internal/ai` architecture from [01-ai-core](./01-ai-core.md) and establishes implementation patterns for later providers (OpenAI and Google).
 
 Primary goals:
 - Convert runtime-neutral `ai.Message`/`ai.Tool` structures into Anthropic wire payloads.

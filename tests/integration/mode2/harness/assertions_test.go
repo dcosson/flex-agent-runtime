@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/agent"
 )
 
 func TestResolveConflicts_Empty(t *testing.T) {

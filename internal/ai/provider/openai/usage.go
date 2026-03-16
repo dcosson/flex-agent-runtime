@@ -1,6 +1,6 @@
 package openai
 
-import "h2-agent-runtime/internal/ai"
+import "flex-agent-runtime/internal/ai"
 
 func mapUsage(u *chunkUsage) ai.Usage {
 	if u == nil {

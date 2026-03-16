@@ -3,7 +3,7 @@ package google
 import (
 	"encoding/base64"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 // requestParams holds parameters for building the wire request that don't

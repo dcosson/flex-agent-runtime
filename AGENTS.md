@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This repository is the implementation workspace for `h2-agent-runtime`.
+This repository is the implementation workspace for `flex-agent-runtime`.
 
 Primary package layout:
 - `internal/ai`: core runtime contracts and helpers

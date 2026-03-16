@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/rpc/api"
-	rpcserver "h2-agent-runtime/internal/rpc/server"
-	"h2-agent-runtime/internal/sandbox"
-	"h2-agent-runtime/internal/sandbox/gvisor"
-	"h2-agent-runtime/internal/sandbox/zfs"
-	"h2-agent-runtime/internal/termmux"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/rpc/api"
+	rpcserver "flex-agent-runtime/internal/rpc/server"
+	"flex-agent-runtime/internal/sandbox"
+	"flex-agent-runtime/internal/sandbox/gvisor"
+	"flex-agent-runtime/internal/sandbox/zfs"
+	"flex-agent-runtime/internal/termmux"
 )
 
 type fakeGVisor struct{}

@@ -29,7 +29,7 @@
   "created_by": "Danny Cosson",
   "owner": "dcosson@gmail.com",
   "labels": [
-    "project=h2-agent-runtime",
+    "project=flex-agent-runtime",
     "batch=1",
     "plan-doc=01-ai-core"
   ],

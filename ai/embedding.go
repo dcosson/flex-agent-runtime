@@ -1,6 +1,6 @@
 package ai
 
-import internal "h2-agent-runtime/internal/ai"
+import internal "flex-agent-runtime/internal/ai"
 
 type (
 	EmbeddingRequest  = internal.EmbeddingRequest

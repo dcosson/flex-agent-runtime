@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/ai"
 )
 
 // --- Helper ---

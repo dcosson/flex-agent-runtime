@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 // SessionManager manages the lifecycle of terminal multiplexer sessions.

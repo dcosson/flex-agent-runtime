@@ -8,7 +8,7 @@ import (
 	"os"
 	"sync"
 
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 // Store persists events to a JSONL file.

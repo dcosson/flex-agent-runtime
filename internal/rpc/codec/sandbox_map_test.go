@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/sandbox"
-	"h2-agent-runtime/internal/sandbox/zfs"
-	"h2-agent-runtime/internal/tools"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/sandbox"
+	"flex-agent-runtime/internal/sandbox/zfs"
+	"flex-agent-runtime/internal/tools"
 )
 
 func TestToCreateSessionRequest(t *testing.T) {

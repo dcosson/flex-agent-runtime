@@ -1,4 +1,4 @@
-// Package external contains end-to-end tests for the h2-agent-runtime
+// Package external contains end-to-end tests for the flex-agent-runtime
 // organized in three tiers:
 //
 //   - tier1: Mock-based E2E tests and cross-mode parity. Run on every PR,

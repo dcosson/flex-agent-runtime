@@ -380,7 +380,7 @@ sequenceDiagram
 
 The project is split into two repositories with a clean dependency direction:
 
-**`h2-agent-runtime`** (this repo):
+**`flex-agent-runtime`** (this repo):
 - Core agent loop (our own LLM abstraction + tool dispatch, inspired by pi-mono)
 - Tool interfaces and built-in tool implementations (read, write, bash, grep, glob)
 - Terminal multiplexer / session manager (for running CLI-based 3rd party agents like Claude Code, Codex, Aider — they need a PTY)
@@ -396,17 +396,17 @@ The project is split into two repositories with a clean dependency direction:
 - Work ledger / beads-lite task system
 - External integrations (Linear, etc.)
 - Pluggable UI layer (headless by default — TUI, web, desktop/mobile, Slack/Telegram, pure API)
-- Imports `h2-agent-runtime` as a dependency
+- Imports `flex-agent-runtime` as a dependency
 
 **Why two repos:**
-- Clean dependency direction: `h2` depends on `h2-agent-runtime`, never the reverse
-- everything-db imports `h2-agent-runtime` without pulling in orchestration opinions
+- Clean dependency direction: `h2` depends on `flex-agent-runtime`, never the reverse
+- everything-db imports `flex-agent-runtime` without pulling in orchestration opinions
 - Runtime is a stable general-purpose library; orchestrator is an opinionated framework with faster evolution
 - Separate release cadences
 
 ### D2: Everything-DB Integration
 
-everything-db imports `h2-agent-runtime` as a Go library to implement its deferred `ActivityAgentLoop` and `ActivityLLMCall` workflow activity types.
+everything-db imports `flex-agent-runtime` as a Go library to implement its deferred `ActivityAgentLoop` and `ActivityLLMCall` workflow activity types.
 
 The `AgentTool` interface is the integration seam between placement modes:
 
@@ -426,7 +426,7 @@ This makes the agent feel built-in to edb rather than a separate piece of infras
 
 ### D3: Terminal Mux in the Runtime
 
-The terminal multiplexer (PTY allocation, session management, attach/detach) lives in `h2-agent-runtime`, not the orchestrator. 3rd party harnesses (Claude Code, Codex, Aider) are CLI processes that require a PTY to run. Without it, Mode 2 (run 3rd party harness in sandbox) doesn't work.
+The terminal multiplexer (PTY allocation, session management, attach/detach) lives in `flex-agent-runtime`, not the orchestrator. 3rd party harnesses (Claude Code, Codex, Aider) are CLI processes that require a PTY to run. Without it, Mode 2 (run 3rd party harness in sandbox) doesn't work.
 
 The TUI (user-facing terminal interface) lives in `h2` orchestrator — it's a UI concern, distinct from the infrastructure that manages agent processes.
 

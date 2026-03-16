@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/termmux/monitor"
-	"h2-agent-runtime/tests/integration/mode2/harness"
+	"flex-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/tests/integration/mode2/harness"
 )
 
 // S4: Pause/resume with idle snapshot.

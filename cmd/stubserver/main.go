@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"h2-agent-runtime/internal/ai/testutil/stubserver"
+	"flex-agent-runtime/internal/ai/testutil/stubserver"
 )
 
 func main() {

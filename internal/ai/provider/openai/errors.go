@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 func classifyHTTPError(status int, msg string) ai.ProviderErrorCode {

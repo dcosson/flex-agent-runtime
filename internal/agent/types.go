@@ -5,7 +5,7 @@ import (
 	"maps"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 // AgentState is the finite-state machine state for one agent instance.

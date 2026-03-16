@@ -12,7 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"h2-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/rpc/api"
 
 	"github.com/coder/websocket"
 )

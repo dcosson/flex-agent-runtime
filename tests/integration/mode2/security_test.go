@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/tests/integration/mode2/harness"
+	"flex-agent-runtime/tests/integration/mode2/harness"
 )
 
 // =============================================================================

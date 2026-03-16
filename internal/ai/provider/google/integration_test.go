@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 func TestIntegrationGoogleSmoke(t *testing.T) {

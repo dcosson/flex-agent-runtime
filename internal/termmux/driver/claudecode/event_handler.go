@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 // EventHandler processes three event sources (OTEL, hooks, session log)

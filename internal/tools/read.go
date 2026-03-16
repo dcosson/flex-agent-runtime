@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 const (

@@ -1,6 +1,6 @@
 package native
 
-import "h2-agent-runtime/internal/sandbox"
+import "flex-agent-runtime/internal/sandbox"
 
 type StorageBackend = sandbox.StorageBackend
 type ContainerRuntime = sandbox.ContainerRuntime

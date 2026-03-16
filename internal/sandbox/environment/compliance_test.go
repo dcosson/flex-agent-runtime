@@ -10,10 +10,10 @@ import (
 	"sync"
 	"testing"
 
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/sandbox/environment"
-	"h2-agent-runtime/internal/sandbox/environment/local"
-	"h2-agent-runtime/internal/sandbox/environment/native"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/sandbox/environment"
+	"flex-agent-runtime/internal/sandbox/environment/local"
+	"flex-agent-runtime/internal/sandbox/environment/native"
 )
 
 type envFactory func(t *testing.T) environment.ExecutionEnvironment

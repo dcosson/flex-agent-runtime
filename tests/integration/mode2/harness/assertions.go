@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/agent"
 )
 
 // EventConfidence indicates the fidelity of a normalized event.

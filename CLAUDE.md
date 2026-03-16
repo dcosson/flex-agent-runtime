@@ -1,4 +1,4 @@
-# h2-agent-runtime
+# flex-agent-runtime
 
 Go runtime foundation for agent orchestration and provider execution.
 

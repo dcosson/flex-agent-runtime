@@ -6,9 +6,9 @@ import (
 	"io"
 	"testing"
 
-	"h2-agent-runtime/internal/rpc"
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/tools"
+	"flex-agent-runtime/internal/rpc"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/tools"
 )
 
 // O1. Contract golden tests — verify each RPC method returns expected structures.

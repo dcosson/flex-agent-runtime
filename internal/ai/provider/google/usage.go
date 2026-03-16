@@ -1,6 +1,6 @@
 package google
 
-import "h2-agent-runtime/internal/ai"
+import "flex-agent-runtime/internal/ai"
 
 func mapUsage(u *usageMetadata) ai.Usage {
 	if u == nil {

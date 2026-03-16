@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	rh "h2-agent-runtime/tests/integration/runtime/harness"
+	rh "flex-agent-runtime/tests/integration/runtime/harness"
 )
 
 type Mode3ScenarioWorkload struct {

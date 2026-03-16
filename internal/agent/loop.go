@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 // NativeDriver implements the canonical LLM -> tools -> LLM turn loop.

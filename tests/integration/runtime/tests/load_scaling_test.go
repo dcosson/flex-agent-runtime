@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	rh "h2-agent-runtime/tests/integration/runtime/harness"
-	"h2-agent-runtime/tests/integration/runtime/workloads"
+	rh "flex-agent-runtime/tests/integration/runtime/harness"
+	"flex-agent-runtime/tests/integration/runtime/workloads"
 )
 
 func TestLoadScaling_PSmallAndPMedium(t *testing.T) {

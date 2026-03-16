@@ -1,4 +1,4 @@
-module h2-agent-runtime
+module flex-agent-runtime
 
 go 1.24.3
 

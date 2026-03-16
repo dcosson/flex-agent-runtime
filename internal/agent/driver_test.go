@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"h2-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai"
 )
 
 type testDriver struct{}

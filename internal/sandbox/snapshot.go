@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"h2-agent-runtime/internal/sandbox/zfs"
+	"flex-agent-runtime/internal/sandbox/zfs"
 )
 
 func (svc *SandboxHostService) TurnComplete(ctx context.Context, sessionID string) (*SnapshotResult, error) {

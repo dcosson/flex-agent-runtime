@@ -3,7 +3,7 @@ package environment
 import (
 	"time"
 
-	"h2-agent-runtime/internal/tools"
+	"flex-agent-runtime/internal/tools"
 )
 
 // SessionConfig carries parameters for environment creation.

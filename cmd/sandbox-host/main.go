@@ -10,12 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	rpcserver "h2-agent-runtime/internal/rpc/server"
-	"h2-agent-runtime/internal/rpc/transport"
-	"h2-agent-runtime/internal/sandbox"
-	"h2-agent-runtime/internal/sandbox/gvisor"
-	"h2-agent-runtime/internal/sandbox/zfs"
-	"h2-agent-runtime/internal/termmux"
+	rpcserver "flex-agent-runtime/internal/rpc/server"
+	"flex-agent-runtime/internal/rpc/transport"
+	"flex-agent-runtime/internal/sandbox"
+	"flex-agent-runtime/internal/sandbox/gvisor"
+	"flex-agent-runtime/internal/sandbox/zfs"
+	"flex-agent-runtime/internal/termmux"
 )
 
 func main() {

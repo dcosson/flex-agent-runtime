@@ -6,9 +6,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/rpc"
-	"h2-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/rpc"
+	"flex-agent-runtime/internal/rpc/api"
 )
 
 type AgentEventServer struct {

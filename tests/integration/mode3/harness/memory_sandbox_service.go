@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"h2-agent-runtime/internal/rpc"
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/sandbox"
-	"h2-agent-runtime/internal/tools"
+	"flex-agent-runtime/internal/rpc"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/sandbox"
+	"flex-agent-runtime/internal/tools"
 )
 
 const (

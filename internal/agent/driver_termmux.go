@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"h2-agent-runtime/internal/termmux"
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/termmux"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 // TermmuxDriverAdapter bridges a termmux session to the AgentDriver interface.

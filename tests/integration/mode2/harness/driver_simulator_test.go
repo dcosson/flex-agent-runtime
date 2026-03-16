@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 func TestLoadReplayScript_FixtureRoundTrip(t *testing.T) {

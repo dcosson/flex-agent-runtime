@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"go.starlark.net/starlark"
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/tools/codeinterp/datastore"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/tools/codeinterp/datastore"
 )
 
 func (s *executionState) builtinDiscover(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {

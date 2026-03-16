@@ -8,7 +8,7 @@ import (
 	"io"
 	"time"
 
-	"h2-agent-runtime/internal/termmux/monitor"
+	"flex-agent-runtime/internal/termmux/monitor"
 )
 
 // TermmuxDriverAdapter abstracts a 3rd party agent CLI for termmux session control.

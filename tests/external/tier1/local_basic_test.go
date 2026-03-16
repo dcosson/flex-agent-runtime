@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/tests/integration/harness"
-	"h2-agent-runtime/tests/integration/testutil"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/tests/integration/harness"
+	"flex-agent-runtime/tests/integration/testutil"
 )
 
 // TestL1_BasicMultiTurn verifies a three-provider-turn interaction:

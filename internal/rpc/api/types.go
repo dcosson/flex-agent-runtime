@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"h2-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/agent"
 )
 
 type CreateSessionRequest struct {

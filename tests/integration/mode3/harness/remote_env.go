@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/agent"
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/rpc/client"
-	"h2-agent-runtime/internal/rpc/server"
-	"h2-agent-runtime/internal/tools"
-	"h2-agent-runtime/internal/tools/codeinterp"
-	"h2-agent-runtime/tests/integration/testutil"
+	"flex-agent-runtime/internal/agent"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/rpc/client"
+	"flex-agent-runtime/internal/rpc/server"
+	"flex-agent-runtime/internal/tools"
+	"flex-agent-runtime/internal/tools/codeinterp"
+	"flex-agent-runtime/tests/integration/testutil"
 )
 
 type RemoteEnv struct {

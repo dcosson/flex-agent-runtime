@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/ai/testutil/stubserver"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai/testutil/stubserver"
 	"pgregory.net/rapid"
 )
 

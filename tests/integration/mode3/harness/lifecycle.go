@@ -3,7 +3,7 @@ package harness
 import (
 	"context"
 
-	"h2-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/rpc/api"
 )
 
 type SessionLifecycle struct {

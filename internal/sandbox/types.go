@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"h2-agent-runtime/internal/sandbox/gvisor"
+	"flex-agent-runtime/internal/sandbox/gvisor"
 )
 
 var (

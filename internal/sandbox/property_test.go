@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/sandbox/zfs"
-	"h2-agent-runtime/internal/tools"
+	"flex-agent-runtime/internal/sandbox/zfs"
+	"flex-agent-runtime/internal/tools"
 
 	"pgregory.net/rapid"
 )

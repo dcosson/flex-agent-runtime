@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/ai/provider/cohere"
-	"h2-agent-runtime/internal/ai/provider/google"
-	"h2-agent-runtime/internal/ai/provider/openai"
-	"h2-agent-runtime/internal/ai/testutil/stubserver"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/ai/provider/cohere"
+	"flex-agent-runtime/internal/ai/provider/google"
+	"flex-agent-runtime/internal/ai/provider/openai"
+	"flex-agent-runtime/internal/ai/testutil/stubserver"
 )
 
 // loadJSONFixture reads a JSON fixture file from testdata/fixtures/.

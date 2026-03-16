@@ -841,7 +841,7 @@ The public `ai` package re-exports embedding types alongside the existing chat t
 
 package ai
 
-import "h2-agent-runtime/internal/ai"
+import "flex-agent-runtime/internal/ai"
 
 type (
     EmbeddingRequest   = ai.EmbeddingRequest

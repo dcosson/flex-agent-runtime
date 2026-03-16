@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"h2-agent-runtime/internal/rpc"
-	"h2-agent-runtime/internal/tools"
-	mh "h2-agent-runtime/tests/integration/mode3/harness"
-	"h2-agent-runtime/tests/integration/testutil"
+	"flex-agent-runtime/internal/rpc"
+	"flex-agent-runtime/internal/tools"
+	mh "flex-agent-runtime/tests/integration/mode3/harness"
+	"flex-agent-runtime/tests/integration/testutil"
 )
 
 // S4: Pause/resume continuity (identity + workspace).

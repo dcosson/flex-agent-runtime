@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-This plan covers porting the terminal multiplexer, event handler, and agent state machine from the existing h2 codebase into h2-agent-runtime. This is battle-tested code with significant debugging work around robustness (panic recovery, lock safety, hung process detection). The goal is to preserve all of that reliability while restructuring it to fit the runtime's architecture.
+This plan covers porting the terminal multiplexer, event handler, and agent state machine from the existing h2 codebase into flex-agent-runtime. This is battle-tested code with significant debugging work around robustness (panic recovery, lock safety, hung process detection). The goal is to preserve all of that reliability while restructuring it to fit the runtime's architecture.
 
 **What we're porting:**
 - Terminal multiplexer (PTY management, session lifecycle, multi-client attach/detach)

@@ -9,10 +9,10 @@ import (
 	"sync"
 	"testing"
 
-	"h2-agent-runtime/internal/ai"
-	"h2-agent-runtime/internal/rpc/api"
-	"h2-agent-runtime/internal/sandbox/environment"
-	"h2-agent-runtime/internal/tools"
+	"flex-agent-runtime/internal/ai"
+	"flex-agent-runtime/internal/rpc/api"
+	"flex-agent-runtime/internal/sandbox/environment"
+	"flex-agent-runtime/internal/tools"
 )
 
 // mockSandboxService implements api.SandboxService for unit testing.
