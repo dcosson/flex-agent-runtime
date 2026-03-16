@@ -400,12 +400,16 @@ func TestP5_ThresholdRuleSoundness(t *testing.T) {
 
 		regressions := rh.CompareAgainstBaseline(current, baseline, tolerance)
 
-		shouldRegress := deltaPct > tolerance
+		// Compute the expected delta the same way CompareAgainstBaseline does,
+		// using the actual float64 values (not the idealized deltaPct), to avoid
+		// floating-point round-trip disagreement at boundary values.
+		recomputedDelta := 100 * ((currentVal - baseVal) / baseVal)
+		shouldRegress := recomputedDelta > tolerance
 		didRegress := len(regressions) > 0
 
 		if shouldRegress != didRegress {
-			rt.Fatalf("threshold mismatch: deltaPct=%.4f tolerance=%.4f shouldRegress=%v didRegress=%v",
-				deltaPct, tolerance, shouldRegress, didRegress)
+			rt.Fatalf("threshold mismatch: deltaPct=%.4f recomputed=%.17g tolerance=%.4f shouldRegress=%v didRegress=%v",
+				deltaPct, recomputedDelta, tolerance, shouldRegress, didRegress)
 		}
 	})
 }
