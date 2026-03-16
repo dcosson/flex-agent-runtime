@@ -14,7 +14,7 @@ This plan defines how to test the flex-agent-runtime end-to-end from the outside
 - **Concrete usage examples** showing how callers wire up agents in each placement mode.
 - **Docker-based CI** that can run the full ZFS + gVisor stack, gVisor-only, or neither -- without dedicated infrastructure (see addendum 02 for configurable backends).
 - **Tiered test matrix** that gates PRs with fast mock-based tests and runs heavier infrastructure tests nightly.
-- **Cross-mode parity verification** ensuring the same agent logic produces equivalent results across All Local, Agent in Sandbox, and Agent outside Sandbox.
+- **Cross-mode parity verification** ensuring the same agent logic produces equivalent results across All Local, Agent in Sandbox, and Tools in Sandbox.
 
 Non-goals:
 - Redefining the internal test harnesses (plans 01 through 16 cover those).
@@ -167,7 +167,7 @@ func main() {
 }
 ```
 
-### 2.3 Agent outside Sandbox (Mode 3) -- RPC Dispatch
+### 2.3 Tools in Sandbox (Mode 3) -- RPC Dispatch
 
 The agent loop runs on a controller host. Tool calls are dispatched to a remote sandbox-host via RPC. The agent uses `NativeSandboxEnvironment` as its execution backend.
 
@@ -635,7 +635,7 @@ These tests run against a sandbox-host. The infrastructure config determines whi
 | **S9: Snapshot on local-disk returns error** | Call CreateSnapshot on local-disk sandbox-host | local-disk | Returns `ErrSnapshotsNotAvailable`; agent handles gracefully |
 | **S10: All-direct execution (no gVisor)** | Execute Tier 2 classified tools without gVisor | none runtime | All tools execute directly (Tier 1); correct results returned |
 
-### 5.3 Agent outside Sandbox -- Mode 3 (Tier 2/3)
+### 5.3 Tools in Sandbox -- Mode 3 (Tier 2/3)
 
 These tests verify RPC dispatch from a local agent to a remote sandbox-host. Config combinations determine which capabilities are available.
 

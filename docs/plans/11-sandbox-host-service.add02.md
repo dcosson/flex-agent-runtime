@@ -503,9 +503,9 @@ This replaces the previous approach of deferring mismatch detection to individua
 
 ---
 
-## 7. Separate Connection Model (Agent outside Sandbox)
+## 7. Separate Connection Model (Tools in Sandbox)
 
-In the "Agent outside Sandbox" deployment mode, the orchestrator and the agent loop are separate processes, potentially running on different machines. Each process maintains its own RPC connection to the sandbox-host and constructs its own `NativeSandboxEnvironment` instance. There is no shared in-process state between them; the only coordination point is the session ID.
+In the "Tools in Sandbox" deployment mode, the orchestrator and the agent loop are separate processes, potentially running on different machines. Each process maintains its own RPC connection to the sandbox-host and constructs its own `NativeSandboxEnvironment` instance. There is no shared in-process state between them; the only coordination point is the session ID.
 
 ### 7.1 Connection Topology
 

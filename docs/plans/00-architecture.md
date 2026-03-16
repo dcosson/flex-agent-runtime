@@ -66,9 +66,9 @@ type RuntimeController interface {
 
 - **ToolBackend** — Two modes:
   - `LocalBackend` — Executes tools on the machine the agent is running on. Used in All Local and Agent in Sandbox (tools are local to that sandbox).
-  - `SandboxBackend` — Dispatches tool calls via RPC to Tool Call Sandbox infrastructure. Used in Agent outside Sandbox.
+  - `SandboxBackend` — Dispatches tool calls via RPC to Tool Call Sandbox infrastructure. Used in Tools in Sandbox.
 - **Session Sandbox** — The container/environment where an entire agent process runs in the Agent in Sandbox placement. The agent's tools use LocalBackend (they're local to the sandbox). Long-lived for the duration of the session.
-- **Tool Call Sandbox** — The ZFS + gVisor infrastructure that executes individual tool calls in the Agent outside Sandbox placement. Per-call container lifecycle. The SandboxBackend dispatches to this infrastructure via RPC.
+- **Tool Call Sandbox** — The ZFS + gVisor infrastructure that executes individual tool calls in the Tools in Sandbox placement. Per-call container lifecycle. The SandboxBackend dispatches to this infrastructure via RPC.
 
 ### Design Principles
 
@@ -82,7 +82,7 @@ type RuntimeController interface {
 
 ## Placement Modes
 
-The key architectural question is where the agent lives relative to its tools. The `AgentTool` interface is the seam — `LocalBackend` and `SandboxBackend` implement the same interface. In All Local and Agent outside Sandbox, the RuntimeController can be local or remote (shown as a dashed line); in Agent in Sandbox it's necessarily remote.
+The key architectural question is where the agent lives relative to its tools. The `AgentTool` interface is the seam — `LocalBackend` and `SandboxBackend` implement the same interface. In All Local and Tools in Sandbox, the RuntimeController can be local or remote (shown as a dashed line); in Agent in Sandbox it's necessarily remote.
 
 ```mermaid
 graph LR
@@ -94,7 +94,7 @@ graph LR
         RC2[RuntimeController] -->|RPC| M2A[Agent + Tools<br/>LocalBackend<br/>in Session Sandbox]
     end
 
-    subgraph "Agent outside Sandbox (Tool Call Sandbox)"
+    subgraph "Tools in Sandbox (Tool Call Sandbox)"
         RC3[RuntimeController] -.->|local or remote| M3A[Agent Loop] -->|SandboxBackend| M3B[Tools on<br/>Tool Call Sandbox host]
     end
 
@@ -111,7 +111,7 @@ graph LR
 
 **Agent in Sandbox** — the agent and its tools run together inside a Session Sandbox. Tools use `LocalBackend` (local to that sandbox). The sandbox can stay alive for the full session or be paused between turns — the disk (ZFS dataset) is persistent, so session state survives pause/resume. Primary path for 3rd party drivers (ClaudeCodeDriver, CodexDriver run inside the Session Sandbox).
 
-**Agent outside Sandbox** — agent loop runs on a separate machine. Sandboxes are spun up per tool call (or per turn) and paused in between, using lightweight fast-booting containers (gVisor) with persistent disk (ZFS). Tool calls are dispatched via RPC using `SandboxBackend` to Tool Call Sandbox hosts.
+**Tools in Sandbox** — agent loop runs on a separate machine. Sandboxes are spun up per tool call (or per turn) and paused in between, using lightweight fast-booting containers (gVisor) with persistent disk (ZFS). Tool calls are dispatched via RPC using `SandboxBackend` to Tool Call Sandbox hosts.
 
 > **Meta-tools (Code Interpreter):** The Starlark-based Code Interpreter has two layers: the Starlark interpreter that runs the script, and the tool calls the script makes (via `invoke()`). The interpreter itself can run either with the agent loop or with the tools. When a script calls `invoke("bash", ...)` or `invoke("read_file", ...)`, those inner tool calls dispatch through whichever backend the placement mode uses (LocalBackend or SandboxBackend).
 
@@ -268,7 +268,7 @@ graph TB
     style starlark fill:#fff3e0
 ```
 
-### Architecture Sketch (Agent outside Sandbox)
+### Architecture Sketch (Tools in Sandbox)
 
 ```mermaid
 graph TB
@@ -449,7 +449,7 @@ func (a *Agent) Abort()
 
 ### 3. Built-in Tools (`internal/tools`)
 
-Core coding tools that implement the `AgentTool` interface. Each tool has two backends: **`LocalBackend`** (direct filesystem/process execution — used in All Local and Agent in Sandbox where the agent runs on the same machine as the tools) and **`SandboxBackend`** (RPC dispatch to Tool Call Sandbox infrastructure — used in Agent outside Sandbox).
+Core coding tools that implement the `AgentTool` interface. Each tool has two backends: **`LocalBackend`** (direct filesystem/process execution — used in All Local and Agent in Sandbox where the agent runs on the same machine as the tools) and **`SandboxBackend`** (RPC dispatch to Tool Call Sandbox infrastructure — used in Tools in Sandbox).
 
 #### Tool Catalog
 
@@ -468,7 +468,7 @@ Core coding tools that implement the `AgentTool` interface. Each tool has two ba
 ```go
 // ToolBackend abstracts where tool execution happens.
 // LocalBackend implements this for direct execution (All Local, Agent in Sandbox).
-// SandboxBackend implements this as an RPC client stub (Agent outside Sandbox).
+// SandboxBackend implements this as an RPC client stub (Tools in Sandbox).
 type ToolBackend interface {
     // ExecuteTool dispatches a tool call and returns the result.
     // The backend handles tier selection, container lifecycle, and snapshots.
@@ -516,7 +516,7 @@ type LocalToolsOptions struct {
 
 ```go
 // NewSandboxTools creates the built-in tool set using SandboxBackend.
-// All tool calls are dispatched via RPC to Tool Call Sandbox infrastructure (Agent outside Sandbox).
+// All tool calls are dispatched via RPC to Tool Call Sandbox infrastructure (Tools in Sandbox).
 func NewSandboxTools(client rpc.SandboxClient, sessionID string) []agent.AgentTool
 ```
 
@@ -805,7 +805,7 @@ Interfaces between layers when they run on separate hosts.
 
 #### Tool Dispatch Protocol
 
-Used between agent loop and sandbox host in Agent outside Sandbox:
+Used between agent loop and sandbox host in Tools in Sandbox:
 
 ```go
 // SandboxClient is the client-side interface for remote tool dispatch
@@ -850,7 +850,7 @@ ConnectRPC — gRPC compatibility with simpler deployment (standard HTTP), good 
 
 ---
 
-## Data Flow: End-to-End Tool Call (Agent outside Sandbox)
+## Data Flow: End-to-End Tool Call (Tools in Sandbox)
 
 ```mermaid
 sequenceDiagram
@@ -973,12 +973,12 @@ The `AgentTool` interface is the integration seam between placement modes:
 tools := []AgentTool{localReadFile, localBash, localGrep}
 agent := agentruntime.NewAgentLoop(tools, llmConfig)
 
-// edb workflow executor, Agent outside Sandbox (production)
+// edb workflow executor, Tools in Sandbox (production)
 tools := []AgentTool{sandboxRPC.ReadFile, sandboxRPC.Bash, sandboxRPC.Grep}
 agent := agentruntime.NewAgentLoop(tools, llmConfig)
 ```
 
-Same agent loop code, different tool backends. All Local runs everything in-process (just goroutines, no RPC, no sandbox host, no ZFS). Agent outside Sandbox dispatches tool calls to Tool Call Sandbox hosts via RPC. The agent loop doesn't know or care — it just calls `AgentTool.Execute()`.
+Same agent loop code, different tool backends. All Local runs everything in-process (just goroutines, no RPC, no sandbox host, no ZFS). Tools in Sandbox dispatches tool calls to Tool Call Sandbox hosts via RPC. The agent loop doesn't know or care — it just calls `AgentTool.Execute()`.
 
 This makes the agent feel built-in to edb rather than a separate piece of infrastructure. The workflow engine dispatches `ActivityAgentLoop` → runtime runs the loop → events flow back as activity progress/completion via the existing ERC patterns.
 
