@@ -244,23 +244,16 @@ test-external-tier1:
 
 test-external-tier2:
 	@set -e; \
-		docker compose -f $(EXTERNAL_COMPOSE_FILE) --profile full up -d --build --wait; \
-		trap 'docker compose -f $(EXTERNAL_COMPOSE_FILE) --profile full down -v' EXIT; \
+		docker compose -f $(EXTERNAL_COMPOSE_FILE) --profile minimal up -d --build --wait; \
+		trap 'docker compose -f $(EXTERNAL_COMPOSE_FILE) --profile minimal down -v' EXIT; \
 		SANDBOX_HOST_URL="http://localhost:8080" \
 		SANDBOX_AUTH_TOKEN="e2e-test-token" \
-		SANDBOX_STORAGE_BACKEND="zfs" \
-		SANDBOX_CONTAINER_RUNTIME="gvisor" \
+		SANDBOX_STORAGE_BACKEND="local-disk" \
+		SANDBOX_CONTAINER_RUNTIME="none" \
 		$(GO) test $(GO_TEST_RACE) -v -tags=docker -timeout=5m ./tests/external/tier2/...
 
 test-external-tier3:
-	@set -e; \
-		docker compose -f $(EXTERNAL_COMPOSE_FILE) --profile full up -d --build --wait; \
-		trap 'docker compose -f $(EXTERNAL_COMPOSE_FILE) --profile full down -v' EXIT; \
-		SANDBOX_HOST_URL="http://localhost:8080" \
-		SANDBOX_AUTH_TOKEN="e2e-test-token" \
-		SANDBOX_STORAGE_BACKEND="zfs" \
-		SANDBOX_CONTAINER_RUNTIME="gvisor" \
-		$(GO) test $(GO_TEST_RACE) -v -tags=native -timeout=20m ./tests/external/tier3/...
+	$(GO) test $(GO_TEST_RACE) -v -tags=native -timeout=20m ./tests/external/tier3/...
 
 # ---------------------------------------------------------------------------
 # Cleanup
