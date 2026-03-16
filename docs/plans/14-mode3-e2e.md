@@ -96,7 +96,7 @@ sequenceDiagram
 ## 3. Test Suite Structure
 
 ```text
-e2etests/
+tests/integration/
 ├── mode3/
 │   ├── harness/
 │   │   ├── remote_env.go          # boots RPC client + remote host fixture
@@ -178,7 +178,7 @@ Event ordering guarantees (referencing event types from plan 05 — agent):
 | `internal/rpc` | Remote transport | ConnectRPC methods for lifecycle, tool execution, snapshots, events |
 | `internal/sandbox` | Tool Call Sandbox backend | remote session lifecycle and tiered tool execution (ZFS + gVisor infrastructure) |
 | `internal/tools` | Remote tool adapter | `NewSandboxTools` + `ToolResponse.snapshot_id` propagation |
-| `e2etests/mode3` | Validation harness | deterministic remote environment and assertions |
+| `tests/integration/mode3` | Validation harness | deterministic remote environment and assertions |
 
 ---
 
@@ -304,7 +304,7 @@ On failure, capture:
 
 ## 12. Exit Criteria
 
-1. Mode 3 E2E suite exists under `e2etests/mode3/` and is runnable in deterministic mode.
+1. Mode 3 E2E suite exists under `tests/integration/mode3/` and is runnable in deterministic mode.
 2. Lifecycle scenarios cover create/execute/list snapshots/rollback/pause/resume/destroy.
 3. Tier-mixed remote tool workflows pass with snapshot metadata assertions.
 4. Remote event streaming scenario passes with ordered milestone checks.
@@ -362,7 +362,7 @@ On failure, capture:
 
 | # | Exit Criterion | Status | Evidence |
 |---|---------------|--------|----------|
-| 1 | Mode 3 E2E suite exists under `e2etests/mode3/` and is runnable in deterministic mode | PASS | 6 scenario test files + harness/ with MemorySandboxService, RemoteEnv, lifecycle, assertions |
+| 1 | Mode 3 E2E suite exists under `tests/integration/mode3/` and is runnable in deterministic mode | PASS | 6 scenario test files + harness/ with MemorySandboxService, RemoteEnv, lifecycle, assertions |
 | 2 | Lifecycle scenarios cover create/execute/list snapshots/rollback/pause/resume/destroy | PASS | mode3_happy_path_test.go, mode3_rollback_test.go, mode3_pause_resume_test.go, mode3_session_recovery_test.go |
 | 3 | Tier-mixed remote tool workflows pass with snapshot metadata assertions | PASS | mode3_tier_mix_test.go validates Tier 1/2 routing and snapshot ID sequence |
 | 4 | Remote event streaming scenario passes with ordered milestone checks | PASS | mode3_event_stream_test.go with AssertEventSequence for canonical lifecycle |

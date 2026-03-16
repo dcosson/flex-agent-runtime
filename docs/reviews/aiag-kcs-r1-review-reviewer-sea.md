@@ -8,7 +8,7 @@
 
 ## Test Execution
 
-- `go test -race ./e2etests/mode2/ -v -count=1`: PASS (all 40+ tests, no races)
+- `go test -race ./tests/integration/mode2/ -v -count=1`: PASS (all 40+ tests, no races)
 - Both new tests pass: TestPauseResumeLifecycleAPI, TestF4_PauseResumeRaceUnderBurst
 
 ## Findings

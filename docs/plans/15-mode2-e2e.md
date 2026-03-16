@@ -93,7 +93,7 @@ sequenceDiagram
 ## 3. Test Suite Structure
 
 ```text
-e2etests/
+tests/integration/
 ├── mode2/
 │   ├── harness/
 │   │   ├── sandbox_env.go         # sandbox session + workspace fixtures
@@ -314,7 +314,7 @@ On failure, capture:
 
 ## 12. Exit Criteria
 
-1. Mode 2 E2E suite exists under `e2etests/mode2/` with deterministic scenarios.
+1. Mode 2 E2E suite exists under `tests/integration/mode2/` with deterministic scenarios.
 2. Driver launch + event normalization scenarios pass for at least one concrete driver.
 3. Attach/detach and pause/resume lifecycle scenarios pass.
 4. Config injection/path-stability scenarios pass.
@@ -362,7 +362,7 @@ On failure, capture:
 
 | # | Exit Criterion | Status | Evidence |
 |---|---------------|--------|----------|
-| 1 | Mode 2 E2E suite exists under `e2etests/mode2/` with deterministic scenarios | PASS | 6 scenario test files + harness/ with driver simulator, config injection, sandbox env, termmux env, assertions |
+| 1 | Mode 2 E2E suite exists under `tests/integration/mode2/` with deterministic scenarios | PASS | 6 scenario test files + harness/ with driver simulator, config injection, sandbox env, termmux env, assertions |
 | 2 | Driver launch + event normalization scenarios pass for at least one driver | PASS | mode2_driver_launch_test.go, mode2_event_normalization_test.go with DeterministicDriverSimulator |
 | 3 | Attach/detach and pause/resume lifecycle scenarios pass | PARTIAL | Attach/detach fully tested; pause/resume tested at sandbox/snapshot level but actual TermmuxDriverAdapter pause/resume API calls are skipped (see gap) |
 | 4 | Config injection/path-stability scenarios pass | PASS | mode2_config_persistence_test.go with ZFS-separate config dir path scheme |

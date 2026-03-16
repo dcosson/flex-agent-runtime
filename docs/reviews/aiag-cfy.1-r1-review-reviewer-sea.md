@@ -10,7 +10,7 @@
 
 ### P2 - slopePerHour computes per-interval slope, not per-hour
 
-**Location:** `e2etests/runtime/harness/telemetry.go:128-133`
+**Location:** `tests/integration/runtime/harness/telemetry.go:128-133`
 
 **Problem**
 `slopePerHour` divides `(last - first) / (len(in) - 1)`, computing slope per sample interval, not per hour. The function name and the threshold field `RPCErrorSlopePctHr` both imply per-hour normalization, but `RecordDriftSample` doesn't record timestamps, so there's no way to time-normalize.
@@ -29,7 +29,7 @@ Option 1 is the most robust. Option 3 is the simplest if you want to defer time-
 
 ### P3 - Dead code in MetricsMap
 
-**Location:** `e2etests/runtime/harness/artifacts.go:110-115`
+**Location:** `tests/integration/runtime/harness/artifacts.go:110-115`
 
 **Problem**
 ```go
@@ -49,7 +49,7 @@ Remove the dead code (lines 110-115).
 
 ### P3 - Workloads lack deterministic seed support
 
-**Location:** `e2etests/runtime/workloads/mode2_workloads.go:28`, `e2etests/runtime/workloads/mode3_workloads.go:29`
+**Location:** `tests/integration/runtime/workloads/mode2_workloads.go:28`, `tests/integration/runtime/workloads/mode3_workloads.go:29`
 
 **Problem**
 Both workload types use `rand.Intn()` from the global random source for jitter. The plan specifies "Fixed random seeds for workload generation in deterministic lanes" (§9.2), but there's no way to pass a seed or `*rand.Rand` to the workloads for reproducible runs.

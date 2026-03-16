@@ -1118,7 +1118,7 @@ h2-agent-runtime/
 │   └── sandbox-host/               # Sandbox host service binary
 │       └── main.go
 │
-├── e2etests/                        # End-to-end and integration tests
+├── tests/integration/                        # End-to-end and integration tests
 │   ├── agent_local_test.go          # Agent + LocalBackend tools E2E
 │   ├── agent_sandbox_test.go        # Agent + SandboxBackend tools E2E
 │   ├── sandbox_host_test.go         # Sandbox host service E2E
@@ -1303,9 +1303,9 @@ Each component has its own testing section in its plan doc. The overall strategy
 | **Property** | Invariants under random input (EventStream ordering, transform idempotency) | `*_test.go` alongside source |
 | **Fuzz** | Crash/panic resistance (SSE parser, JSON schema, type coercion) | `*_test.go` alongside source |
 | **Integration** | Real LLM API calls, real ZFS operations | Build-tag gated in `internal/` |
-| **E2E** | Full agent loop with tools, sandbox host service | `e2etests/` |
+| **E2E** | Full agent loop with tools, sandbox host service | `tests/integration/` |
 | **Benchmark** | Performance regression tracking | `benchmarks/` |
-| **Comparison oracle** | Go vs TypeScript reference implementation | `e2etests/` |
+| **Comparison oracle** | Go vs TypeScript reference implementation | `tests/integration/` |
 
 ### Performance Considerations
 

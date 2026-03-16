@@ -1,13 +1,16 @@
 GO ?= go
+RACE ?= 1
+GO_TEST_RACE := $(if $(filter 0 false no,$(RACE)),,-race)
 PKGS := $(shell $(GO) list ./...)
 
-.PHONY: help build fmt fmt-check vet deps-staticcheck check test test-race test-e2e \
+.PHONY: help build fmt fmt-check vet deps deps-staticcheck check test test-race test-integration \
 	test-harness test-harness-t2 \
 	test-anthropic-harness-fast test-anthropic-harness-race \
 	test-harness-openai test-harness-google \
 	test-harness-codeinterp test-harness-e2e-codeinterp \
 	test-harness-mode3-fast test-harness-mode3-standard test-harness-mode3-nightly \
 	test-harness-runtime-fast test-harness-runtime-standard test-harness-runtime-nightly test-harness-runtime-weekly \
+	test-harness-all \
 	test-bench test-bench-ai-core test-anthropic-harness-bench test-bench-openai test-bench-google test-bench-codeinterp \
 	test-stress-openai test-stress-google test-stress-codeinterp test-stress-e2e-codeinterp \
 	test-fuzz test-fuzz-t2 \
@@ -23,14 +26,16 @@ help:
 	@echo "  fmt-check                        Check gofmt formatting without modifying files"
 	@echo "  vet                              Run go vet across all packages"
 	@echo "  check                            Run formatting, vet, and staticcheck"
+	@echo "  deps                             Install/check tool dependencies (staticcheck + Docker check)"
 	@echo "  deps-staticcheck                 Install staticcheck dependency"
 	@echo ""
 	@echo "=== Core Tests ==="
 	@echo "  test                             Unit + small integration (all packages)"
 	@echo "  test-race                        Full test suite with race detector"
-	@echo "  test-e2e                         E2E agent + tools scenarios"
+	@echo "  test-integration                 Integration agent + tools scenarios"
 	@echo ""
 	@echo "=== Harness Tests ==="
+	@echo "  note                             Set RACE=0 to disable race detector on harness/external/integration targets"
 	@echo "  test-harness                     AI-core harness (P*/D*/S* property tests)"
 	@echo "  test-harness-t2                  AI-core T2 thorough property tier (10K rapid checks)"
 	@echo "  test-anthropic-harness-fast      Anthropic harness: property + stub/fault + deterministic/security"
@@ -46,6 +51,7 @@ help:
 	@echo "  test-harness-runtime-standard    Runtime harness PR-standard (~30m): deterministic runtime families"
 	@echo "  test-harness-runtime-nightly     Runtime harness nightly (~4h): benchmarks + soak checks"
 	@echo "  test-harness-runtime-weekly      Runtime harness weekly (~36h): long soak + full benchmarks"
+	@echo "  test-harness-all                 Run all harness targets"
 	@echo ""
 	@echo "=== Benchmarks ==="
 	@echo "  test-bench                       Run all benchmarks"
@@ -92,6 +98,13 @@ vet:
 deps-staticcheck:
 	$(GO) install honnef.co/go/tools/cmd/staticcheck@latest
 
+deps: deps-staticcheck
+	@if ! command -v docker >/dev/null 2>&1; then \
+		echo "Docker Desktop required — install from https://docker.com/products/docker-desktop"; \
+	else \
+		echo "docker found: $$(command -v docker)"; \
+	fi
+
 check: fmt vet
 	@echo "==> staticcheck"
 	$(GO) run honnef.co/go/tools/cmd/staticcheck@latest ./...
@@ -106,8 +119,8 @@ test:
 test-race:
 	$(GO) test -race ./...
 
-test-e2e:
-	$(GO) test -race ./e2etests/... -count=1 -timeout 120s
+test-integration:
+	$(GO) test $(GO_TEST_RACE) ./tests/integration/... -count=1 -timeout 120s
 
 # ---------------------------------------------------------------------------
 # Harness Tests
@@ -126,40 +139,42 @@ test-anthropic-harness-race:
 	$(GO) test -race ./internal/ai/provider/anthropic -run 'Test(P|S|F|D|SEC)' -skip 'TestST1_LongSoak|TestST3_BurstToolStress' -count=1
 
 test-harness-openai:
-	$(GO) test -race ./internal/ai/provider/openai/ -run 'Test(P[1-6]_|F[1-6]_|S[2-4]_|SEC[1-3]_|O3_)'
+	$(GO) test $(GO_TEST_RACE) ./internal/ai/provider/openai/ -run 'Test(P[1-6]_|F[1-6]_|S[2-4]_|SEC[1-3]_|O3_)'
 
 test-harness-google:
-	$(GO) test -race ./internal/ai/provider/google/ -run 'Test(P[1-6]_|F[1-5]_|S[1-2]_|GS[1-5]_|SEC[1-3]_|EC1_)'
+	$(GO) test $(GO_TEST_RACE) ./internal/ai/provider/google/ -run 'Test(P[1-6]_|F[1-5]_|S[1-2]_|GS[1-5]_|SEC[1-3]_|EC1_)'
 
 test-harness-codeinterp:
-	$(GO) test -race ./internal/tools/codeinterp -run 'Test(P[1-8]_|F[1-8]_|O[1-5]_|S[1-6]_|ST[1-5]_|SEC[1-7]_)'
+	$(GO) test $(GO_TEST_RACE) ./internal/tools/codeinterp -run 'Test(P[1-8]_|F[1-8]_|O[1-5]_|S[1-6]_|ST[1-5]_|SEC[1-7]_)'
 
 test-harness-e2e-codeinterp:
-	$(GO) test -race ./e2etests/scenarios -run 'Test(Scenario_CodeInterpreterWorkflow|P[1-5]_|F[1-5]_|O[1-3]_|S[1-3]_|B[1-4]_|ST[1-3]_|SEC[1-4]_)'
+	$(GO) test $(GO_TEST_RACE) ./tests/integration/scenarios -run 'Test(Scenario_CodeInterpreterWorkflow|P[1-5]_|F[1-5]_|O[1-3]_|S[1-3]_|B[1-4]_|ST[1-3]_|SEC[1-4]_)'
 
 test-harness-mode3-fast:
-	MODE3_HARNESS_TIER=pr-fast $(GO) test -race ./e2etests/mode3/harness -run 'Test(P[1-2]_|S1_|SEC1_)'
+	MODE3_HARNESS_TIER=pr-fast $(GO) test $(GO_TEST_RACE) ./tests/integration/mode3/harness -run 'Test(P[1-2]_|S1_|SEC1_)'
 
 test-harness-mode3-standard:
-	MODE3_HARNESS_TIER=pr-standard $(GO) test -race ./e2etests/mode3/harness -run 'Test(P[1-5]_|F[1-5]_|O[1-3]_|S[1-3]_|SEC[1-4]_)'
+	MODE3_HARNESS_TIER=pr-standard $(GO) test $(GO_TEST_RACE) ./tests/integration/mode3/harness -run 'Test(P[1-5]_|F[1-5]_|O[1-3]_|S[1-3]_|SEC[1-4]_)'
 
 test-harness-mode3-nightly:
-	MODE3_HARNESS_TIER=nightly $(GO) test -race ./e2etests/mode3/harness -run 'Test(F[1-8]_|ST[1-3]_|SEC[1-4]_)' -count=1
-	MODE3_HARNESS_TIER=nightly $(GO) test ./e2etests/mode3/harness -run '^$$' -bench 'BenchmarkB[1-4]_' -benchmem
+	MODE3_HARNESS_TIER=nightly $(GO) test $(GO_TEST_RACE) ./tests/integration/mode3/harness -run 'Test(F[1-8]_|ST[1-3]_|SEC[1-4]_)' -count=1
+	MODE3_HARNESS_TIER=nightly $(GO) test ./tests/integration/mode3/harness -run '^$$' -bench 'BenchmarkB[1-4]_' -benchmem
 
 test-harness-runtime-fast:
-	$(GO) test -race ./e2etests/runtime/tests -run 'TestLoadScaling_PSmallAndPMedium|TestLoadScaling_BaselineComparisonAndGating|TestHostConfig_LoadsFleetConfig'
+	$(GO) test $(GO_TEST_RACE) ./tests/integration/runtime/tests -run 'TestLoadScaling_PSmallAndPMedium|TestLoadScaling_BaselineComparisonAndGating|TestHostConfig_LoadsFleetConfig'
 
 test-harness-runtime-standard:
-	$(GO) test -race ./e2etests/runtime/tests -run 'TestLoadScaling_|TestSoakStability_|TestSnapshotGrowth_|TestContainerBootBenchmark_|TestRPCLatencyProfiling_|TestHostConfig_'
+	$(GO) test $(GO_TEST_RACE) ./tests/integration/runtime/tests -run 'TestLoadScaling_|TestSoakStability_|TestSnapshotGrowth_|TestContainerBootBenchmark_|TestRPCLatencyProfiling_|TestHostConfig_'
 
 test-harness-runtime-nightly:
-	$(GO) test -race ./e2etests/runtime/tests -run 'TestLoadScaling_|TestSoakStability_|TestSnapshotGrowth_|TestContainerBootBenchmark_|TestRPCLatencyProfiling_|TestHostConfig_' -count=1
-	$(GO) test ./e2etests/runtime/tests -run '^$$' -bench 'BenchmarkContainerBoot_' -benchmem
+	$(GO) test $(GO_TEST_RACE) ./tests/integration/runtime/tests -run 'TestLoadScaling_|TestSoakStability_|TestSnapshotGrowth_|TestContainerBootBenchmark_|TestRPCLatencyProfiling_|TestHostConfig_' -count=1
+	$(GO) test ./tests/integration/runtime/tests -run '^$$' -bench 'BenchmarkContainerBoot_' -benchmem
 
 test-harness-runtime-weekly:
-	RUNTIME_HARNESS_TIER=weekly MODE3_ENABLE_SOAK=1 $(GO) test -race ./e2etests/runtime/tests -run 'TestSoakStability_|TestSnapshotGrowth_|TestRPCLatencyProfiling_|TestHostConfig_' -count=1
-	$(GO) test ./e2etests/runtime/tests -run '^$$' -bench 'BenchmarkContainerBoot_' -benchmem
+	RUNTIME_HARNESS_TIER=weekly MODE3_ENABLE_SOAK=1 $(GO) test $(GO_TEST_RACE) ./tests/integration/runtime/tests -run 'TestSoakStability_|TestSnapshotGrowth_|TestRPCLatencyProfiling_|TestHostConfig_' -count=1
+	$(GO) test ./tests/integration/runtime/tests -run '^$$' -bench 'BenchmarkContainerBoot_' -benchmem
+
+test-harness-all: test-harness test-harness-t2 test-anthropic-harness-fast test-anthropic-harness-race test-harness-openai test-harness-google test-harness-codeinterp test-harness-e2e-codeinterp test-harness-mode3-fast test-harness-mode3-standard test-harness-mode3-nightly test-harness-runtime-fast test-harness-runtime-standard test-harness-runtime-nightly test-harness-runtime-weekly
 
 # ---------------------------------------------------------------------------
 # Benchmarks
@@ -201,7 +216,7 @@ test-stress-codeinterp:
 	$(GO) test -race ./internal/tools/codeinterp -run 'TestST[1-5]_' -count=1
 
 test-stress-e2e-codeinterp:
-	$(GO) test -race ./e2etests/scenarios -run 'TestST[1-3]_' -count=1
+	$(GO) test $(GO_TEST_RACE) ./tests/integration/scenarios -run 'TestST[1-3]_' -count=1
 
 # ---------------------------------------------------------------------------
 # Fuzz
@@ -224,13 +239,13 @@ test-fuzz-t2:
 # ---------------------------------------------------------------------------
 
 test-external-tier1:
-	$(GO) test -v -timeout=2m ./e2etests/external/tier1/...
+	$(GO) test $(GO_TEST_RACE) -v -timeout=2m ./tests/external/tier1/...
 
 test-external-tier2:
-	$(GO) test -v -tags=docker -timeout=5m ./e2etests/external/tier2/...
+	$(GO) test $(GO_TEST_RACE) -v -tags=docker -timeout=5m ./tests/external/tier2/...
 
 test-external-tier3:
-	$(GO) test -v -tags=native -timeout=20m ./e2etests/external/tier3/...
+	$(GO) test $(GO_TEST_RACE) -v -tags=native -timeout=20m ./tests/external/tier3/...
 
 # ---------------------------------------------------------------------------
 # Cleanup

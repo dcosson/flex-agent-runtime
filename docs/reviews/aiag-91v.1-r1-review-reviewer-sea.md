@@ -10,7 +10,7 @@
 
 ### P2 - ResolveConflicts deduplicates by event type only, ignoring event identity
 
-**Location:** `e2etests/mode2/harness/assertions.go:59-100`
+**Location:** `tests/integration/mode2/harness/assertions.go:59-100`
 
 **Problem**
 `ResolveConflicts` groups events by `Event.Type` within a time window and keeps the highest-priority source. But it doesn't distinguish different logical events of the same type — e.g., two `tool_started` events for different tools (`read` and `write`) arriving 50ms apart would be incorrectly deduplicated, with one silently dropped. The algorithm should also compare identity fields (tool name, call ID, session ID) when deciding whether events are duplicates.
@@ -24,7 +24,7 @@ Add an identity comparison to the inner loop: only treat events as conflicts whe
 
 ### P2 - S4 pause/resume test doesn't exercise actual pause/resume lifecycle
 
-**Location:** `e2etests/mode2/mode2_pause_resume_test.go`
+**Location:** `tests/integration/mode2/mode2_pause_resume_test.go`
 
 **Problem**
 The test name is `TestPauseResumeWithIdleSnapshot` and the plan §4.4 says "Pause session after idle transition snapshot. Resume later and continue prompt flow." But the test never calls any pause or resume API. It runs a simulator, creates a snapshot marker, then reads back workspace files and config credentials — which trivially succeed since nothing was paused or resumed. The test only proves file persistence on the same filesystem, not actual session lifecycle control.
@@ -38,7 +38,7 @@ Either add actual pause/resume calls to the test (if the termmux/adapter API sup
 
 ### P2 - S5 config persistence test doesn't test actual cross-restart persistence
 
-**Location:** `e2etests/mode2/mode2_config_persistence_test.go:47-79`
+**Location:** `tests/integration/mode2/mode2_config_persistence_test.go:47-79`
 
 **Problem**
 `TestConfigDirectoryPersistence` creates two independent `SandboxEnv` instances with the same session ID to "simulate restart." But each `SandboxEnv` calls `t.TempDir()` to get a different base directory, so `sandbox1.ConfigDir` and `sandbox2.ConfigDir` are at completely different absolute paths. The test then only compares the relative path suffix (`configs/<sessionID>`) — it doesn't verify that credentials injected in sandbox1 are readable from sandbox2.
@@ -52,7 +52,7 @@ Either (a) have the second `SandboxEnv` share the same data directory as the fir
 
 ### P3 - No unit tests for harness package
 
-**Location:** `e2etests/mode2/harness/`
+**Location:** `tests/integration/mode2/harness/`
 
 **Problem**
 The harness package has `[no test files]` (visible in test output). The `EventNormalizer` especially has non-trivial logic in `ResolveConflicts` (conflict detection, priority comparison, used-tracking) that would benefit from targeted unit tests — edge cases like zero events, single source, all same priority, events outside window, etc. The assertion helpers also have subtle subsequence-matching logic.
@@ -64,7 +64,7 @@ Add `assertions_test.go` with unit tests for `ResolveConflicts` edge cases and `
 
 ### P3 - basic_session.jsonl fixture and LoadReplayScript are unused
 
-**Location:** `e2etests/fixtures/driver_logs/basic_session.jsonl`, `e2etests/mode2/harness/driver_simulator.go:83-103`
+**Location:** `tests/integration/fixtures/driver_logs/basic_session.jsonl`, `tests/integration/mode2/harness/driver_simulator.go:83-103`
 
 **Problem**
 The `basic_session.jsonl` fixture file is well-formed (9 entries covering a complete session lifecycle with mixed OTEL/PTY/hook sources) and `LoadReplayScript`/`ParseReplayScript` exist to load it. But no test uses either — all tests construct replay entries inline via helpers like `buildLaunchReplayScript`. The fixture and loader are dead code.

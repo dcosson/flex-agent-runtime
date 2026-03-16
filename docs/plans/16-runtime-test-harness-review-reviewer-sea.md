@@ -44,7 +44,7 @@ Mode 2 and Mode 3 workloads implement this interface by wrapping their existing 
 
 **Section:** Plan §5.2 (Threshold Policy)
 **Issue:** The plan mentions "versioned baseline files" and "Regressions fail CI if above tolerated envelopes unless explicitly approved" but doesn't define: (a) who creates initial baselines, (b) how baselines are updated when performance legitimately changes (e.g., after a planned architectural change), (c) what the approval process for exceptions looks like (PR comment? config file? CI flag?), (d) where baselines are stored (in-repo? external artifact store?). Without this, the regression gating will either be too strict (blocking legitimate changes) or too loose (manually overridden on every failure).
-**Recommendation:** Define the baseline workflow: baselines stored in-repo under `e2etests/runtime/reports/baselines/`. New baselines created by running a dedicated "baseline update" CI job that produces and commits updated baseline files. Exceptions require a `BASELINE_OVERRIDE=true` CI variable with a linked issue tracking the expected regression. Automatic baseline drift detection alerts when baselines haven't been updated in >30 days.
+**Recommendation:** Define the baseline workflow: baselines stored in-repo under `tests/integration/runtime/reports/baselines/`. New baselines created by running a dedicated "baseline update" CI job that produces and commits updated baseline files. Exceptions require a `BASELINE_OVERRIDE=true` CI variable with a linked issue tracking the expected regression. Automatic baseline drift detection alerts when baselines haven't been updated in >30 days.
 
 ### [F5] Test harness meta-tests (companion doc) have ambitious coverage without implementation guidance — P3
 

@@ -10,7 +10,7 @@
 
 ### P3 - RetrySequence test doesn't assert on retry behavior
 
-**Location:** `e2etests/external/tier1/stubserver_test.go:513-520`
+**Location:** `tests/external/tier1/stubserver_test.go:513-520`
 
 **Problem**
 The test logs "stubserver received 1 requests" — the provider doesn't retry on 429, so the 429→429→200 sequence is never exercised. The test passes but is functionally equivalent to F3 (single 429 error handling). The comment at line 518-519 acknowledges this ("Even if retry isn't implemented yet...") which is honest, but the test doesn't assert on anything retry-specific.
@@ -22,7 +22,7 @@ Either: (a) assert that `len(reqs) >= 3` and skip the test with `t.Skip("provide
 
 ### P3 - Multi-turn test has tracked-but-unasserted variables
 
-**Location:** `e2etests/external/tier1/stubserver_test.go:176-212`
+**Location:** `tests/external/tier1/stubserver_test.go:176-212`
 
 **Problem**
 `hasToolStarted` and `hasToolCompleted` are tracked through the event loop but then suppressed with blank identifier assignments (`_ = hasToolStarted`, `_ = hasToolCompleted`) at lines 211-212. This looks like assertions that were started but abandoned. The comment at lines 183-187 explains the tool isn't registered, but the blank identifier pattern is confusing — a reader expects these to be asserted on.

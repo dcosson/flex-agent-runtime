@@ -10,7 +10,7 @@
 
 ### P1 - Lock ordering deadlock between DestroySession and executeTool
 
-**Location:** `e2etests/mode3/harness/memory_sandbox_service.go:217-233,380-429`
+**Location:** `tests/integration/mode3/harness/memory_sandbox_service.go:217-233,380-429`
 
 **Problem**
 `DestroySession` acquires service lock (`m.mu.Lock()` line 221) then session lock (`sess.mu.Lock()` line 228). `executeTool` acquires session lock (`sess.mu.Lock()` line 391) then service lock (`m.mu.Lock()` line 421, for routes append). This is an ABBA deadlock: if two goroutines hit these methods concurrently on the same session, each holds one lock and waits for the other.
@@ -36,7 +36,7 @@ return resp, nil
 
 ### P2 - No unit tests for MemorySandboxService
 
-**Location:** `e2etests/mode3/harness/`
+**Location:** `tests/integration/mode3/harness/`
 
 **Problem**
 The bead description lists "Unit tests for MemorySandboxService, all harness components" as a deliverable. The harness package has no test files (`[no test files]` in test output). The MemorySandboxService is 602 lines with state machine logic, rollback with snapshot truncation, tool execution routing, and concurrent access patterns. It's exercised indirectly through the 6 E2E scenarios, but direct unit tests would cover edge cases (invalid state transitions, double-destroy, concurrent create+destroy, rollback to nonexistent snapshot, etc.) more thoroughly.
@@ -48,7 +48,7 @@ Add `memory_sandbox_service_test.go` with targeted unit tests for: (1) state mac
 
 ### P3 - DestroySession "destroying" state is unobservable
 
-**Location:** `e2etests/mode3/harness/memory_sandbox_service.go:228-229`
+**Location:** `tests/integration/mode3/harness/memory_sandbox_service.go:228-229`
 
 **Problem**
 `sess.state = memoryStateDestroying` is immediately followed by `sess.state = memoryStateDestroyed` with no observable side effects between them. The "destroying" state exists in the plan's FSM but is never observable in the fake. This is fine for a test fake but slightly misleading — a reader might expect cleanup to happen between states.
@@ -60,7 +60,7 @@ Either remove the `memoryStateDestroying` assignment (since it's immediately ove
 
 ### P3 - S6 event wait uses polling loop
 
-**Location:** `e2etests/mode3/mode3_event_stream_test.go:50-65`
+**Location:** `tests/integration/mode3/mode3_event_stream_test.go:50-65`
 
 **Problem**
 The test polls for `EventSessionEnded` with `time.Sleep(10ms)` in a loop. This works but is a minor smell — a channel-based wait (similar to the idle wait in `PromptAndWait`) would be cleaner and avoid unnecessary CPU churn.

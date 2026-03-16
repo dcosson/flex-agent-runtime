@@ -32,4 +32,4 @@ Run `make test` to verify tests pass. Use `make test-race` for race detection.
 - `make test-harness` — harness-focused property/determinism/concurrency tests
 - `make test-bench` — benchmark suite
 - `make test-fuzz` — short fuzz runs
-- `make test-e2e` — e2e placeholder
+- `make test-integration` — integration scenario suite

@@ -52,7 +52,7 @@ The agent framework, built-in tools, and code interpreter. These can be partiall
 | [05-agent](./05-agent.md) | `internal/agent` | Agent struct, agent loop (LLM → tools → LLM cycle), AgentMessage/AgentTool/AgentEvent types, subscription model, state management, steering, follow-up, terminal tools. Full unit tests with mock provider, integration test with real provider. | 01-ai-core, 02-provider-anthropic | Not started |
 | [06-built-in-tools](./06-built-in-tools.md) | `internal/tools` | Built-in tool implementations: read, write, edit, bash, grep, glob, git ops. ToolBackend interface (LocalBackend vs SandboxBackend) for dispatch. LocalTools factory. Tool-level unit tests. | 01-ai-core, 05-agent | Not started |
 | [07-code-interpreter](./07-code-interpreter.md) | `internal/tools/codeinterp` | Starlark code interpreter meta-tool: sandboxed interpreter, progressive tool discovery (discover/describe/invoke), recursive LLM calls (llm_call/llm_batch), pluggable DataStore (memory/fs/blob/sql), two-tier execution (lightweight/full), configurable limits. | 01-ai-core, 05-agent, 06-built-in-tools | Not started |
-| [08-agent-tools-e2e](./08-agent-tools-e2e.md) | Agent + tools E2E | End-to-end tests: agent loop with local built-in tools, multi-turn conversations with file operations and bash, code interpreter workflows. Tests go in `e2etests/`. | 05-agent, 06-built-in-tools, 07-code-interpreter | Not started |
+| [08-agent-tools-e2e](./08-agent-tools-e2e.md) | Agent + tools E2E | End-to-end tests: agent loop with local built-in tools, multi-turn conversations with file operations and bash, code interpreter workflows. Tests go in `tests/integration/`. | 05-agent, 06-built-in-tools, 07-code-interpreter | Not started |
 
 ## Batch 4: Infrastructure Services
 

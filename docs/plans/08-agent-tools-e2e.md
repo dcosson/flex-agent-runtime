@@ -3,7 +3,7 @@
 **Status:** Approved
 **Depends on:** 05-agent, 06-built-in-tools, 07-code-interpreter
 **Depended on by:** 14-mode3-e2e
-**Implements:** `e2etests/` suite validating full agent-loop behavior with built-in tools and code interpreter workflows across local execution modes.
+**Implements:** `tests/integration/` suite validating full agent-loop behavior with built-in tools and code interpreter workflows across local execution modes.
 
 ---
 
@@ -96,7 +96,7 @@ sequenceDiagram
 ### 3.1 File Layout
 
 ```text
-e2etests/
+tests/integration/
 ├── harness/
 │   ├── runner.go              # scenario execution, lifecycle, event collection, assertions, diagnostics
 │   └── exec.go                # testability wrapper for exec.Command
@@ -294,7 +294,7 @@ On scenario failure, automatically emit:
 
 ## 12. Exit Criteria
 
-1. `e2etests/` contains scenario suite covering file, bash, steering/follow-up, code interpreter, git, error recovery, and terminal-tool workflows.
+1. `tests/integration/` contains scenario suite covering file, bash, steering/follow-up, code interpreter, git, error recovery, and terminal-tool workflows.
 2. Deterministic provider mode is stable and green in CI.
 3. Live-provider smoke mode is available behind secrets gate.
 4. Failure artifacts (events, transcript, workspace diff) are generated automatically.
@@ -336,7 +336,7 @@ On scenario failure, automatically emit:
 - **Branch**: main
 - **Commit**: d1df5b5
 - **Verified by**: reviewer-sea
-- **Test verification**: `go test -race ./e2etests/... -count=1` — PASS (scenarios 11.631s)
+- **Test verification**: `go test -race ./tests/integration/... -count=1` — PASS (scenarios 11.631s)
 - **Acceptance tests**: PASS (8 scenarios; #8 live-provider smoke is credential-gated, not run)
 - **Deviations from plan**:
   - [Cosmetic] No separate `fixtures/` directory — fixtures are created inline in test Setup functions (simpler, no stale fixtures)

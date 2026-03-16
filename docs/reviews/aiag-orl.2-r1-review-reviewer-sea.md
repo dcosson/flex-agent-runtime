@@ -10,7 +10,7 @@
 
 ### P2 - F6-F8 use application-level chaos instead of TCP proxy
 
-**Location:** `e2etests/mode3/harness/harness_suites_test.go:305-347,711-806`
+**Location:** `tests/integration/mode3/harness/harness_suites_test.go:305-347,711-806`
 
 **Problem**
 The plan §2 note explicitly says "F6-F8 use a TCP proxy (such as toxiproxy) interposed between the RPC client and the Tool Call Sandbox host to inject network-level faults without modifying application code." The implementation uses `chaosSandboxService` which wraps the service interface and injects errors at the application layer via `failingStream`. This validates error handling/classification but doesn't exercise real network-level failure modes — TCP RST mid-transfer, partial response writes, connection timeouts from the OS. These network faults produce different error signatures than clean RPC errors.
@@ -22,7 +22,7 @@ Add a comment in F6-F8 acknowledging the current approach uses application-level
 
 ### P3 - O1 oracle doesn't compare exit codes or do byte-for-byte content matching
 
-**Location:** `e2etests/mode3/harness/harness_suites_test.go:349-392`
+**Location:** `tests/integration/mode3/harness/harness_suites_test.go:349-392`
 
 **Problem**
 The plan O1 specifies three semantic equivalence criteria: (1) "File content changes must match (byte-for-byte comparison)", (2) "Tool output content must match", (3) "Exit codes must match." The implementation only checks `strings.Contains` for "wrote" and "changed" in tool output — no exit code comparison, no byte-for-byte file content matching. The oracle catches gross mismatches but is less rigorous than specified.
@@ -34,7 +34,7 @@ Compare `resp.ExitCode` between local and remote for each tool call. Compare the
 
 ### P3 - ST2 soak test has unreachable execution path
 
-**Location:** `e2etests/mode3/harness/harness_suites_test.go:543-567`
+**Location:** `tests/integration/mode3/harness/harness_suites_test.go:543-567`
 
 **Problem**
 The soak test requires `MODE3_HARNESS_TIER=weekly` + `MODE3_ENABLE_SOAK=1`, then defaults to 12 hours, then skips if duration > 2 minutes. So it always skips unless `MODE3_SOAK_DURATION` is also set to ≤ 2 minutes. The three-layer gating makes the test effectively unreachable in most CI configurations, including the weekly lane that's supposed to run it.
@@ -46,7 +46,7 @@ Either remove the 2-minute cap (rely on the weekly tier gating + `MODE3_ENABLE_S
 
 ### P3 - B1 overhead metric is negative (expected for in-memory fake)
 
-**Location:** `e2etests/mode3/harness/harness_bench_test.go:20-52`
+**Location:** `tests/integration/mode3/harness/harness_bench_test.go:20-52`
 
 **Problem**
 B1 reports `overhead_p95_us = -91` because the in-memory fake is faster than the local backend doing real filesystem I/O. The metric is technically correct but misleading — the plan target ("Mode 3 RPC overhead p95 ≤ 10ms over Mode 1 baseline") assumes real RPC. Add a comment noting this metric is only meaningful against a real sandbox host.

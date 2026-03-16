@@ -563,8 +563,8 @@ Connected component pairs with the interface at each boundary. Reference these w
 | `internal/tools/codeinterp` | `internal/tools` (tool catalog) | `discover → describe → invoke` via tool factories | 07 §5.2 | 06 §3.2 |
 | `internal/tools/codeinterp` | `internal/ai` (Provider) | `llm_call/llm_batch` → `ai.StreamSimple` | 07 §5.3 | 01 §5.1 |
 | `internal/termmux` | `internal/agent` (driver adapters) | `TermmuxDriverAdapter → AgentDriver` | 09-tmux §3 | 05 §3.2 |
-| `e2etests/` | `internal/agent` + `internal/tools` | Full agent loop with deterministic provider | 08 §2 | 05, 06 |
-| `e2etests/mode3/` | `internal/rpc` + `internal/sandbox` | Remote dispatch via `MemorySandboxService` or real host | 14 §3 | 13, 11 |
+| `tests/integration/` | `internal/agent` + `internal/tools` | Full agent loop with deterministic provider | 08 §2 | 05, 06 |
+| `tests/integration/mode3/` | `internal/rpc` + `internal/sandbox` | Remote dispatch via `MemorySandboxService` or real host | 14 §3 | 13, 11 |
 
 ### 5.1 Import Flow (No Circular Dependencies)
 
@@ -582,7 +582,7 @@ internal/sandbox         → internal/sandbox/zfs, internal/sandbox/gvisor, inte
 internal/rpc             → internal/sandbox, internal/agent, internal/tools
 internal/termmux         → stdlib, otel (does NOT import internal/agent)
 cmd/sandbox-host         → internal/sandbox, internal/rpc
-e2etests/                → all internal packages
+tests/integration/                → all internal packages
 ```
 
 **Hard rule:** `internal/ai` must NEVER import `internal/agent`. `internal/termmux` must NEVER import `internal/agent`. The dependency flows downward.
@@ -616,7 +616,7 @@ e2etests/                → all internal packages
 ## 8. Testing Quick Reference
 
 - **Unit tests**: Co-located with implementation packages. Run under `-race`. Coverage check per package.
-- **E2E tests**: `e2etests/` directory. Do NOT mix with application code packages.
+- **E2E tests**: `tests/integration/` directory. Do NOT mix with application code packages.
 - **Deterministic provider**: Default for CI. Uses canned provider traces and fixture repos.
 - **Live provider**: Behind secrets gate. Optional smoke lane.
 - **MemorySandboxService**: In-memory fake for Mode 3 tests. Implements full `SandboxHostService` interface with in-memory filesystem, snapshot-as-copy, and session state machine.

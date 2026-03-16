@@ -10,7 +10,7 @@
 
 ### P2 - SEC4 input/output boundary tests are no-ops
 
-**Location:** `e2etests/mode2/security_test.go:246-265` (input), `e2etests/mode2/security_test.go:268-285` (output)
+**Location:** `tests/integration/mode2/security_test.go:246-265` (input), `tests/integration/mode2/security_test.go:268-285` (output)
 
 **Problem**
 `TestSEC4_PTYInputHardening_ControlSequences` constructs 19 malformed input byte slices (control sequences, malformed UTF-8, null bytes, etc.) but never feeds them to the system. Line 263: `_ = input` — each sub-test creates a fresh `DeterministicDriverSimulator` with the standard `buildSimpleReplayScript()` and runs it without any input injection. The test only verifies the simulator doesn't crash on its own, not that the system handles malformed PTY input.
@@ -26,7 +26,7 @@ For input: use `env.WritePTY(input)` via a `TermmuxEnv` session (similar to F1 t
 
 ### P2 - O2/O3 driver parity oracles use identical replay structure
 
-**Location:** `e2etests/mode2/oracle_test.go:204-233` (`buildDriverReplayScript`), `e2etests/mode2/oracle_test.go:141-163` (O2), `e2etests/mode2/oracle_test.go:170-200` (O3)
+**Location:** `tests/integration/mode2/oracle_test.go:204-233` (`buildDriverReplayScript`), `tests/integration/mode2/oracle_test.go:141-163` (O2), `tests/integration/mode2/oracle_test.go:170-200` (O3)
 
 **Problem**
 Both `TestO2_DriverParityOracle` and `TestO3_NativeReferenceOracle` call `buildDriverReplayScript` which produces structurally identical event sequences — only the `driver` attribute string and `session_id` differ. The lifecycle comparison at lines 152-162 (O2) and 190-199 (O3) will always pass trivially because both sides derive from the same template.
@@ -42,7 +42,7 @@ Create driver-specific replay scripts that reflect realistic differences between
 
 ### P2 - P5 attach/detach safety test doesn't perform attach/detach
 
-**Location:** `e2etests/mode2/property_test.go:347-395`
+**Location:** `tests/integration/mode2/property_test.go:347-395`
 
 **Problem**
 `TestP5_AttachDetachSafety` claims to verify that "Attach/detach operations do not alter driver semantic state beyond connection metadata." However, the "attach/detach cycles" loop at lines 378-387 only calls `mon.State()` repeatedly — it never performs any actual attach or detach operations. The test verifies that calling `State()` N times returns the same value, which is trivially true since nothing changes the monitor between calls.
@@ -60,7 +60,7 @@ env.Detach(fmt.Sprintf("p5-client-%d", i))
 
 ### P3 - B2 benchmark leaks a goroutine per iteration
 
-**Location:** `e2etests/mode2/benchmark_test.go:120-128`
+**Location:** `tests/integration/mode2/benchmark_test.go:120-128`
 
 **Problem**
 Each benchmark iteration spawns `go func() { for range evtCh {} }()` at line 121 to drain the event channel. However, `unsub()` at line 126 only removes the subscription — it doesn't close `evtCh`. The goroutine blocks forever on the open, unwritten channel. Over many iterations, this accumulates leaked goroutines during the benchmark run.
@@ -79,7 +79,7 @@ Note: verify that `mon.Close()` doesn't also close subscriber channels to avoid 
 
 ### P3 - ST1 soak has no tier-gating for weekly 12h variant
 
-**Location:** `e2etests/mode2/stress_test.go:23-28`
+**Location:** `tests/integration/mode2/stress_test.go:23-28`
 
 **Problem**
 The plan specifies "12-hour continuous driver sessions" for the Weekly CI tier. The implementation uses `testing.Short()` to skip entirely in short mode, and hardcodes 30 seconds for the non-short variant. There's no environment variable or tier-gating mechanism (like `MODE2_HARNESS_TIER` or `MODE2_ENABLE_SOAK`) to run the full 12h soak in weekly CI. Compare with Mode 3's `MODE3_HARNESS_TIER=nightly` approach.

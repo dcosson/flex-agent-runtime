@@ -1,0 +1,117 @@
+services:
+  stubserver:
+    build:
+      context: ../../../
+      dockerfile: tests/external/docker/Dockerfile.stubserver
+    ports:
+      - "9090:9090"
+    profiles: ["minimal", "gvisor", "full"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+
+  sandbox-host-minimal:
+    build:
+      context: ../../../
+      dockerfile: tests/external/docker/Dockerfile.sandbox-host
+      target: base-minimal
+    ports:
+      - "8080:8080"
+    environment:
+      SANDBOX_STORAGE_BACKEND: "local-disk"
+      SANDBOX_CONTAINER_RUNTIME: "none"
+      SANDBOX_SESSIONS_ROOT_DIR: "/var/lib/sandbox/sessions"
+      SANDBOX_MAX_SESSIONS: "100"
+      SANDBOX_TOOL_TIMEOUT: "60s"
+      SANDBOX_AUTH_TOKEN: "e2e-test-token"
+    volumes:
+      - sandbox-sessions-minimal:/var/lib/sandbox/sessions
+    profiles: ["minimal"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sandbox-host-gvisor:
+    build:
+      context: ../../../
+      dockerfile: tests/external/docker/Dockerfile.sandbox-host
+      target: base-gvisor
+    ports:
+      - "8080:8080"
+    privileged: true
+    cap_add:
+      - NET_RAW
+    environment:
+      SANDBOX_STORAGE_BACKEND: "local-disk"
+      SANDBOX_CONTAINER_RUNTIME: "gvisor"
+      SANDBOX_SESSIONS_ROOT_DIR: "/var/lib/sandbox/sessions"
+      SANDBOX_MAX_SESSIONS: "100"
+      SANDBOX_TOOL_TIMEOUT: "60s"
+      SANDBOX_AUTH_TOKEN: "e2e-test-token"
+    volumes:
+      - sandbox-sessions-gvisor:/var/lib/sandbox/sessions
+    profiles: ["gvisor"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sandbox-host-full:
+    build:
+      context: ../../../
+      dockerfile: tests/external/docker/Dockerfile.sandbox-host
+      target: base-full
+    ports:
+      - "8080:8080"
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/zfs:/dev/zfs
+    environment:
+      SANDBOX_STORAGE_BACKEND: "zfs"
+      SANDBOX_CONTAINER_RUNTIME: "gvisor"
+      SANDBOX_POOL_NAME: "testpool"
+      SANDBOX_BASES_DATASET: "testpool/bases"
+      SANDBOX_SESSIONS_DATASET: "testpool/sessions"
+      SANDBOX_MAX_SESSIONS: "100"
+      SANDBOX_TOOL_TIMEOUT: "60s"
+      SANDBOX_AUTH_TOKEN: "e2e-test-token"
+    volumes:
+      - zfs-pool:/var/lib/zfs-test
+    depends_on:
+      init-pool:
+        condition: service_completed_successfully
+    profiles: ["full"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  init-pool:
+    build:
+      context: ../../../
+      dockerfile: tests/external/docker/Dockerfile.sandbox-host
+      target: base-full
+    entrypoint: ["/bin/bash", "/init-pool.sh"]
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/zfs:/dev/zfs
+    volumes:
+      - zfs-pool:/var/lib/zfs-test
+      - ./init-pool.sh:/init-pool.sh:ro
+    profiles: ["full"]
+
+volumes:
+  sandbox-sessions-minimal:
+  sandbox-sessions-gvisor:
+  zfs-pool:

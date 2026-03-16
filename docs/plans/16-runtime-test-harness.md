@@ -96,7 +96,7 @@ type Workload interface {
 ## 3. Suite Structure
 
 ```text
-e2etests/runtime/
+tests/integration/runtime/
 ├── harness/
 │   ├── controller.go          # orchestrates run plans and phases
 │   ├── profiles.go            # load/soak/benchmark profile definitions
@@ -170,7 +170,7 @@ These are initial targets to be refined as empirical data is gathered. The soak 
 - **PR / on-demand runs:** CI-provisioned hosts spun up for the run duration and torn down after.
 - **Nightly / weekly runs:** Static fleet of pre-provisioned hosts with persistent ZFS pools to avoid cold-start overhead.
 
-**Host discovery and management:** The harness controller uses a static configuration file listing available hosts per environment (CI vs. static fleet). Before each run, the controller performs a health check against each host (connectivity, ZFS pool availability, minimum free resources). Unhealthy hosts are excluded from the run and flagged in the report. The host list config is stored in-repo at `e2etests/runtime/config/hosts.yaml`.
+**Host discovery and management:** The harness controller uses a static configuration file listing available hosts per environment (CI vs. static fleet). Before each run, the controller performs a health check against each host (connectivity, ZFS pool availability, minimum free resources). Unhealthy hosts are excluded from the run and flagged in the report. The host list config is stored in-repo at `tests/integration/runtime/config/hosts.yaml`.
 
 ---
 
@@ -186,13 +186,13 @@ These are initial targets to be refined as empirical data is gathered. The soak 
 
 ### 5.2 Threshold Policy
 
-- Thresholds stored in versioned baseline files under `e2etests/runtime/reports/baselines/`.
+- Thresholds stored in versioned baseline files under `tests/integration/runtime/reports/baselines/`.
 - Regressions fail CI if above tolerated envelopes unless explicitly approved.
 - Trend-based alerts on monotonic degradation across recent runs.
 
 **Baseline management workflow:**
 
-1. **Storage:** Baselines are committed in-repo at `e2etests/runtime/reports/baselines/`, one file per profile/metric family (e.g., `p-medium-rpc-latency.json`).
+1. **Storage:** Baselines are committed in-repo at `tests/integration/runtime/reports/baselines/`, one file per profile/metric family (e.g., `p-medium-rpc-latency.json`).
 2. **Creation and update:** A dedicated "baseline update" CI job runs the target profile on the static fleet, produces updated baseline files, and commits them to the repo. This job is triggered manually or on-demand after architectural changes that are expected to shift performance characteristics.
 3. **Exceptions:** To merge a PR that exceeds baseline thresholds, the CI pipeline requires the `BASELINE_OVERRIDE=true` CI variable to be set. Setting this variable requires a linked issue tracking the expected regression and a justification comment on the PR.
 4. **Staleness detection:** CI emits a warning alert when any baseline file has not been updated in > 30 days. This ensures baselines stay representative of current system behavior and are not silently stale.
@@ -214,8 +214,8 @@ Per run produce:
 
 | Component | Seam | Contract |
 |-----------|------|----------|
-| `e2etests/mode3` | workload source | remote dispatch scenarios scaled for load/soak |
-| `e2etests/mode2` | workload source | driver/PTY lifecycle scenarios scaled for load/soak |
+| `tests/integration/mode3` | workload source | remote dispatch scenarios scaled for load/soak |
+| `tests/integration/mode2` | workload source | driver/PTY lifecycle scenarios scaled for load/soak |
 | `internal/sandbox` | durability and execution metrics | snapshots, rollback, tiered execution timings |
 | `internal/rpc` | transport profiling | method-level latency/retry/error telemetry |
 | `internal/termmux` | mode2 stability metrics | PTY health and normalized event throughput |
@@ -302,8 +302,8 @@ On threshold breach, auto-capture:
 
 | Dependency | Purpose |
 |-----------|---------|
-| `e2etests/mode3` | remote-dispatch workload primitives |
-| `e2etests/mode2` | 3rd-party-driver workload primitives |
+| `tests/integration/mode3` | remote-dispatch workload primitives |
+| `tests/integration/mode2` | 3rd-party-driver workload primitives |
 | `internal/sandbox` | snapshot/container metrics and lifecycle hooks |
 | `internal/rpc` | transport profiling hooks |
 | `internal/termmux` | PTY/session stability metrics |
@@ -312,7 +312,7 @@ On threshold breach, auto-capture:
 
 ## 14. Exit Criteria
 
-1. Runtime harness exists under `e2etests/runtime/` with load, soak, snapshot, container, and RPC profiling suites.
+1. Runtime harness exists under `tests/integration/runtime/` with load, soak, snapshot, container, and RPC profiling suites.
 2. Mixed-mode concurrency profiles execute successfully and emit standardized artifacts.
 3. 12h soak lane is operational with drift assertions.
 4. Snapshot space growth reporting is automated and baseline-compared.
@@ -360,7 +360,7 @@ On threshold breach, auto-capture:
 
 | # | Exit Criterion | Status | Evidence |
 |---|---------------|--------|----------|
-| 1 | Runtime harness exists under `e2etests/runtime/` with load, soak, snapshot, container, and RPC profiling suites | PASS | harness/ (controller.go, profiles.go, telemetry.go, artifacts.go, assertions.go, hosts.go), workloads/ (mode2, mode3, mixed), tests/ (load, soak, fault, oracle, simulation, stress, security, benchmark) |
+| 1 | Runtime harness exists under `tests/integration/runtime/` with load, soak, snapshot, container, and RPC profiling suites | PASS | harness/ (controller.go, profiles.go, telemetry.go, artifacts.go, assertions.go, hosts.go), workloads/ (mode2, mode3, mixed), tests/ (load, soak, fault, oracle, simulation, stress, security, benchmark) |
 | 2 | Mixed-mode concurrency profiles execute successfully and emit standardized artifacts | PASS | Controller.RunProfile with ConcurrencyProfile (P-small/medium/large), WriteArtifacts producing JSON/CSV/Markdown |
 | 3 | 12h soak lane is operational with drift assertions | PASS | soak_stability_test.go with DriftThresholds (goroutine, RSS, FD, error slope), tier-gated via RUNTIME_HARNESS_TIER env var |
 | 4 | Snapshot space growth reporting is automated and baseline-compared | PASS | TelemetryCollector.RecordSnapshotDelta + SnapshotDelta in snapshots, CompareAgainstBaseline for regression detection |
@@ -374,7 +374,7 @@ On threshold breach, auto-capture:
 - **Telemetry**: RPC latency/count/errors, container boot times, snapshot deltas, drift samples (goroutine count, RSS MB, FD count, error rate), percentile computation
 - **Profiles**: ConcurrencyProfile (concurrency, mode weights, target session time), SoakProfile (duration, warmup, drift thresholds), BenchmarkProfile
 - **Artifacts**: JSON summary, CSV metrics, Markdown report with delta-vs-baseline
-- **Host management**: hosts.yaml config in e2etests/runtime/config/
+- **Host management**: hosts.yaml config in tests/integration/runtime/config/
 - **CI tier gating**: RUNTIME_HARNESS_TIER env var (pr-fast/pr-standard/nightly/weekly)
 
 ### Gaps

@@ -567,7 +567,7 @@ The `NewSandboxHostService` signature change from `*SandboxHostService` to `(*Sa
 3. **`cmd/sandbox-host/main.go`** (or equivalent entrypoint) — handle error at top-level, log and exit on misconfiguration.
 4. **`internal/rpc/rpctest/harness.go`** (`newTestStack`) — test harness builder. Add error handling; `t.Fatal` on error.
 5. **`internal/sandbox/*_test.go`** — unit test constructors. Use `t.Fatal` on error.
-6. **`e2etests/mode3/harness/`** — e2e test harness. Propagate error.
+6. **`tests/integration/mode3/harness/`** — e2e test harness. Propagate error.
 
 All call sites should be updated in a single commit to avoid compile failures on partial migration.
 

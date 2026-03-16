@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-This plan defines how to test the h2-agent-runtime end-to-end from the outside -- as a consumer of the Go library and the `sandbox-host` binary would. It complements the existing internal E2E tests in `e2etests/` (plans 08, 14, 15, 16) by adding:
+This plan defines how to test the h2-agent-runtime end-to-end from the outside -- as a consumer of the Go library and the `sandbox-host` binary would. It complements the existing internal E2E tests in `tests/integration/` (plans 08, 14, 15, 16) by adding:
 
 - **Concrete usage examples** showing how callers wire up agents in each placement mode.
 - **Docker-based CI** that can run the full ZFS + gVisor stack, gVisor-only, or neither -- without dedicated infrastructure (see addendum 02 for configurable backends).
@@ -339,7 +339,7 @@ sequenceDiagram
     participant GV as gVisor (runsc)
 
     Note over CI,GV: Tier 1: Mock-Based (all environments)
-    CI->>Test: go test ./e2etests/external/...
+    CI->>Test: go test ./tests/external/...
     Test->>Agent: New(NativeDriver)
     Agent->>Env: LocalEnvironment or MemorySandboxService
     Env-->>Agent: tool results (in-memory)
@@ -350,7 +350,7 @@ sequenceDiagram
 
     Note over CI,SH: Variant A: local-disk + none (simplest)
     CI->>CI: docker compose up (sandbox-host, config: local-disk/none)
-    CI->>Test: go test -tags=docker ./e2etests/external/docker/...
+    CI->>Test: go test -tags=docker ./tests/external/docker/...
     Test->>SH: RPC: CreateSession
     SH->>SH: os.MkdirAll (session dir)
     SH-->>Test: session_id
@@ -376,7 +376,7 @@ sequenceDiagram
     Agent-->>Test: events + session state
 
     Note over CI,GV: Tier 3: Dedicated Host
-    CI->>Test: go test -tags=native ./e2etests/external/native/...
+    CI->>Test: go test -tags=native ./tests/external/native/...
     Test->>SH: sandbox-host (local process)
     SH->>ZFS: real ZFS commands
     SH->>GV: real gVisor containers
@@ -450,7 +450,7 @@ services:
   sandbox-host-minimal:
     build:
       context: .
-      dockerfile: e2etests/external/docker/Dockerfile.sandbox-host
+      dockerfile: tests/external/docker/Dockerfile.sandbox-host
       target: base-minimal
     environment:
       SANDBOX_LISTEN_ADDR: "0.0.0.0:8080"
@@ -470,7 +470,7 @@ services:
   sandbox-host-gvisor:
     build:
       context: .
-      dockerfile: e2etests/external/docker/Dockerfile.sandbox-host
+      dockerfile: tests/external/docker/Dockerfile.sandbox-host
       target: base-gvisor
     privileged: true                    # required for gVisor runsc
     cap_add:
@@ -493,7 +493,7 @@ services:
   sandbox-host-full:
     build:
       context: .
-      dockerfile: e2etests/external/docker/Dockerfile.sandbox-host
+      dockerfile: tests/external/docker/Dockerfile.sandbox-host
       target: base-full
     privileged: true                    # required for ZFS + gVisor
     cap_add:
@@ -522,7 +522,7 @@ services:
   test-runner:
     build:
       context: .
-      dockerfile: e2etests/external/docker/Dockerfile.test-runner
+      dockerfile: tests/external/docker/Dockerfile.test-runner
     environment:
       SANDBOX_HOST_URL: "http://sandbox-host:8080"
       SANDBOX_AUTH_TOKEN: "e2e-test-token"
@@ -536,7 +536,7 @@ services:
   init-pool:
     build:
       context: .
-      dockerfile: e2etests/external/docker/Dockerfile.sandbox-host
+      dockerfile: tests/external/docker/Dockerfile.sandbox-host
       target: base-full
     privileged: true
     cap_add: [SYS_ADMIN]
@@ -769,7 +769,7 @@ Tests are gated using Go build tags to control which tier runs:
 
 | Tag | Tests included | When used |
 |-----|---------------|-----------|
-| (none) | Tier 1 mock-based tests | Always; `go test ./e2etests/external/...` |
+| (none) | Tier 1 mock-based tests | Always; `go test ./tests/external/...` |
 | `docker` | Tier 2 Docker-based tests | PR-Standard on Linux CI with Docker |
 | `native` | Tier 3 dedicated host tests | Nightly on dedicated Linux hosts |
 | `provider_integration` | Real provider tests | Nightly with API keys available |
@@ -793,7 +793,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version: '1.23' }
-      - run: go test -v -timeout=2m ./e2etests/external/...
+      - run: go test -v -timeout=2m ./tests/external/...
 
   tier2-docker-minimal:
     name: "Tier 2: Docker E2E (local-disk + none)"
@@ -838,7 +838,7 @@ jobs:
       - uses: actions/setup-go@v5
         with: { go-version: '1.23' }
       - name: Run native E2E
-        run: go test -v -tags=native -timeout=20m ./e2etests/external/native/...
+        run: go test -v -tags=native -timeout=20m ./tests/external/native/...
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -847,7 +847,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-report
-          path: e2etests/external/reports/
+          path: tests/external/reports/
 ```
 
 ### 6.4 Test Reporting
@@ -998,7 +998,7 @@ func requireGVisorRuntime(t *testing.T) {
 ## 8. File Structure
 
 ```
-e2etests/
+tests/integration/
   external/                          # <-- new directory for this plan
     README.go                        # package doc explaining the tiers
     common/
@@ -1047,7 +1047,7 @@ graph LR
 
 | Phase | Work | Depends on |
 |-------|------|------------|
-| **Phase 1** | `e2etests/external/common/` helpers, `tier1/` tests, cross-mode parity | Existing code (plans 08, 14, 15) |
+| **Phase 1** | `tests/external/common/` helpers, `tier1/` tests, cross-mode parity | Existing code (plans 08, 14, 15) |
 | **Phase 2** | Docker compose setup, Dockerfiles, `tier2/` tests, ZFS pool init script | Phase 1, sandbox-host binary (plan 11) |
 | **Phase 3** | `tier3/` native tests, CI workflow YAML, test reporting | Phase 2, dedicated CI runner setup |
 | **Phase 4** | Failure injection tests, provider integration tests, stress tests | Phase 3, API keys provisioned |
@@ -1228,7 +1228,7 @@ Add the following service to `docker-compose.e2e.yaml` (available in all profile
   stubserver:
     build:
       context: ../../../
-      dockerfile: e2etests/external/docker/Dockerfile.stubserver
+      dockerfile: tests/external/docker/Dockerfile.stubserver
     ports:
       - "9090:9090"
     profiles: ["minimal", "gvisor", "full"]
@@ -1349,25 +1349,25 @@ These fault scenarios should be added as stubserver-backed variants of the exist
 
 | Deliverable | Status | Evidence |
 |-------------|--------|----------|
-| Common helpers (prereq.go) | DONE | `e2etests/external/common/prereq.go` — RequireZFS, RequireGVisor, RequireDocker, SandboxHostConfig, RequireZFSBackend, RequireGVisorRuntime |
-| Common helpers (report.go) | DONE | `e2etests/external/common/report.go` — E2EReport, ScenarioReport, ReportSummary types with JSON serialization |
-| Common helpers (scenario.go) | DONE | `e2etests/external/common/scenario.go` — BackendConfig with StandardConfigs() returning C1-C4, SupportsSnapshots(), SupportsTierRouting() |
-| Common helpers (parity.go) | DONE | `e2etests/external/common/parity.go` — EventTypeSequence, AssertEventTypeParity, CountEventType |
-| Docker infrastructure (Dockerfile) | DONE | `e2etests/external/docker/Dockerfile.sandbox-host` — Multi-stage: base-minimal (local-disk+none), base-gvisor (+runsc), base-full (+ZFS) |
-| Docker infrastructure (compose) | DONE | `e2etests/external/docker/docker-compose.e2e.yaml` — Profile-based services (minimal/gvisor/full) with health checks |
-| Docker infrastructure (init-pool.sh) | DONE | `e2etests/external/docker/init-pool.sh` |
+| Common helpers (prereq.go) | DONE | `tests/external/common/prereq.go` — RequireZFS, RequireGVisor, RequireDocker, SandboxHostConfig, RequireZFSBackend, RequireGVisorRuntime |
+| Common helpers (report.go) | DONE | `tests/external/common/report.go` — E2EReport, ScenarioReport, ReportSummary types with JSON serialization |
+| Common helpers (scenario.go) | DONE | `tests/external/common/scenario.go` — BackendConfig with StandardConfigs() returning C1-C4, SupportsSnapshots(), SupportsTierRouting() |
+| Common helpers (parity.go) | DONE | `tests/external/common/parity.go` — EventTypeSequence, AssertEventTypeParity, CountEventType |
+| Docker infrastructure (Dockerfile) | DONE | `tests/external/docker/Dockerfile.sandbox-host` — Multi-stage: base-minimal (local-disk+none), base-gvisor (+runsc), base-full (+ZFS) |
+| Docker infrastructure (compose) | DONE | `tests/external/docker/docker-compose.e2e.yaml` — Profile-based services (minimal/gvisor/full) with health checks |
+| Docker infrastructure (init-pool.sh) | DONE | `tests/external/docker/init-pool.sh` |
 | Tier 1 tests (local_basic_test.go) | DONE | 12 tests passing: L1-L7, L10 scenarios covering multi-turn, bash, code interpreter, steering, follow-up, abort, error recovery, concurrent subscribers |
 | Tier 1 parity tests (parity_test.go) | DONE | P1-P4 parity tests: file ops, event types, session state, error behavior — Local vs MemorySandboxService |
-| Tier 2 Docker-gated stubs | DONE | `e2etests/external/tier2/docker_test.go` — build tag `docker`, 6 test functions covering lifecycle (all configs), snapshots (ZFS), tier routing (gVisor), streaming progress, capabilities |
-| Tier 3 native-gated stubs | DONE | `e2etests/external/tier3/native_test.go` — build tag `native`, 7 test functions covering ZFS pool, gVisor isolation, provider integration (Anthropic/OpenAI), multi-session stress, failure injection, double destroy |
+| Tier 2 Docker-gated stubs | DONE | `tests/external/tier2/docker_test.go` — build tag `docker`, 6 test functions covering lifecycle (all configs), snapshots (ZFS), tier routing (gVisor), streaming progress, capabilities |
+| Tier 3 native-gated stubs | DONE | `tests/external/tier3/native_test.go` — build tag `native`, 7 test functions covering ZFS pool, gVisor isolation, provider integration (Anthropic/OpenAI), multi-session stress, failure injection, double destroy |
 | CI workflow | DONE | `.github/workflows/e2e.yml` — 4 jobs: tier1-mock (always), tier2-docker-minimal (PRs), tier2-docker-full (PRs, ZFS-gated), tier3-nightly (schedule, self-hosted) |
-| Package documentation | DONE | `e2etests/external/README.go` — package doc explaining 3-tier structure |
+| Package documentation | DONE | `tests/external/README.go` — package doc explaining 3-tier structure |
 
 ### Acceptance Criteria (from Section 10)
 
 | Criterion | Status | Evidence |
 |-----------|--------|----------|
-| Tier 1 pass rate: 100% | PASS | All 12 tier1 tests pass (`go test ./e2etests/external/tier1/...`) |
+| Tier 1 pass rate: 100% | PASS | All 12 tier1 tests pass (`go test ./tests/external/tier1/...`) |
 | Cross-mode parity: 100% match | PASS | P1-P4 parity tests all pass, comparing Local vs MemorySandboxService |
 | Tier 2 Docker tests defined | PASS | 6 Docker-gated test functions defined with build tag `docker`; stub implementations skip gracefully until sandbox-host binary is available |
 | Tier 3 native tests defined | PASS | 7 native-gated test functions defined with build tag `native`; skip until dedicated infrastructure is available |

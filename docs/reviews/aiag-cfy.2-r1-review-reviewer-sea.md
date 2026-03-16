@@ -8,7 +8,7 @@
 
 ## Test Execution
 
-- `go test -race ./e2etests/runtime/... -v -count=1`: **1 FAILURE** (ST1_HarnessSelfSoak)
+- `go test -race ./tests/integration/runtime/... -v -count=1`: **1 FAILURE** (ST1_HarnessSelfSoak)
 - All other tests (property, fault injection, oracle, simulation, security, stress ST2/ST3): PASS
 - Benchmarks: B1=24ms/op, B2=8.6ms/100k, B3 p95=0ms, B4 p95=2µs — all well within targets
 - Race detector: no data races detected
@@ -17,7 +17,7 @@
 
 ### P1 - ST1 heap growth measurement has uint64 underflow bug
 
-**Location:** `e2etests/runtime/tests/stress_meta_test.go:94`
+**Location:** `tests/integration/runtime/tests/stress_meta_test.go:94`
 
 **Problem**
 The heap growth calculation `float64(memAfter.HeapInuse - memBefore.HeapInuse)` subtracts two `uint64` values. When `memAfter.HeapInuse < memBefore.HeapInuse` (which happens normally after GC reclaims memory between runs), the subtraction wraps around to a very large uint64 value (~2^64), producing a nonsensical "17.6 TB" heap growth and causing the test to always fail:
@@ -42,7 +42,7 @@ if memAfter.HeapInuse > memBefore.HeapInuse {
 
 ### P2 - F1 telemetry loss pattern is deterministic, not random as specified
 
-**Location:** `e2etests/runtime/tests/fault_injection_test.go:49`
+**Location:** `tests/integration/runtime/tests/fault_injection_test.go:49`
 
 **Problem**
 The plan specifies F1 as "Drop random telemetry batches" but the implementation uses `shouldDrop := float64(i)/float64(numSamples) < lossRate`, which drops the first N% of samples in sequential order. At 50% loss rate, it always drops samples 0-49 and keeps 50-99. This is a deterministic head-of-stream burst pattern, not a random loss pattern.
@@ -61,7 +61,7 @@ shouldDrop := rng.Float64() < lossRate
 
 ### P3 - S3 implements soak threshold testing, not multi-dimensional tradeoffs as planned
 
-**Location:** `e2etests/runtime/tests/simulation_test.go:140`
+**Location:** `tests/integration/runtime/tests/simulation_test.go:140`
 
 **Problem**
 The plan specifies S3 as "Multi-dimensional tradeoff simulation — Improve one metric while degrading another; verify policy weighting behaves as intended." The actual S3 implementation tests individual soak drift thresholds (goroutine growth, RSS, FD, error slope) — valuable but a different test. The planned multi-dimensional scenario (e.g., latency improves while error rate worsens) is not covered.
@@ -75,7 +75,7 @@ Either rename the test to reflect what it actually does, or add a subtest coveri
 
 ### P3 - containsStr reimplements strings.Contains
 
-**Location:** `e2etests/runtime/tests/security_meta_test.go:342-352`
+**Location:** `tests/integration/runtime/tests/security_meta_test.go:342-352`
 
 **Problem**
 The `containsStr` helper function is a manual reimplementation of `strings.Contains` from the standard library. Using the stdlib version is simpler and less error-prone.

@@ -207,7 +207,7 @@ Target:
 - **Branch**: main
 - **Commit**: d1df5b5
 - **Verified by**: reviewer-sea
-- **Test verification**: `go test -race ./e2etests/... -count=1` — PASS (scenarios 11.631s)
+- **Test verification**: `go test -race ./tests/integration/... -count=1` — PASS (scenarios 11.631s)
 - **Acceptance tests**: N/A (no acceptance criteria in test harness plan)
 - **Deviations from plan**:
   - None
