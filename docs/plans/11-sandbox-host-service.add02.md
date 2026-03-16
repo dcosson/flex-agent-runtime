@@ -731,3 +731,54 @@ Attempt to create a session with IDs containing `../`, `..\\`, absolute paths, n
 - **Total findings:** 15
 - **Incorporation rate:** 100%
 - **Reviewers:** coder-1-sea, reviewer-sea
+
+---
+
+## Completion Signoff
+
+- **Status:** Complete
+- **Date:** 2026-03-15
+- **Epic:** aiag-q7c
+- **Task:** aiag-q7c.1 (assigned: coder-1-sea, status: closed)
+- **Implementation commits:** 8d122fb, a3a8874
+- **Code review:** R1 by reviewer-sea, findings incorporated, R2 approved at 24733e6
+- **Branch:** main
+
+### Acceptance Criteria Verification
+
+| AC | Status | Evidence |
+|----|--------|----------|
+| AC1: Full degraded mode lifecycle (local-disk + none) | PASS | `TestCreateSessionLocalDisk_PathSafetyAndDestroy` verifies directory create/destroy. `TestSnapshotOps_NonZFSUnavailable` verifies ErrSnapshotsNotAvailable. `TestExecuteTool_RuntimeNoneDowngradesTier2` verifies Tier 2 downgrade. `TestCapabilities_DynamicByConfig` verifies Snapshots=false, Rollback=false, TierRouting=false. |
+| AC2: Capability negotiation failure | PASS | `TestCreate_CapabilityNegotiationMismatchSnapshots` and `TestCreate_CapabilityNegotiationMismatchTierRouting` verify clear mismatch errors when client config disagrees with server capabilities. |
+| AC3: Constructor validation | PASS | `TestNewSandboxHostService_BackendCombinations` covers all 8 cases: 4 valid combos succeed, ZFS+nil manager errors, gVisor+nil manager errors, invalid StorageBackend errors, empty ContainerRuntime errors. |
+| AC4: Mixed mode (ZFS + no gVisor) | PASS | Constructor test "zfs+none" succeeds with mock ZFS manager. `ExecuteTool` tier downgrade verified. Snapshot/rollback code paths use ZFS manager when configured. |
+| AC5: PerToolSnapshots silently skipped on local-disk | PASS | `execute.go` line 64 gates per-tool snapshots on `svc.config.PerToolSnapshots && svc.config.StorageBackend == StorageBackendZFS`. Non-ZFS backends skip silently. |
+| AC6: Session ID path traversal rejected | PASS | `TestSEC2_SessionIDInjection` tests `../../../etc`, `sess; rm -rf /`, null bytes, long strings. `TestCreateSessionLocalDisk_PathSafetyAndDestroy` tests `../escape`. `ValidateSessionID` uses regex + `..` check + `safeSessionPath` containment verification. |
+
+### Key Implementation Files
+
+| Plan Section | File(s) |
+|-------------|---------|
+| 2.1-2.2 Config types | `internal/sandbox/config.go` |
+| 2.3 Constructor validation | `internal/sandbox/service.go` (NewSandboxHostService) |
+| 3.2 Dynamic capabilities | `internal/sandbox/environment/native/native.go` (Capabilities) |
+| 3.3 Capability-gated methods | `internal/sandbox/environment/native/native.go` (CreateSnapshot, Rollback) |
+| 4.1 Session ID safety | `internal/sandbox/config.go` (ValidateSessionID, safeSessionPath) |
+| 4.2-4.3 Local-disk sessions | `internal/sandbox/service.go` (CreateSession, DestroySession) |
+| 4.4 ExecuteTool without gVisor | `internal/sandbox/execute.go` |
+| 4.5 Snapshot/Rollback without ZFS | `internal/sandbox/snapshot.go` |
+| 4.6 HealthCheck without ZFS | `internal/sandbox/service.go` (HealthCheck) |
+| 4.8 Capabilities method | `internal/sandbox/service.go` (Capabilities) |
+| 5 Error sentinels | `internal/sandbox/types.go` (ErrSnapshotsNotAvailable) |
+| 6.1 Capability negotiation | `internal/sandbox/environment/native/native.go` (Create) |
+| 6.1 RPC API changes | `internal/rpc/api/types.go` (CreateSessionResponse.ServerCapabilities, Capabilities) |
+| 6.1 Codec mapping | `internal/rpc/codec/sandbox_map.go` (FromEnvironmentCapabilities) |
+| 6.1 RPC handler | `internal/rpc/server/sandbox_server.go` (CreateSession) |
+| 8.5 Config re-export | `internal/sandbox/environment/native/config.go` |
+| 9.1 NativeSandboxCapabilities removed | `internal/sandbox/environment/capabilities.go` (no longer contains NativeSandboxCapabilities) |
+| Unit tests | `internal/sandbox/configurable_backends_test.go`, `internal/sandbox/security_test.go`, `internal/sandbox/environment/native/native_test.go` |
+
+### Deviations from Plan
+
+1. **Codec function naming:** Plan specifies `codec.ToAPICapabilities()` / `codec.FromAPICapabilities()`. Implementation uses `codec.FromEnvironmentCapabilities()` (maps environment.Capabilities to api.Capabilities). Reverse mapping omitted since client reads ServerCapabilities fields directly. Functionally equivalent; reviewed and accepted in R1 review.
+2. **ServiceConfig field grouping:** Plan groups fields into backend-specific sections with comments. Implementation keeps fields flat in a single struct but with the same semantics. All fields present and used correctly.
