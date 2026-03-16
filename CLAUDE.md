@@ -16,6 +16,10 @@ Current implemented areas:
 5. `TransformMessages` adapts conversations across model/provider seams.
 6. `IsContextOverflow` + `ProviderError` classify error/overflow behavior consistently.
 
+## Test policy
+
+There are NO known failures or flakes. Every test must pass, every time. If you discover a flaky or failing test — even one that predates your current work — create a bead to track it and fix it as soon as you finish your current task. Never dismiss a failure as "known" or "pre-existing." Zero tolerance.
+
 ## Before committing
 
 Always run `make check` before committing. This runs gofmt, go vet, and staticcheck. All must pass clean — no warnings, no unused code.

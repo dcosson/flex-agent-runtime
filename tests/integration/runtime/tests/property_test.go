@@ -400,10 +400,16 @@ func TestP5_ThresholdRuleSoundness(t *testing.T) {
 
 		regressions := rh.CompareAgainstBaseline(current, baseline, tolerance)
 
-		// Compute the expected delta the same way CompareAgainstBaseline does,
-		// using the actual float64 values (not the idealized deltaPct), to avoid
-		// floating-point round-trip disagreement at boundary values.
+		// Recompute the delta the same way CompareAgainstBaseline does.
+		// At the float64 boundary (|delta - tolerance| < 1e-9), FMA
+		// instruction optimization can cause identical formulas to produce
+		// different results at different call sites, so either answer is
+		// acceptable — skip those cases.
 		recomputedDelta := 100 * ((currentVal - baseVal) / baseVal)
+		if math.Abs(recomputedDelta-tolerance) < 1e-9 {
+			return
+		}
+
 		shouldRegress := recomputedDelta > tolerance
 		didRegress := len(regressions) > 0
 

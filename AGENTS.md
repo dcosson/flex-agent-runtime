@@ -16,6 +16,7 @@ Primary package layout:
 - Keep interfaces stable and deterministic; avoid implicit behavior drift.
 - Preserve concurrency safety (`-race` must stay green).
 - Prefer table/property/fuzz tests for cross-provider invariants.
+- **Zero tolerance for flaky or failing tests.** There are NO known failures or pre-existing flakes. Every test must pass, every time. If you discover a flaky or failing test — even one that predates your current work — create a bead to track it and fix it as soon as you finish your current task. Never dismiss a failure as "known" or "pre-existing."
 
 ## Build/Test Workflow
 
