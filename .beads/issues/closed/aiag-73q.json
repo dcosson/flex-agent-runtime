@@ -2,7 +2,7 @@
   "id": "aiag-73q",
   "title": "Stubserver E2E Testing",
   "description": "Wire existing stubserver into E2E tests for full HTTP stack coverage. Includes NewHandler() library addition, standalone binary, Docker infrastructure, SSE fixtures, and stubserver-backed Tier 1 tests. Per docs/plans/17-external-testing.md Section 12.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "epic",
   "dependents": [
@@ -22,5 +22,7 @@
     "batch=4b"
   ],
   "created_at": "2026-03-15T18:49:45.131053-07:00",
-  "updated_at": "2026-03-15T18:49:45.131053-07:00"
+  "updated_at": "2026-03-15T20:44:00.285763-07:00",
+  "closed_at": "2026-03-15T20:44:00.274532-07:00",
+  "close_reason": "Auto-closed: all children completed"
 }

@@ -2,7 +2,7 @@
   "id": "aiag-73q.2",
   "title": "Stubserver-backed Tier 1 E2E tests + fault injection",
   "description": "Implement stubserver-backed E2E tests from docs/plans/17-external-testing.md Section 12.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nDepends on: T1 (NewHandler + fixtures must exist)\n\nKey deliverables:\n- Stubserver-backed Tier 1 tests in e2etests/external/tier1/: full agent loop with real Anthropic provider pointed at in-process stubserver via base URL override\n- Multi-turn scenario test (tool call + response over real HTTP/SSE)\n- Auth header propagation verification\n- Fault injection variants: TCP reset (F1), malformed SSE (F2), rate limiting/429 (F3), backpressure/timeout (F4), empty body (F6), retry sequences\n- Update make test-external-tier1 if needed\n- All tests pass with make test-external-tier1\n\nAC: Tier 1 tests exercise full HTTP/SSE stack without Docker, fault injection catches real failure modes, all tests pass.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-73q",
@@ -33,5 +33,7 @@
     }
   ],
   "created_at": "2026-03-15T18:50:04.195272-07:00",
-  "updated_at": "2026-03-15T20:43:34.041674-07:00"
+  "updated_at": "2026-03-15T20:44:00.267972-07:00",
+  "closed_at": "2026-03-15T20:44:00.267972-07:00",
+  "close_reason": "Closed"
 }
