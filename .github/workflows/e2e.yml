@@ -23,13 +23,24 @@ jobs:
     needs: tier1-mock
     steps:
       - uses: actions/checkout@v4
-      - name: Run minimal Docker E2E
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Start sandbox-host container (minimal)
         run: |
           docker compose -f e2etests/external/docker/docker-compose.e2e.yaml --profile minimal \
-            up --build --abort-on-container-exit
+            up -d --build --wait
+      - name: Run Tier 2 tests against container
+        run: go test -v -tags=docker -timeout=5m ./e2etests/external/tier2/...
         env:
+          SANDBOX_HOST_URL: "http://localhost:8080"
+          SANDBOX_AUTH_TOKEN: "e2e-test-token"
           SANDBOX_STORAGE_BACKEND: "local-disk"
           SANDBOX_CONTAINER_RUNTIME: "none"
+      - name: Stop containers
+        if: always()
+        run: |
+          docker compose -f e2etests/external/docker/docker-compose.e2e.yaml --profile minimal down -v
 
   tier2-docker-full:
     name: "Tier 2: Docker E2E (ZFS + gVisor)"
@@ -38,17 +49,28 @@ jobs:
     needs: tier2-docker-minimal
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
       - name: Load ZFS kernel module
         run: sudo modprobe zfs || echo "ZFS module not available; skipping"
       - name: Run full Docker E2E
         run: |
           if lsmod | grep -q zfs; then
             docker compose -f e2etests/external/docker/docker-compose.e2e.yaml --profile full \
-              up --build --abort-on-container-exit
+              up -d --build --wait
+            go test -v -tags=docker -timeout=5m ./e2etests/external/tier2/... || EXIT=$?
+            docker compose -f e2etests/external/docker/docker-compose.e2e.yaml --profile full down -v
+            exit ${EXIT:-0}
           else
             echo "::warning::ZFS kernel module not available. Skipping full Tier 2 tests."
             echo "::notice::Minimal Tier 2 (local-disk + none) already passed."
           fi
+        env:
+          SANDBOX_HOST_URL: "http://localhost:8080"
+          SANDBOX_AUTH_TOKEN: "e2e-test-token"
+          SANDBOX_STORAGE_BACKEND: "zfs"
+          SANDBOX_CONTAINER_RUNTIME: "gvisor"
 
   tier3-nightly:
     name: "Tier 3: Nightly Full E2E"

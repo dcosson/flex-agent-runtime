@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   sandbox-host-minimal:
     build:
@@ -14,6 +12,7 @@ services:
       SANDBOX_SESSIONS_ROOT_DIR: "/var/lib/sandbox/sessions"
       SANDBOX_MAX_SESSIONS: "100"
       SANDBOX_TOOL_TIMEOUT: "60s"
+      SANDBOX_AUTH_TOKEN: "e2e-test-token"
     volumes:
       - sandbox-sessions-minimal:/var/lib/sandbox/sessions
     profiles: ["minimal"]
@@ -39,6 +38,7 @@ services:
       SANDBOX_SESSIONS_ROOT_DIR: "/var/lib/sandbox/sessions"
       SANDBOX_MAX_SESSIONS: "100"
       SANDBOX_TOOL_TIMEOUT: "60s"
+      SANDBOX_AUTH_TOKEN: "e2e-test-token"
     volumes:
       - sandbox-sessions-gvisor:/var/lib/sandbox/sessions
     profiles: ["gvisor"]
@@ -69,6 +69,7 @@ services:
       SANDBOX_SESSIONS_DATASET: "testpool/sessions"
       SANDBOX_MAX_SESSIONS: "100"
       SANDBOX_TOOL_TIMEOUT: "60s"
+      SANDBOX_AUTH_TOKEN: "e2e-test-token"
     volumes:
       - zfs-pool:/var/lib/zfs-test
     depends_on:
