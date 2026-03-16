@@ -68,7 +68,7 @@ func newRootCmd() *cobra.Command {
 func newRankCmd() *cobra.Command {
 	var texts stringList
 	query := ""
-	modelID := envOrDefault("EMBEDDING_MODEL", "text-embedding-3-small")
+	modelID := strings.TrimSpace(os.Getenv("EMBEDDING_MODEL"))
 	timeout := 60 * time.Second
 
 	cmd := &cobra.Command{
@@ -100,6 +100,12 @@ func runRank(texts []string, query, modelID string, timeout time.Duration) error
 		return fmt.Errorf("no API keys found; set one of: OPENAI_API_KEY, GOOGLE_API_KEY, COHERE_API_KEY")
 	}
 
+	selectedModel, selectedProvider, autoSelected, err := resolveEmbeddingModel(modelID, available)
+	if err != nil {
+		return err
+	}
+	modelID = selectedModel
+
 	model, ok := ai.GetEmbeddingModel(modelID)
 	if !ok {
 		return fmt.Errorf("unknown embedding model %q", modelID)
@@ -123,6 +129,9 @@ func runRank(texts []string, query, modelID string, timeout time.Duration) error
 		return errors.New("provide at least one -text or pipe newline-delimited texts on stdin")
 	}
 
+	if autoSelected {
+		fmt.Printf("model not specified; defaulting to %s (provider=%s)\n", selectedModel, selectedProvider)
+	}
 	fmt.Printf("available providers: %s\n", strings.Join(available, ", "))
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -184,6 +193,50 @@ func registerEmbeddingProviders() []string {
 	return available
 }
 
+func resolveEmbeddingModel(modelID string, available []string) (string, string, bool, error) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID != "" {
+		model, ok := ai.GetEmbeddingModel(modelID)
+		if !ok {
+			return "", "", false, fmt.Errorf("unknown embedding model %q", modelID)
+		}
+		return modelID, model.Provider, false, nil
+	}
+
+	// Pick first available provider in precedence order.
+	for _, provider := range []string{embedCohere, embedGoogle, embedOpenAI} {
+		if !contains(available, provider) {
+			continue
+		}
+		if model := defaultModelForProvider(provider); model != "" {
+			return model, provider, true, nil
+		}
+	}
+	return "", "", false, fmt.Errorf("no embedding model available for providers: %s", strings.Join(available, ", "))
+}
+
+func defaultModelForProvider(provider string) string {
+	var preferred string
+	switch provider {
+	case embedOpenAI:
+		preferred = "text-embedding-3-small"
+	case embedGoogle:
+		preferred = "gemini-embedding-001"
+	case embedCohere:
+		preferred = "embed-v4.0"
+	}
+	if preferred != "" {
+		if model, ok := ai.GetEmbeddingModel(preferred); ok && model.Provider == provider {
+			return preferred
+		}
+	}
+	models := ai.ListEmbeddingModelsByProvider(provider)
+	if len(models) == 0 {
+		return ""
+	}
+	return models[0].ID
+}
+
 func readTextsFromStdinIfPiped() ([]string, error) {
 	fi, err := os.Stdin.Stat()
 	if err != nil {
@@ -217,12 +270,4 @@ func contains(items []string, target string) bool {
 		}
 	}
 	return false
-}
-
-func envOrDefault(name, fallback string) string {
-	v := strings.TrimSpace(os.Getenv(name))
-	if v == "" {
-		return fallback
-	}
-	return v
 }

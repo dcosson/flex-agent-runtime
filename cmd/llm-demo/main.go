@@ -151,6 +151,7 @@ func runAssistantTurn(model ai.Model, history *[]ai.Message, timeout time.Durati
 
 		es := ai.StreamSimple(ctx, model, llmCtx, ai.SimpleStreamOptions{})
 		printedText := false
+		streamedText := false
 		printedThinking := false
 		for ev := range es.C {
 			switch ev.Type {
@@ -176,6 +177,7 @@ func runAssistantTurn(model ai.Model, history *[]ai.Message, timeout time.Durati
 					fmt.Print("assistant> ")
 					printedText = true
 				}
+				streamedText = true
 				fmt.Print(ev.Delta)
 			case ai.EventTextEnd:
 				if printedText {
@@ -192,7 +194,7 @@ func runAssistantTurn(model ai.Model, history *[]ai.Message, timeout time.Durati
 
 		toolCalls := assistantToolCalls(msg)
 		if len(toolCalls) == 0 {
-			if !printedText {
+			if !streamedText {
 				fmt.Printf("assistant> %s\n", assistantText(msg))
 			}
 			return nil
