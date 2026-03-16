@@ -1,0 +1,30 @@
+{
+  "id": "aiag-73q.1",
+  "title": "Stubserver library + standalone binary + Docker infra",
+  "description": "Implement stubserver infrastructure from docs/plans/17-external-testing.md Section 12.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nKey deliverables:\n- Add NewHandler(opts ...Option) http.Handler to internal/ai/testutil/stubserver/ (same capture-wrapping handler as New() but without starting httptest.Server)\n- Create cmd/stubserver/main.go standalone binary with fixture loading, /health endpoint, X-Fixture header routing\n- Create e2etests/external/docker/Dockerfile.stubserver (multi-stage: builder + alpine)\n- Add stubserver service to e2etests/external/docker/docker-compose.e2e.yaml (all profiles)\n- Create initial SSE fixture files in testdata/fixtures/ (anthropic-simple-response.sse, anthropic-tool-call.sse, anthropic-multi-turn.sse at minimum)\n- Unit tests for NewHandler, standalone binary smoke test\n- make test passes\n\nAC: NewHandler returns working http.Handler, standalone binary serves fixtures and responds to /health, Docker image builds, fixtures load correctly.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-73q",
+  "dependencies": [
+    {
+      "id": "aiag-73q",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-73q.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4b",
+    "plan-doc=17-external-testing"
+  ],
+  "created_at": "2026-03-15T18:49:55.495761-07:00",
+  "updated_at": "2026-03-15T18:49:55.495761-07:00"
+}

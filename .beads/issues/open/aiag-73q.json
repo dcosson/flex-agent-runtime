@@ -1,0 +1,26 @@
+{
+  "id": "aiag-73q",
+  "title": "Stubserver E2E Testing",
+  "description": "Wire existing stubserver into E2E tests for full HTTP stack coverage. Includes NewHandler() library addition, standalone binary, Docker infrastructure, SSE fixtures, and stubserver-backed Tier 1 tests. Per docs/plans/17-external-testing.md Section 12.",
+  "status": "open",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-73q.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-73q.2",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4b"
+  ],
+  "created_at": "2026-03-15T18:49:45.131053-07:00",
+  "updated_at": "2026-03-15T18:49:45.131053-07:00"
+}
