@@ -4,7 +4,7 @@ GO_TEST_RACE := $(if $(filter 0 false no,$(RACE)),,-race)
 EXTERNAL_COMPOSE_FILE ?= tests/external/docker/docker-compose.e2e.yaml
 PKGS := $(shell $(GO) list ./...)
 
-.PHONY: help build fmt fmt-check vet deps deps-staticcheck check test test-race test-integration \
+.PHONY: help build build-llm-demo build-embedding-demo fmt fmt-check vet deps deps-staticcheck check test test-race test-integration \
 	test-harness test-harness-t2 \
 	test-anthropic-harness-fast test-anthropic-harness-race \
 	test-harness-openai test-harness-google \
@@ -23,6 +23,8 @@ help:
 	@echo ""
 	@echo "=== Build & Check ==="
 	@echo "  build                            Build all project packages"
+	@echo "  build-llm-demo                   Build llm-demo interactive CLI binary"
+	@echo "  build-embedding-demo             Build embedding-demo ranking CLI binary"
 	@echo "  fmt                              Run gofmt on all Go files (writes changes)"
 	@echo "  fmt-check                        Check gofmt formatting without modifying files"
 	@echo "  vet                              Run go vet across all packages"
@@ -86,6 +88,14 @@ help:
 
 build:
 	$(GO) build ./...
+
+build-llm-demo:
+	@mkdir -p bin
+	$(GO) build -o bin/llm-demo ./cmd/llm-demo
+
+build-embedding-demo:
+	@mkdir -p bin
+	$(GO) build -o bin/embedding-demo ./cmd/embedding-demo
 
 fmt:
 	gofmt -w .
