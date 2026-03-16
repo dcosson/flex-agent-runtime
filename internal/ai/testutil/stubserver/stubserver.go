@@ -95,6 +95,7 @@ type Option func(*Server)
 func New(opts ...Option) *Server {
 	s := &Server{}
 	handler := s.configureHandler(opts...)
+	handler = s.wrapWithCapture(handler)
 
 	s.httpServer = httptest.NewServer(handler)
 	s.URL = s.httpServer.URL
@@ -118,8 +119,12 @@ func (s *Server) configureHandler(opts ...Option) http.Handler {
 		})
 	}
 
+	return s.handler
+}
+
+func (s *Server) wrapWithCapture(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Capture request.
+		// Capture request for test assertions in New()-backed servers.
 		body, _ := io.ReadAll(r.Body)
 		s.mu.Lock()
 		s.requests = append(s.requests, CapturedRequest{
@@ -130,7 +135,7 @@ func (s *Server) configureHandler(opts ...Option) http.Handler {
 		})
 		s.mu.Unlock()
 
-		s.handler.ServeHTTP(w, r)
+		next.ServeHTTP(w, r)
 	})
 }
 
