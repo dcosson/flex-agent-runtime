@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
 )
 
 // AgentService manages agent loop sessions.
@@ -25,6 +23,6 @@ type AgentService interface {
 
 // EventReceiver is the transport-neutral stream interface for agent events.
 type EventReceiver interface {
-	Recv() (*agent.AgentEvent, error)
+	Recv() (*AgentEvent, error)
 	Close() error
 }

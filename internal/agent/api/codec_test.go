@@ -8,7 +8,6 @@ import (
 
 	"pgregory.net/rapid"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
 	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
@@ -16,11 +15,11 @@ func TestAgentMessageCodecRoundTrip_Table(t *testing.T) {
 	baseTime := time.Date(2026, time.March, 17, 9, 30, 0, 0, time.UTC)
 	tests := []struct {
 		name string
-		msg  agent.AgentMessage
+		msg  AgentMessage
 	}{
 		{
 			name: "user text unicode",
-			msg: agent.AgentMessage{
+			msg: AgentMessage{
 				Turn:      1,
 				CreatedAt: baseTime,
 				Message: &ai.UserMessage{
@@ -31,7 +30,7 @@ func TestAgentMessageCodecRoundTrip_Table(t *testing.T) {
 		},
 		{
 			name: "assistant multi block",
-			msg: agent.AgentMessage{
+			msg: AgentMessage{
 				Turn:      2,
 				CreatedAt: baseTime.Add(time.Second),
 				Message: &ai.AssistantMessage{
@@ -69,7 +68,7 @@ func TestAgentMessageCodecRoundTrip_Table(t *testing.T) {
 		},
 		{
 			name: "assistant empty content",
-			msg: agent.AgentMessage{
+			msg: AgentMessage{
 				Turn:      3,
 				CreatedAt: baseTime.Add(2 * time.Second),
 				Message: &ai.AssistantMessage{
@@ -83,7 +82,7 @@ func TestAgentMessageCodecRoundTrip_Table(t *testing.T) {
 		},
 		{
 			name: "tool result with image block",
-			msg: agent.AgentMessage{
+			msg: AgentMessage{
 				Turn:      4,
 				CreatedAt: baseTime.Add(3 * time.Second),
 				Message: &ai.ToolResultMessage{
@@ -139,7 +138,7 @@ func TestAgentMessageCodecErrors(t *testing.T) {
 	})
 
 	t.Run("reject user image payload encode", func(t *testing.T) {
-		_, err := AgentMessageToRecord(agent.AgentMessage{
+		_, err := AgentMessageToRecord(AgentMessage{
 			Message: &ai.UserMessage{
 				Content: []ai.ContentBlock{
 					&ai.ImageContent{Data: "abc", MimeType: "image/png"},
@@ -178,13 +177,13 @@ func TestPropertyCodecRoundTrip(t *testing.T) {
 	})
 }
 
-func generateRandomAgentMessage(rt *rapid.T, role string) agent.AgentMessage {
+func generateRandomAgentMessage(rt *rapid.T, role string) AgentMessage {
 	turn := rapid.IntRange(0, 100).Draw(rt, "turn")
 	createdUnix := rapid.Int64Range(0, 2_000_000_000).Draw(rt, "created_unix")
 	createdAt := time.Unix(createdUnix, 0).UTC()
 	timestamp := rapid.Int64Range(0, 2_000_000_000_000).Draw(rt, "msg_ts")
 
-	out := agent.AgentMessage{
+	out := AgentMessage{
 		Turn:      turn,
 		CreatedAt: createdAt,
 	}
@@ -280,7 +279,7 @@ func generateRandomAgentMessage(rt *rapid.T, role string) agent.AgentMessage {
 	return out
 }
 
-func assertAgentMessagesEqual(t *testing.T, expected, got agent.AgentMessage) {
+func assertAgentMessagesEqual(t *testing.T, expected, got AgentMessage) {
 	t.Helper()
 	wantJSON := canonicalJSON(t, snapshotAgentMessage(expected))
 	gotJSON := canonicalJSON(t, snapshotAgentMessage(got))
@@ -306,7 +305,7 @@ func canonicalJSON(t *testing.T, v any) string {
 	return string(b)
 }
 
-func snapshotAgentMessage(msg agent.AgentMessage) map[string]any {
+func snapshotAgentMessage(msg AgentMessage) map[string]any {
 	return map[string]any{
 		"turn":       msg.Turn,
 		"created_at": msg.CreatedAt.UnixNano(),

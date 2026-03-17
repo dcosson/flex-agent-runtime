@@ -81,6 +81,17 @@ func (a *Agent) Session() *Session {
 	return a.session.Clone()
 }
 
+// ConversationLen returns the number of conversation entries without cloning
+// the entire session payload.
+func (a *Agent) ConversationLen() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.session == nil {
+		return 0
+	}
+	return len(a.session.ConversationLog)
+}
+
 func (a *Agent) SetSession(session *Session) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
 	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
@@ -69,7 +68,7 @@ type recordContentBlock struct {
 
 // AgentMessageToRecord converts an in-memory AgentMessage to the serializable
 // record format used for persistence and resume.
-func AgentMessageToRecord(msg agent.AgentMessage) (AgentMessageRecord, error) {
+func AgentMessageToRecord(msg AgentMessage) (AgentMessageRecord, error) {
 	record := AgentMessageRecord{
 		Turn:      msg.Turn,
 		CreatedAt: msg.CreatedAt,
@@ -139,8 +138,8 @@ func AgentMessageToRecord(msg agent.AgentMessage) (AgentMessageRecord, error) {
 
 // RecordToAgentMessage converts a serialized record back to an in-memory
 // AgentMessage.
-func RecordToAgentMessage(rec AgentMessageRecord) (agent.AgentMessage, error) {
-	out := agent.AgentMessage{
+func RecordToAgentMessage(rec AgentMessageRecord) (AgentMessage, error) {
+	out := AgentMessage{
 		Turn:      rec.Turn,
 		CreatedAt: rec.CreatedAt,
 	}
@@ -148,7 +147,7 @@ func RecordToAgentMessage(rec AgentMessageRecord) (agent.AgentMessage, error) {
 	case AgentMessageRoleUser:
 		var payload userRecordContent
 		if err := json.Unmarshal(rec.Content, &payload); err != nil {
-			return agent.AgentMessage{}, fmt.Errorf("parse user content: %w", err)
+			return AgentMessage{}, fmt.Errorf("parse user content: %w", err)
 		}
 		user := &ai.UserMessage{Timestamp: payload.Timestamp}
 		if payload.HasTextBlock {
@@ -159,11 +158,11 @@ func RecordToAgentMessage(rec AgentMessageRecord) (agent.AgentMessage, error) {
 	case AgentMessageRoleAssistant:
 		var payload assistantRecordContent
 		if err := json.Unmarshal(rec.Content, &payload); err != nil {
-			return agent.AgentMessage{}, fmt.Errorf("parse assistant content: %w", err)
+			return AgentMessage{}, fmt.Errorf("parse assistant content: %w", err)
 		}
 		content, err := fromAssistantRecordBlocks(payload.ContentBlocks)
 		if err != nil {
-			return agent.AgentMessage{}, err
+			return AgentMessage{}, err
 		}
 		out.Message = &ai.AssistantMessage{
 			Content:      content,
@@ -177,11 +176,11 @@ func RecordToAgentMessage(rec AgentMessageRecord) (agent.AgentMessage, error) {
 	case AgentMessageRoleToolResult:
 		var payload toolResultRecordContent
 		if err := json.Unmarshal(rec.Content, &payload); err != nil {
-			return agent.AgentMessage{}, fmt.Errorf("parse tool_result content: %w", err)
+			return AgentMessage{}, fmt.Errorf("parse tool_result content: %w", err)
 		}
 		content, err := fromToolResultRecordBlocks(payload.Content)
 		if err != nil {
-			return agent.AgentMessage{}, err
+			return AgentMessage{}, err
 		}
 		out.Message = &ai.ToolResultMessage{
 			ToolCallID: payload.ToolCallID,
@@ -192,7 +191,7 @@ func RecordToAgentMessage(rec AgentMessageRecord) (agent.AgentMessage, error) {
 		}
 		return out, nil
 	default:
-		return agent.AgentMessage{}, fmt.Errorf("unknown record role %q", rec.Role)
+		return AgentMessage{}, fmt.Errorf("unknown record role %q", rec.Role)
 	}
 }
 

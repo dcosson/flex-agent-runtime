@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 // CurrentConversationSchemaVersion is the supported schema version for
@@ -55,8 +55,17 @@ type GetAgentSessionRequest struct {
 type GetAgentSessionResponse struct {
 	SessionID       string
 	State           string
-	Metrics         agent.SessionMetrics
+	Metrics         SessionMetrics
 	ConversationLen int
+}
+
+type SessionMetrics struct {
+	TurnsStarted      uint64
+	TurnsCompleted    uint64
+	MessagesAppended  uint64
+	ToolCallsStarted  uint64
+	ToolCallsFinished uint64
+	Errors            uint64
 }
 
 type ListAgentSessionsRequest struct {
@@ -120,6 +129,12 @@ type AgentMessageRecord struct {
 	Turn      int
 	Role      string
 	Content   json.RawMessage
+	CreatedAt time.Time
+}
+
+type AgentMessage struct {
+	Turn      int
+	Message   ai.Message
 	CreatedAt time.Time
 }
 
