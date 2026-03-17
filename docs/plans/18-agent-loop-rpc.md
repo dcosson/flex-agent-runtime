@@ -1522,3 +1522,43 @@ Review incorporated: `18-agent-loop-rpc-seam-review.md` (automated seam review).
 | F2 | Agent.Abort() signature -- cleared, no issue found. | AgentService <-> Agent | P2 | **Acknowledged (no change)** | Signatures align. No action needed. |
 | F9 | EventPublisher.Publish is fire-and-forget -- persistence-critical events could be silently dropped under backpressure. | AgentLoopService <-> EventPublisher | P3 | **Acknowledged (no change)** | Consistent with existing `AgentEventServer` behavior. Already discussed in section 12.4 (backpressure policy). The orchestrator's persistence subscriber uses blocking writes; if buffer sizing is adequate, drops do not occur. |
 | F14 | Import constraint between internal/agent/api -> internal/agent enforced by convention only. | Import cycles | P3 | **Acknowledged** | Import flow is safe (no cycle). Added note in section 16.4 that CI linting (e.g., `go-import-lint`) could enforce the types-only constraint automatically in the future. |
+
+---
+
+## Completion Signoff
+
+- **Status:** Partial
+- **Date:** 2026-03-17
+- **Epic:** aiag-rmv
+- **Task:** aiag-r3z.1
+- **Branch:** main
+- **Verified by:** coder-1-sea
+- **Code verification:** `go test ./internal/agent/... ./internal/rpc/... ./internal/sandbox/control/... ./cmd/flexagent/... ./tests/integration/agent_rpc/... ./tests/integration/scenarios/... -count=1` (PASS)
+- **Race verification:** `go test -race ./internal/agent/... ./internal/rpc/... -count=1` (PASS)
+
+### Contract Checklist
+
+| Plan Contract | Status | Evidence |
+|---|---|---|
+| `AgentService` + `EventReceiver` interfaces and method set | PASS | `internal/agent/api/agent.go` (all methods present and implemented by service/server/client) |
+| Request/response/session types (`SessionConfig`, `ResumeSessionRequest`, `AgentMessageRecord`, `ToolEnvironmentType`) | PASS | `internal/agent/api/agent_types.go` |
+| `AgentMessageRecord` codec and cross-agent conversion seam | PASS | `internal/agent/api/codec.go`, `internal/agent/api/termmux_codec.go` |
+| `ResumeSession` validation (schema, role, parse, turn monotonicity, warnings) | PASS | `internal/agent/service.go` (`validateAndDecodeResumeLog`) + `internal/agent/service_test.go` |
+| `AgentLoopService` lifecycle (`Create/Get/List/Send/Continue/Steer/FollowUp/Abort/Subscribe/Destroy/Close`) | PASS | `internal/agent/service.go`, `internal/agent/service_test.go` |
+| RPC transport procedures and conditional registration via server options | PASS | `internal/rpc/transport/procedures.go`, `internal/rpc/transport/server.go` |
+| `AgentRPCServer`, client adapter, and RPC error mapping | PASS | `internal/rpc/server/agent_server.go`, `internal/rpc/client/agent_client.go`, `internal/rpc/errors.go` |
+| `SandboxControl` interface + native/cloud providers + process RPCs | PASS | `internal/sandbox/control/control.go`, `internal/sandbox/control/native/native.go`, `internal/sandbox/control/cloud/cloud.go` |
+| Unified `flexagent` binary serve modes (`agent`, `sandbox-host`, `all`, `orchestrator`) | PASS | `cmd/flexagent/main.go`, `cmd/flexagent/serve_*.go` |
+| Integration and E2E coverage for fork/resume/recovery/launch-process | PASS | `tests/integration/agent_rpc/e2e_test.go`, `tests/integration/scenarios/agent_rpc_fork_test.go`, `tests/integration/scenarios/agent_rpc_resume_test.go` |
+
+### Deviation Classification
+
+| Deviation | Class | Status |
+|---|---|---|
+| `CreateSession` flow in section 4 specifies `ExecutionEnvironment` construction from `ToolEnvironmentConfig` and tool wiring; current `AgentLoopService` rejects `ToolEnvSandbox` and installs noop tools (`buildNoopTools`). | Contractual | Open |
+| `AgentServiceClient` constructor shape differs from plan prose (`NewAgentServiceClient(baseURL, opts...)` vs actual `NewAgentServiceClient(httpClient, baseURL, transport.ClientConfig)`). | Structural | Accepted |
+| Section 7.1 flag examples (`--addr`, `--sandbox-host`, `--root-dir`) differ from current implementation flags (`--listen`, RPC/version/auth options). | Cosmetic | Accepted |
+
+### Summary
+
+Plan 18 core RPC/service/sandbox-control architecture is implemented and verified by test + race runs. Completion remains **partial** due one open contractual gap in `AgentLoopService` tool-environment execution wiring.

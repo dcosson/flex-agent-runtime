@@ -2379,3 +2379,49 @@ Before Plan 18 implementation is considered complete:
 | `internal/sandbox/control/native/native_test.go` | SC1-SC4 |
 | `tests/integration/scenarios/agent_rpc_fork_test.go` | FK1-FK2 |
 | `tests/integration/scenarios/agent_rpc_resume_test.go` | CR1, CR3 |
+
+---
+
+## Completion Signoff
+
+- **Status:** Partial
+- **Date:** 2026-03-17
+- **Epic:** aiag-rmv
+- **Task:** aiag-r3z.1
+- **Branch:** main
+- **Verified by:** coder-1-sea
+- **Code verification:** `go test ./internal/agent/... ./internal/rpc/... ./internal/sandbox/control/... ./cmd/flexagent/... ./tests/integration/agent_rpc/... ./tests/integration/scenarios/... -count=1` (PASS)
+- **Race verification:** `go test -race ./internal/agent/... ./internal/rpc/... -count=1` (PASS)
+
+### Test Category Checklist
+
+| Categories | Status | Evidence |
+|---|---|---|
+| P1-P6 | PASS | `internal/agent/harness_test.go`, `internal/agent/service_property_test.go`, `internal/agent/api/codec_test.go`, `internal/rpc/rpctest/property_test.go` |
+| U1-U6 | PASS | `internal/agent/service_test.go` |
+| EP1-EP5 | PASS | `internal/agent/service_test.go` (`TestEventPublisher*`, `TestTurnScopedReceiverEndsAtTurnCompleted`, `TestSubscribeEventsMultipleSubscribers`, `TestDualDeliveryBothStreamsReceiveEvents`) |
+| RT1-RT3 | PASS | `internal/rpc/server/agent_server_test.go`, `internal/rpc/client/agent_client_test.go` |
+| FK1-FK2 | PASS | `tests/integration/scenarios/agent_rpc_fork_test.go` |
+| CR1-CR3 | PASS | `tests/integration/scenarios/agent_rpc_resume_test.go` |
+| EF1-EF4 | PASS | `internal/rpc/rpctest/agent_harness_test.go` |
+| SC1-SC4 | PASS | `internal/sandbox/control/native/native_test.go`, `internal/sandbox/control/cloud/cloud_test.go` |
+| DV1-DV2 | PARTIAL | Equivalent behavior coverage exists via `TestDualDeliveryBothStreamsReceiveEvents` and terminal stream tests, but no dedicated DV-tagged termmux independence/failure tests matching section 11 verbatim. |
+| GS1-GS3 | PARTIAL | `TestCloseDrainsActiveSessions` and `TestCloseRejectsNewSessions` cover GS1/GS3; no explicit GS2 assertion for forced close after drain deadline. |
+| FI1-FI5 | PARTIAL | Fault coverage exists across `internal/agent/harness_test.go` and `internal/agent/service_test.go` (`malformed logs`, warning paths), but naming/scope differs from FI table. |
+| B1-B6 | PARTIAL | B1-B4 present (`internal/agent/harness_bench_test.go`, `internal/rpc/rpctest/benchmark_test.go`); no dedicated B5/B6 benchmarks matching section 14 labels. |
+| ST1-ST3 | PASS | `internal/agent/harness_soak_test.go`, `internal/rpc/rpctest/stress_test.go`, scenario stress tests |
+| SEC1-SEC3 | PASS | `internal/agent/harness_test.go`, `internal/rpc/rpctest/security_test.go`, `internal/sandbox/control/cloud/cloud_test.go` |
+
+### Deviation Classification
+
+| Deviation | Class | Status |
+|---|---|---|
+| Section 11 DV categories are covered only indirectly; no direct DV1/DV2 tests with the specified scope text. | Missing | Open |
+| GS2 force-shutdown-after-deadline case is not explicitly asserted in current tests. | Missing | Open |
+| B5/B6 benchmark categories in section 14 do not have matching benchmark functions by ID. | Missing | Open |
+| Test inventory has equivalent coverage but different file/function organization than section 2363 file map. | Structural | Accepted |
+| Some category IDs are represented by equivalent tests under different naming conventions (e.g., F*/S*/property suites). | Cosmetic | Accepted |
+
+### Summary
+
+Harness coverage for the implemented RPC stack is broad and stable (all required verification commands passed). Completion is **partial** because three labeled harness categories (DV, GS2, B5/B6) are not implemented as specified.
