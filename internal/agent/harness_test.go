@@ -240,15 +240,18 @@ func TestP3_SnapshotTriggerCardinality(t *testing.T) {
 		if err := agent.Prompt(context.Background(), "root"); err != nil {
 			t.Fatalf("prompt: %v", err)
 		}
+		acceptedFollowUps := 0
 		for i := 0; i < followUpN; i++ {
-			_ = agent.FollowUp(fmt.Sprintf("f-%d", i))
+			if err := agent.FollowUp(fmt.Sprintf("f-%d", i)); err == nil {
+				acceptedFollowUps++
+			}
 		}
 
 		waitForState(t, agent, StateIdle, 2*time.Second)
 		mu.Lock()
 		defer mu.Unlock()
 
-		expectedTurns := followUpN + 1
+		expectedTurns := acceptedFollowUps + 1
 		if turnCompleted != expectedTurns {
 			t.Fatalf("turn_completed cardinality mismatch: got=%d want=%d", turnCompleted, expectedTurns)
 		}

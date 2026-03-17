@@ -148,7 +148,7 @@ func (d *MockAgentDriver) turnScript() []agent.AgentEvent {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if len(d.TurnScript) == 0 {
-		return defaultTurnScript()
+		return defaultTurnScript(d.ToolCallScript)
 	}
 	out := make([]agent.AgentEvent, len(d.TurnScript))
 	copy(out, d.TurnScript)
@@ -170,17 +170,27 @@ func (d *MockAgentDriver) emit(evt agent.AgentEvent) {
 	}
 }
 
-func defaultTurnScript() []agent.AgentEvent {
-	return []agent.AgentEvent{
+func defaultTurnScript(toolCalls []ToolCallEntry) []agent.AgentEvent {
+	script := []agent.AgentEvent{
 		{Type: agent.EventTurnStarted, Turn: 1},
 		{Type: agent.EventAgentMessageDelta, Turn: 1, Delta: "Hello from mock agent"},
-		{
+	}
+	for i, call := range toolCalls {
+		toolCallID := fmt.Sprintf("tool-%d", i+1)
+		script = append(script,
+			agent.AgentEvent{Type: agent.EventToolStarted, Turn: 1, ToolName: call.ToolName, ToolCallID: toolCallID},
+			agent.AgentEvent{Type: agent.EventToolCompleted, Turn: 1, ToolName: call.ToolName, ToolCallID: toolCallID},
+		)
+	}
+	script = append(script,
+		agent.AgentEvent{
 			Type:    agent.EventAgentMessageCompleted,
 			Turn:    1,
 			Message: &agent.AgentMessage{Turn: 1, CreatedAt: time.Now()},
 		},
-		{Type: agent.EventTurnCompleted, Turn: 1},
-	}
+		agent.AgentEvent{Type: agent.EventTurnCompleted, Turn: 1},
+	)
+	return script
 }
 
 // NewDriverFactory returns a name-aware factory for service.SetDriverFactory.
