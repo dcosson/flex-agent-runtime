@@ -38,11 +38,11 @@ The flex-agent-runtime has all the building blocks (agent loop, tools, sandbox e
 
 The "modes" (All Local, Agent in Sandbox, Tools in Sandbox) are not discrete configurations — they're points on a continuous placement spectrum. The three layers (orchestrator, agent loop, tools) are independently deployable:
 
-| Layer | Can run... |
-|-------|-----------|
-| **Orchestrator** | On your laptop, on a cloud server, co-located with sandbox-host |
-| **Agent Loop** | In-process with orchestrator, as a standalone process on any machine, inside a sandbox |
-| **Tools** | In-process with agent loop, on a remote sandbox-host via RPC |
+| Layer | Placement Options |
+|-------|------------------|
+| **Orchestrator** | Local process, remote server |
+| **Agent Loop** | In-process with orchestrator, standalone process (any machine), inside a sandbox |
+| **Tools** | In-process with agent (e.g. Starlark interpreter), same machine/sandbox as agent (local filesystem), remote sandbox-host via RPC (our ZFS/gVisor infra), remote cloud provider via RPC (E2B/Daytona/Fly — designed, not yet implemented) |
 
 The named modes are just common deployment patterns, not hard boundaries. The library should support any valid combination.
 
@@ -73,7 +73,7 @@ The named modes are just common deployment patterns, not hard boundaries. The li
 | R6 | User can send messages / follow-ups / steering commands to running agents | Must-have |
 | R7 | Session lifecycle management: create, pause, resume, destroy | Must-have |
 | R8 | Agent loop server connects to sandbox-host for remote tool execution OR runs tools locally — independent config | Must-have |
-| R9 | Sandbox-host can launch agent loop server inside a sandbox it manages (enables Agent in Sandbox with our loop) | Undecided |
+| R9 | SandboxControl can launch agent loop server inside a sandbox (native via sandbox-host, and external via cloud provider APIs) | Must-have |
 
 ---
 
@@ -96,5 +96,36 @@ The application layer built on top of Plan A:
 - Demonstrates how to build on the library, but is also genuinely useful standalone
 
 Plan A must come first. Plan B depends on it.
+
+---
+
+## Key Design Decisions
+
+### Sandbox Control Abstraction
+
+The orchestrator needs a **SandboxControl** interface for creating/destroying sandboxes, independent of provider:
+
+- **NativeSandboxControl** — RPC client to our sandbox-host (which manages ZFS + gVisor internally)
+- **E2BSandboxControl** — HTTP client to E2B API
+- **DaytonaSandboxControl** — HTTP client to Daytona API
+- **FlySandboxControl** — HTTP client to Fly Machines API
+
+This is distinct from **ExecutionEnvironment** (which is about executing tools within an already-created sandbox). SandboxControl is about lifecycle; ExecutionEnvironment is about usage.
+
+For our native stack, the sandbox-host IS the control plane. For 3rd parties, their API is the control plane. The orchestrator doesn't care — it calls SandboxControl.CreateSandbox() either way.
+
+### Per-Tool-Call vs Session-Level Lifecycle
+
+- **Per-tool-call isolation** is internal to the ExecutionEnvironment implementation (e.g. native creates/destroys a gVisor container per call; E2B runs commands in a persistent VM)
+- **Session-level lifecycle** (create, pause, resume, destroy) is the orchestrator's job via SandboxControl
+- The ExecutionEnvironment never decides about pausing — it just executes tools
+
+---
+
+## Future Considerations
+
+### Deep Pause via ZFS Send to S3
+
+For cost optimization at scale with our native sandbox: instead of keeping ZFS datasets on local disk during pause, use `zfs send` to stream the dataset to S3, then destroy the local copy. Resume uses `zfs receive` from S3. This makes EBS "dumb storage" with no important state — ZFS is always recreatable from S3. Not needed for v1 but the SandboxControl.Pause/Resume interface should be designed to allow this.
 
 ---
