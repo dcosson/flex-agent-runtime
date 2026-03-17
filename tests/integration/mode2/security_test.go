@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/tests/integration/mode2/harness"
+	"github.com/anthropics/flex-agent-runtime/tests/integration/mode2/harness"
 )
 
 // =============================================================================

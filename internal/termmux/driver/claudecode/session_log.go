@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	"flex-agent-runtime/internal/termmux/driver"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux/driver"
 )
 
 // ParseSessionLog reads Claude Code's session.jsonl format and returns

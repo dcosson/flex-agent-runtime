@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/termmux/monitor"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
 )
 
 func TestSession_StartAndWait(t *testing.T) {

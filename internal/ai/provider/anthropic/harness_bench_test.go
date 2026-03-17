@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/ai/sse"
-	"flex-agent-runtime/internal/ai/testutil/stubserver"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai/sse"
+	"github.com/anthropics/flex-agent-runtime/internal/ai/testutil/stubserver"
 )
 
 // B1: SSE throughput benchmark target (>=50k events/sec).

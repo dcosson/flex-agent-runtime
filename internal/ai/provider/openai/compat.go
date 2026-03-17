@@ -4,7 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 // boolVal safely dereferences a *bool, returning false for nil.

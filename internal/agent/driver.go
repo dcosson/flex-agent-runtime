@@ -6,7 +6,7 @@ import (
 	"sort"
 	"sync"
 
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 // AgentDriver is the runtime-level driver contract shared by native and adapter drivers.

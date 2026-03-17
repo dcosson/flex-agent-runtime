@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"flex-agent-runtime/internal/rpc"
-	"flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
 )
 
 // SEC1. AuthN/AuthZ enforcement hooks — verify missing session returns NotFound.

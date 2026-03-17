@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/sandbox/gvisor"
-	"flex-agent-runtime/internal/tools"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/gvisor"
+	"github.com/anthropics/flex-agent-runtime/internal/tools"
 )
 
 func (svc *SandboxHostService) ExecuteTool(ctx context.Context, req ExecuteToolRequest) (*ExecuteToolResponse, error) {

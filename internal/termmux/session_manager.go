@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"flex-agent-runtime/internal/termmux/monitor"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
 )
 
 // SessionManager manages the lifecycle of terminal multiplexer sessions.

@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/tools/codeinterp"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/tools/codeinterp"
 )
 
 // toolImpl is the internal tool implementation used by backends.

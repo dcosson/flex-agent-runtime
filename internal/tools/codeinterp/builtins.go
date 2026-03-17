@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/tools/codeinterp/datastore"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/tools/codeinterp/datastore"
 	"go.starlark.net/starlark"
 )
 

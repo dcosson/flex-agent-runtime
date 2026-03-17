@@ -6,13 +6,13 @@ import (
 	"sync"
 	"testing"
 
-	"flex-agent-runtime/internal/rpc"
-	"flex-agent-runtime/internal/rpc/api"
-	"flex-agent-runtime/internal/rpc/client"
-	"flex-agent-runtime/internal/rpc/server"
-	"flex-agent-runtime/internal/sandbox"
-	"flex-agent-runtime/internal/sandbox/gvisor"
-	"flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/client"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/server"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/gvisor"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
 )
 
 const baseSnapshot = "tank/bases/repo@initial"

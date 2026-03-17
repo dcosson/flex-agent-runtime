@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
 )
 
 func (svc *SandboxHostService) TurnComplete(ctx context.Context, sessionID string) (*SnapshotResult, error) {

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/ai/sse"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai/sse"
 )
 
 func (p *Provider) Stream(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions) *ai.EventStream {

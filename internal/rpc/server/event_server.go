@@ -6,9 +6,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/rpc"
-	"flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
 )
 
 type AgentEventServer struct {

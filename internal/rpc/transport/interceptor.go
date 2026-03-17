@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"flex-agent-runtime/internal/rpc"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc"
 )
 
 type ServerAuthHook func(ctx context.Context, procedure string, headers http.Header) error

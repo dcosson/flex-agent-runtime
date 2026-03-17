@@ -1,7 +1,7 @@
 package tools
 
 import (
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 // ToolRequest carries all parameters needed to dispatch a single tool call.

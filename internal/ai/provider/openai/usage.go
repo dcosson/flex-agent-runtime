@@ -1,6 +1,6 @@
 package openai
 
-import "flex-agent-runtime/internal/ai"
+import "github.com/anthropics/flex-agent-runtime/internal/ai"
 
 func mapUsage(u *chunkUsage) ai.Usage {
 	if u == nil {

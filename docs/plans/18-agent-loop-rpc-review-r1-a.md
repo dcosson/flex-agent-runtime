@@ -24,7 +24,7 @@ The plan places the `AgentService` interface in `internal/rpc/api/agent.go`. How
 
 This creates a **circular import**: `internal/agent/service.go` would need to import `internal/rpc/api` for the `AgentEventReceiver` type, but `internal/rpc/api/types.go` already imports `internal/agent` for the `agent.AgentEvent` type.
 
-The existing codebase has `internal/rpc/api/types.go` importing `flex-agent-runtime/internal/agent`, so `internal/agent` cannot import `internal/rpc/api`. Either:
+The existing codebase has `internal/rpc/api/types.go` importing `github.com/anthropics/flex-agent-runtime/internal/agent`, so `internal/agent` cannot import `internal/rpc/api`. Either:
 - The `AgentService` interface must live in a separate package (not `internal/rpc/api`), or
 - A new event receiver type must be defined in `internal/agent` that doesn't reference `api` types, or
 - The interface needs to be split into a transport-neutral core (in `internal/agent` or a new package like `internal/agent/api`) and an RPC-specific layer.

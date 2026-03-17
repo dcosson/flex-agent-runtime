@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/sandbox/environment"
-	"flex-agent-runtime/internal/sandbox/environment/local"
-	"flex-agent-runtime/internal/sandbox/environment/native"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/environment"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/environment/local"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/environment/native"
 )
 
 func TestF1_NativeRPCFailureHandling(t *testing.T) {

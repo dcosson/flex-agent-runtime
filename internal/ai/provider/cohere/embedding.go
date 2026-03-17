@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 const (

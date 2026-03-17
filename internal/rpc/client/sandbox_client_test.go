@@ -6,10 +6,10 @@ import (
 	"io"
 	"testing"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/rpc"
-	"flex-agent-runtime/internal/rpc/api"
-	"flex-agent-runtime/internal/tools"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/tools"
 )
 
 type fakeStream struct {

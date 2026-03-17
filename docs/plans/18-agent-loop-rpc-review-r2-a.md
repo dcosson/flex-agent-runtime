@@ -214,7 +214,7 @@ However, the actual comment in the code block says:
 Resources ResourceSpec // CPU, memory (uses existing api.ResourceSpec)
 ```
 
-But the `SandboxControl` interface is in package `internal/sandbox/control/control.go`, and it imports `flex-agent-runtime/internal/sandbox/environment`. It does NOT show an import of `internal/rpc/api`. Using `api.ResourceSpec` (from `internal/rpc/api`) would add a dependency from `internal/sandbox/control` to `internal/rpc/api`, which seems wrong for a domain interface.
+But the `SandboxControl` interface is in package `internal/sandbox/control/control.go`, and it imports `github.com/anthropics/flex-agent-runtime/internal/sandbox/environment`. It does NOT show an import of `internal/rpc/api`. Using `api.ResourceSpec` (from `internal/rpc/api`) would add a dependency from `internal/sandbox/control` to `internal/rpc/api`, which seems wrong for a domain interface.
 
 Should this be `environment.ResourceSpec`? But `environment` does not have a `ResourceSpec` type (verified: `capabilities.go` only defines `Capabilities`). Or should `ResourceSpec` be a new type in `internal/sandbox/control`? The plan should be explicit. Since the existing `api.ResourceSpec` only has `CPUs float64` and `MemMB int`, redefining it locally in the `control` package would be trivial and avoid the cross-layer import.
 

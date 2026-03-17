@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 type mockDriver struct {

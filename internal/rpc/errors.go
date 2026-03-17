@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"flex-agent-runtime/internal/sandbox"
-	"flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
 )
 
 type Code string

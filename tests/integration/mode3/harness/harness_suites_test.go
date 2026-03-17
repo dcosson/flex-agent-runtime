@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/rpc"
-	"flex-agent-runtime/internal/rpc/api"
-	"flex-agent-runtime/internal/tools"
-	"flex-agent-runtime/tests/integration/testutil"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/tools"
+	"github.com/anthropics/flex-agent-runtime/tests/integration/testutil"
 )
 
 func harnessTier() string {

@@ -12,7 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
 
 	"github.com/coder/websocket"
 )

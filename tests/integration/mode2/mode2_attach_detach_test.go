@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/tests/integration/mode2/harness"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/tests/integration/mode2/harness"
 )
 
 // S3: Attach/detach lifecycle (no event loss).

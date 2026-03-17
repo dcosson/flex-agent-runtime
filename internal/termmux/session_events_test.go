@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/termmux/eventsrc/otelserver"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux/eventsrc/otelserver"
 )
 
 func TestSessionEventSources_StartStop(t *testing.T) {

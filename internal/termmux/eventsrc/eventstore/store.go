@@ -8,7 +8,7 @@ import (
 	"os"
 	"sync"
 
-	"flex-agent-runtime/internal/termmux/monitor"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
 )
 
 // Store persists events to a JSONL file.

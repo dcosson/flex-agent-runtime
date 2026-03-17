@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
 )
 
 type CreateSessionRequest struct {

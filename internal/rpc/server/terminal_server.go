@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"time"
 
-	"flex-agent-runtime/internal/rpc"
-	"flex-agent-runtime/internal/rpc/api"
-	"flex-agent-runtime/internal/termmux"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux"
 )
 
 // TerminalServer implements api.TerminalService by bridging terminal

@@ -7,7 +7,7 @@ import (
 
 	streamingjson "github.com/karminski/streaming-json-go"
 
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 type toolJSONParser struct {

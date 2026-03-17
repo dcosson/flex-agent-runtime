@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 // NativeDriver implements the canonical LLM -> tools -> LLM turn loop.

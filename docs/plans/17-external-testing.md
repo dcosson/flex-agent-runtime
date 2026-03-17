@@ -40,10 +40,10 @@ import (
     "log/slog"
     "time"
 
-    "flex-agent-runtime/internal/agent"
-    "flex-agent-runtime/internal/ai"
-    "flex-agent-runtime/internal/sandbox/environment/local"
-    "flex-agent-runtime/internal/tools"
+    "github.com/anthropics/flex-agent-runtime/internal/agent"
+    "github.com/anthropics/flex-agent-runtime/internal/ai"
+    "github.com/anthropics/flex-agent-runtime/internal/sandbox/environment/local"
+    "github.com/anthropics/flex-agent-runtime/internal/tools"
 )
 
 func main() {
@@ -114,9 +114,9 @@ import (
     "fmt"
     "log/slog"
 
-    "flex-agent-runtime/internal/agent"
-    "flex-agent-runtime/internal/rpc/client"
-    "flex-agent-runtime/internal/termmux"
+    "github.com/anthropics/flex-agent-runtime/internal/agent"
+    "github.com/anthropics/flex-agent-runtime/internal/rpc/client"
+    "github.com/anthropics/flex-agent-runtime/internal/termmux"
 )
 
 func main() {
@@ -179,11 +179,11 @@ import (
     "fmt"
     "log/slog"
 
-    "flex-agent-runtime/internal/agent"
-    "flex-agent-runtime/internal/ai"
-    "flex-agent-runtime/internal/rpc/client"
-    "flex-agent-runtime/internal/sandbox/environment/native"
-    "flex-agent-runtime/internal/tools"
+    "github.com/anthropics/flex-agent-runtime/internal/agent"
+    "github.com/anthropics/flex-agent-runtime/internal/ai"
+    "github.com/anthropics/flex-agent-runtime/internal/rpc/client"
+    "github.com/anthropics/flex-agent-runtime/internal/sandbox/environment/native"
+    "github.com/anthropics/flex-agent-runtime/internal/tools"
 )
 
 func main() {
@@ -1157,7 +1157,7 @@ import (
     "os"
     "path/filepath"
 
-    "flex-agent-runtime/internal/ai/testutil/stubserver"
+    "github.com/anthropics/flex-agent-runtime/internal/ai/testutil/stubserver"
 )
 
 func main() {

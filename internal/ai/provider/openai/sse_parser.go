@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/ai/sse"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai/sse"
 )
 
 type toolStreamState struct {

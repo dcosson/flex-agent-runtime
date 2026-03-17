@@ -1,8 +1,8 @@
 package google
 
 import (
-	"flex-agent-runtime/ai/provider"
-	internal "flex-agent-runtime/internal/ai/provider/google"
+	"github.com/anthropics/flex-agent-runtime/ai/provider"
+	internal "github.com/anthropics/flex-agent-runtime/internal/ai/provider/google"
 )
 
 // Google supports chat/streaming and embeddings.
