@@ -1,6 +1,6 @@
 # 18: Agent Loop RPC Service
 
-**Status:** Draft (R1 + R2 + seam reviews incorporated)
+**Status:** Approved (R1 + R2 + seam reviews incorporated)
 **Depends on:** 05-agent, 13-rpc-layer, 11-sandbox-host-service.add01
 **Depended on by:** Orchestrator application (future)
 **Scope:** Wrap the existing agent loop with a ConnectRPC interface so it can run as a standalone service, deployable anywhere. Adds a SandboxControl abstraction for unified sandbox lifecycle management across native and cloud providers.
