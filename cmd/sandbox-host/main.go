@@ -107,12 +107,17 @@ func main() {
 		termSessions = termmux.NewSessionManager()
 	}
 
-	rpcTransport := transport.NewServer(sandboxRPC, eventRPC, termSessions, transport.ServerConfig{
-		MaxMessageBytes: cfg.RPCMaxMessageBytes,
-		APIVersion:      cfg.APIVersion,
-		MinAPIVersion:   cfg.MinAPIVersion,
-		AuthHook:        authHook,
-	})
+	rpcTransport := transport.NewServer(
+		transport.ServerConfig{
+			MaxMessageBytes: cfg.RPCMaxMessageBytes,
+			APIVersion:      cfg.APIVersion,
+			MinAPIVersion:   cfg.MinAPIVersion,
+			AuthHook:        authHook,
+		},
+		transport.WithSandboxService(sandboxRPC),
+		transport.WithAgentEventService(eventRPC),
+		transport.WithSessionManager(termSessions),
+	)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
 	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
 	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
 )
@@ -56,7 +57,21 @@ func MapError(err error) error {
 	if errors.As(err, &rpcErr) {
 		return rpcErr
 	}
+	var serviceErr *agent.ServiceError
+	if errors.As(err, &serviceErr) {
+		msg := serviceErr.Message
+		if msg == "" {
+			msg = err.Error()
+		}
+		return NewRPCError(mapServiceCode(serviceErr.Code), msg, err)
+	}
 	switch {
+	case errors.Is(err, agent.ErrQueueFull):
+		return NewRPCError(CodeResourceExhausted, err.Error(), err)
+	case errors.Is(err, agent.ErrBusy),
+		errors.Is(err, agent.ErrStopped),
+		errors.Is(err, agent.ErrInvalidState):
+		return NewRPCError(CodeFailedPrecondition, err.Error(), err)
 	case errors.Is(err, sandbox.ErrSessionNotFound):
 		return NewRPCError(CodeNotFound, err.Error(), err)
 	case errors.Is(err, sandbox.ErrSessionExists):
@@ -76,6 +91,29 @@ func MapError(err error) error {
 		return NewRPCError(CodeDeadlineExceeded, err.Error(), err)
 	default:
 		return NewRPCError(CodeInternal, err.Error(), err)
+	}
+}
+
+func mapServiceCode(code agent.ServiceCode) Code {
+	switch code {
+	case agent.CodeInvalidArgument:
+		return CodeInvalidArgument
+	case agent.CodeNotFound:
+		return CodeNotFound
+	case agent.CodeAlreadyExists:
+		return CodeAlreadyExists
+	case agent.CodeFailedPrecondition:
+		return CodeFailedPrecondition
+	case agent.CodeResourceExhausted:
+		return CodeResourceExhausted
+	case agent.CodeUnavailable:
+		return CodeUnavailable
+	case agent.CodeDeadlineExceeded:
+		return CodeDeadlineExceeded
+	case agent.CodeCanceled:
+		return CodeCanceled
+	default:
+		return CodeInternal
 	}
 }
 

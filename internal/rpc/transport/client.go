@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"connectrpc.com/connect"
+	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
 	"github.com/anthropics/flex-agent-runtime/internal/rpc"
 	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
 	"github.com/anthropics/flex-agent-runtime/internal/termmux"
@@ -37,6 +38,20 @@ type EventClient struct {
 	Stream *connect.Client[api.StreamAgentEventsRequest, api.AgentEventEnvelope]
 }
 
+type AgentClient struct {
+	CreateSession   *connect.Client[agentapi.CreateAgentSessionRequest, agentapi.CreateAgentSessionResponse]
+	GetSession      *connect.Client[agentapi.GetAgentSessionRequest, agentapi.GetAgentSessionResponse]
+	ListSessions    *connect.Client[agentapi.ListAgentSessionsRequest, agentapi.ListAgentSessionsResponse]
+	ResumeSession   *connect.Client[agentapi.ResumeSessionRequest, agentapi.ResumeSessionResponse]
+	SendMessage     *connect.Client[agentapi.SendMessageRequest, api.AgentEventEnvelope]
+	Continue        *connect.Client[agentapi.ContinueRequest, api.AgentEventEnvelope]
+	Steer           *connect.Client[agentapi.SteerRequest, agentapi.SteerResponse]
+	FollowUp        *connect.Client[agentapi.FollowUpRequest, agentapi.FollowUpResponse]
+	Abort           *connect.Client[agentapi.AbortRequest, agentapi.AbortResponse]
+	SubscribeEvents *connect.Client[agentapi.SubscribeEventsRequest, api.AgentEventEnvelope]
+	DestroySession  *connect.Client[agentapi.DestroyAgentSessionRequest, agentapi.DestroyAgentSessionResponse]
+}
+
 type TerminalClient struct {
 	Stream *connect.Client[termmux.TerminalClientMessage, termmux.TerminalServerMessage]
 }
@@ -61,6 +76,22 @@ func NewSandboxClient(httpClient connect.HTTPClient, baseURL string, cfg ClientC
 func NewEventClient(httpClient connect.HTTPClient, baseURL string, cfg ClientConfig) *EventClient {
 	return &EventClient{
 		Stream: connect.NewClient[api.StreamAgentEventsRequest, api.AgentEventEnvelope](httpClient, baseURL+ProcedureEventsStream, clientOptions(cfg)...),
+	}
+}
+
+func NewAgentClient(httpClient connect.HTTPClient, baseURL string, cfg ClientConfig) *AgentClient {
+	return &AgentClient{
+		CreateSession:   connect.NewClient[agentapi.CreateAgentSessionRequest, agentapi.CreateAgentSessionResponse](httpClient, baseURL+ProcedureAgentCreateSession, clientOptions(cfg)...),
+		GetSession:      connect.NewClient[agentapi.GetAgentSessionRequest, agentapi.GetAgentSessionResponse](httpClient, baseURL+ProcedureAgentGetSession, clientOptions(cfg)...),
+		ListSessions:    connect.NewClient[agentapi.ListAgentSessionsRequest, agentapi.ListAgentSessionsResponse](httpClient, baseURL+ProcedureAgentListSessions, clientOptions(cfg)...),
+		ResumeSession:   connect.NewClient[agentapi.ResumeSessionRequest, agentapi.ResumeSessionResponse](httpClient, baseURL+ProcedureAgentResumeSession, clientOptions(cfg)...),
+		SendMessage:     connect.NewClient[agentapi.SendMessageRequest, api.AgentEventEnvelope](httpClient, baseURL+ProcedureAgentSendMessage, clientOptions(cfg)...),
+		Continue:        connect.NewClient[agentapi.ContinueRequest, api.AgentEventEnvelope](httpClient, baseURL+ProcedureAgentContinue, clientOptions(cfg)...),
+		Steer:           connect.NewClient[agentapi.SteerRequest, agentapi.SteerResponse](httpClient, baseURL+ProcedureAgentSteer, clientOptions(cfg)...),
+		FollowUp:        connect.NewClient[agentapi.FollowUpRequest, agentapi.FollowUpResponse](httpClient, baseURL+ProcedureAgentFollowUp, clientOptions(cfg)...),
+		Abort:           connect.NewClient[agentapi.AbortRequest, agentapi.AbortResponse](httpClient, baseURL+ProcedureAgentAbort, clientOptions(cfg)...),
+		SubscribeEvents: connect.NewClient[agentapi.SubscribeEventsRequest, api.AgentEventEnvelope](httpClient, baseURL+ProcedureAgentSubscribeEvents, clientOptions(cfg)...),
+		DestroySession:  connect.NewClient[agentapi.DestroyAgentSessionRequest, agentapi.DestroyAgentSessionResponse](httpClient, baseURL+ProcedureAgentDestroySession, clientOptions(cfg)...),
 	}
 }
 

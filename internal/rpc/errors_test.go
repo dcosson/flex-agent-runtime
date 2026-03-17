@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
 	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
 	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
 )
@@ -38,6 +39,12 @@ func TestMapError(t *testing.T) {
 		{name: "already exists", err: sandbox.ErrSessionExists, code: CodeAlreadyExists},
 		{name: "failed precondition", err: sandbox.ErrSessionPaused, code: CodeFailedPrecondition},
 		{name: "resource exhausted", err: zfs.ErrPoolFull, code: CodeResourceExhausted},
+		{name: "agent queue full", err: agent.ErrQueueFull, code: CodeResourceExhausted},
+		{name: "agent busy", err: agent.BusyError{State: agent.StateStreaming}, code: CodeFailedPrecondition},
+		{name: "service not found", err: &agent.ServiceError{Code: agent.CodeNotFound, Message: "missing"}, code: CodeNotFound},
+		{name: "service duplicate", err: &agent.ServiceError{Code: agent.CodeAlreadyExists, Message: "duplicate"}, code: CodeAlreadyExists},
+		{name: "service unavailable", err: &agent.ServiceError{Code: agent.CodeUnavailable, Message: "closing"}, code: CodeUnavailable},
+		{name: "service max sessions", err: &agent.ServiceError{Code: agent.CodeResourceExhausted, Message: "max sessions reached"}, code: CodeResourceExhausted},
 		{name: "canceled", err: context.Canceled, code: CodeCanceled},
 		{name: "deadline", err: context.DeadlineExceeded, code: CodeDeadlineExceeded},
 	}

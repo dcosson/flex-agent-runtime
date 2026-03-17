@@ -10,8 +10,10 @@ import (
 	"sync/atomic"
 
 	"connectrpc.com/connect"
+	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
 	"github.com/anthropics/flex-agent-runtime/internal/rpc"
 	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	rpcserver "github.com/anthropics/flex-agent-runtime/internal/rpc/server"
 	"github.com/anthropics/flex-agent-runtime/internal/termmux"
 )
 
@@ -22,9 +24,40 @@ type ServerConfig struct {
 	AuthHook        ServerAuthHook
 }
 
+type ServerOption func(*Server)
+
+func WithSandboxService(s api.SandboxService) ServerOption {
+	return func(server *Server) {
+		server.sandbox = s
+	}
+}
+
+func WithAgentEventService(e api.AgentEventService) ServerOption {
+	return func(server *Server) {
+		server.events = e
+	}
+}
+
+func WithSessionManager(t *termmux.SessionManager) ServerOption {
+	return func(server *Server) {
+		server.terms = t
+	}
+}
+
+func WithAgentService(a agentapi.AgentService) ServerOption {
+	return func(server *Server) {
+		if a == nil {
+			server.agent = nil
+			return
+		}
+		server.agent = rpcserver.NewAgentRPCServer(a)
+	}
+}
+
 type Server struct {
 	sandbox api.SandboxService
 	events  api.AgentEventService
+	agent   *rpcserver.AgentRPCServer
 	terms   *termmux.SessionManager
 	cfg     ServerConfig
 
@@ -33,7 +66,7 @@ type Server struct {
 	subSeq      atomic.Uint64
 }
 
-func NewServer(sandbox api.SandboxService, events api.AgentEventService, terms *termmux.SessionManager, cfg ServerConfig) *Server {
+func NewServer(cfg ServerConfig, opts ...ServerOption) *Server {
 	if cfg.MaxMessageBytes <= 0 {
 		cfg.MaxMessageBytes = 16 << 20
 	}
@@ -43,137 +76,29 @@ func NewServer(sandbox api.SandboxService, events api.AgentEventService, terms *
 	if cfg.MinAPIVersion == "" {
 		cfg.MinAPIVersion = rpc.MinSupportedAPIVersion()
 	}
-	return &Server{sandbox: sandbox, events: events, terms: terms, cfg: cfg}
+	server := &Server{cfg: cfg}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(server)
+		}
+	}
+	return server
 }
 
 func (s *Server) Handler() http.Handler {
 	s.handlerOnce.Do(func() {
 		mux := http.NewServeMux()
-		opts := []connect.HandlerOption{
-			connect.WithCodec(JSONCodec{}),
-			connect.WithReadMaxBytes(s.cfg.MaxMessageBytes),
-			connect.WithSendMaxBytes(s.cfg.MaxMessageBytes),
-			connect.WithInterceptors(NewPolicyInterceptor(InterceptorConfig{
-				AuthHook:      s.cfg.AuthHook,
-				APIVersion:    s.cfg.APIVersion,
-				MinAPIVersion: s.cfg.MinAPIVersion,
-			})),
-		}
+		handlerOpts := s.handlerOptions()
 
-		mux.Handle(ProcedureSandboxCreateSession, connect.NewUnaryHandlerSimple(
-			ProcedureSandboxCreateSession, func(ctx context.Context, req *api.CreateSessionRequest) (*api.CreateSessionResponse, error) {
-				res, err := s.sandbox.CreateSession(ctx, req)
-				return res, toConnectError(err)
-			}, opts...,
-		))
-		mux.Handle(ProcedureSandboxGetSession, connect.NewUnaryHandlerSimple(
-			ProcedureSandboxGetSession, func(ctx context.Context, req *api.GetSessionRequest) (*api.GetSessionResponse, error) {
-				res, err := s.sandbox.GetSession(ctx, req)
-				return res, toConnectError(err)
-			}, opts...,
-		))
-		mux.Handle(ProcedureSandboxPauseSession, connect.NewUnaryHandlerSimple(
-			ProcedureSandboxPauseSession, func(ctx context.Context, req *api.PauseSessionRequest) (*api.PauseSessionResponse, error) {
-				res, err := s.sandbox.PauseSession(ctx, req)
-				return res, toConnectError(err)
-			}, opts...,
-		))
-		mux.Handle(ProcedureSandboxResumeSession, connect.NewUnaryHandlerSimple(
-			ProcedureSandboxResumeSession, func(ctx context.Context, req *api.ResumeSessionRequest) (*api.ResumeSessionResponse, error) {
-				res, err := s.sandbox.ResumeSession(ctx, req)
-				return res, toConnectError(err)
-			}, opts...,
-		))
-		mux.Handle(ProcedureSandboxDestroySession, connect.NewUnaryHandlerSimple(
-			ProcedureSandboxDestroySession, func(ctx context.Context, req *api.DestroySessionRequest) (*api.DestroySessionResponse, error) {
-				res, err := s.sandbox.DestroySession(ctx, req)
-				return res, toConnectError(err)
-			}, opts...,
-		))
-		mux.Handle(ProcedureSandboxExecuteTool, connect.NewUnaryHandlerSimple(
-			ProcedureSandboxExecuteTool, func(ctx context.Context, req *api.ExecuteToolRequest) (*api.ExecuteToolResponse, error) {
-				res, err := s.sandbox.ExecuteTool(ctx, req)
-				return res, toConnectError(err)
-			}, opts...,
-		))
-		mux.Handle(ProcedureSandboxTurnComplete, connect.NewUnaryHandlerSimple(
-			ProcedureSandboxTurnComplete, func(ctx context.Context, req *api.TurnCompleteRequest) (*api.TurnCompleteResponse, error) {
-				res, err := s.sandbox.TurnComplete(ctx, req)
-				return res, toConnectError(err)
-			}, opts...,
-		))
-		mux.Handle(ProcedureSandboxCreateSnapshot, connect.NewUnaryHandlerSimple(
-			ProcedureSandboxCreateSnapshot, func(ctx context.Context, req *api.CreateSnapshotRequest) (*api.CreateSnapshotResponse, error) {
-				res, err := s.sandbox.CreateSnapshot(ctx, req)
-				return res, toConnectError(err)
-			}, opts...,
-		))
-		mux.Handle(ProcedureSandboxRollback, connect.NewUnaryHandlerSimple(
-			ProcedureSandboxRollback, func(ctx context.Context, req *api.RollbackSessionRequest) (*api.RollbackSessionResponse, error) {
-				res, err := s.sandbox.RollbackSession(ctx, req)
-				return res, toConnectError(err)
-			}, opts...,
-		))
-		mux.Handle(ProcedureSandboxListSnapshots, connect.NewUnaryHandlerSimple(
-			ProcedureSandboxListSnapshots, func(ctx context.Context, req *api.ListSnapshotsRequest) (*api.ListSnapshotsResponse, error) {
-				res, err := s.sandbox.ListSnapshots(ctx, req)
-				return res, toConnectError(err)
-			}, opts...,
-		))
-		mux.Handle(ProcedureSandboxHealthCheck, connect.NewUnaryHandlerSimple(
-			ProcedureSandboxHealthCheck, func(ctx context.Context, req *api.HealthCheckRequest) (*api.HealthCheckResponse, error) {
-				res, err := s.sandbox.HealthCheck(ctx, req)
-				return res, toConnectError(err)
-			}, opts...,
-		))
-		mux.Handle(ProcedureSandboxExecuteStream, connect.NewServerStreamHandler(
-			ProcedureSandboxExecuteStream,
-			func(ctx context.Context, req *connect.Request[api.ExecuteToolRequest], stream *connect.ServerStream[api.ExecuteToolStreamMessage]) error {
-				recv, err := s.sandbox.ExecuteToolStream(ctx, req.Msg)
-				if err != nil {
-					return toConnectError(err)
-				}
-				defer recv.Close()
-				for {
-					msg, recvErr := recv.Recv()
-					if recvErr == nil {
-						if sendErr := stream.Send(msg); sendErr != nil {
-							return sendErr
-						}
-						continue
-					}
-					if errors.Is(recvErr, io.EOF) {
-						return nil
-					}
-					return toConnectError(recvErr)
-				}
-			},
-			opts...,
-		))
-		mux.Handle(ProcedureEventsStream, connect.NewServerStreamHandler(
-			ProcedureEventsStream,
-			func(ctx context.Context, req *connect.Request[api.StreamAgentEventsRequest], stream *connect.ServerStream[api.AgentEventEnvelope]) error {
-				recv, err := s.events.StreamAgentEvents(ctx, req.Msg)
-				if err != nil {
-					return toConnectError(err)
-				}
-				defer recv.Close()
-				for {
-					msg, recvErr := recv.Recv()
-					if recvErr == nil {
-						if sendErr := stream.Send(msg); sendErr != nil {
-							return sendErr
-						}
-						continue
-					}
-					if errors.Is(recvErr, io.EOF) {
-						return nil
-					}
-					return toConnectError(recvErr)
-				}
-			},
-			opts...,
-		))
+		if s.sandbox != nil {
+			s.registerSandboxHandlers(mux, handlerOpts)
+		}
+		if s.events != nil {
+			s.registerEventHandlers(mux, handlerOpts)
+		}
+		if s.agent != nil {
+			s.registerAgentHandlers(mux, handlerOpts)
+		}
 		mux.Handle(ProcedureTerminalStream, connect.NewBidiStreamHandler(
 			ProcedureTerminalStream,
 			func(ctx context.Context, stream *connect.BidiStream[termmux.TerminalClientMessage, termmux.TerminalServerMessage]) error {
@@ -182,11 +107,279 @@ func (s *Server) Handler() http.Handler {
 				}
 				return s.streamTerminal(ctx, stream)
 			},
-			opts...,
+			handlerOpts...,
 		))
 		s.handler = mux
 	})
 	return s.handler
+}
+
+func (s *Server) handlerOptions() []connect.HandlerOption {
+	return []connect.HandlerOption{
+		connect.WithCodec(JSONCodec{}),
+		connect.WithReadMaxBytes(s.cfg.MaxMessageBytes),
+		connect.WithSendMaxBytes(s.cfg.MaxMessageBytes),
+		connect.WithInterceptors(NewPolicyInterceptor(InterceptorConfig{
+			AuthHook:      s.cfg.AuthHook,
+			APIVersion:    s.cfg.APIVersion,
+			MinAPIVersion: s.cfg.MinAPIVersion,
+		})),
+	}
+}
+
+func (s *Server) registerSandboxHandlers(mux *http.ServeMux, opts []connect.HandlerOption) {
+	mux.Handle(ProcedureSandboxCreateSession, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxCreateSession, func(ctx context.Context, req *api.CreateSessionRequest) (*api.CreateSessionResponse, error) {
+			res, err := s.sandbox.CreateSession(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxGetSession, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxGetSession, func(ctx context.Context, req *api.GetSessionRequest) (*api.GetSessionResponse, error) {
+			res, err := s.sandbox.GetSession(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxPauseSession, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxPauseSession, func(ctx context.Context, req *api.PauseSessionRequest) (*api.PauseSessionResponse, error) {
+			res, err := s.sandbox.PauseSession(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxResumeSession, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxResumeSession, func(ctx context.Context, req *api.ResumeSessionRequest) (*api.ResumeSessionResponse, error) {
+			res, err := s.sandbox.ResumeSession(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxDestroySession, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxDestroySession, func(ctx context.Context, req *api.DestroySessionRequest) (*api.DestroySessionResponse, error) {
+			res, err := s.sandbox.DestroySession(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxExecuteTool, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxExecuteTool, func(ctx context.Context, req *api.ExecuteToolRequest) (*api.ExecuteToolResponse, error) {
+			res, err := s.sandbox.ExecuteTool(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxTurnComplete, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxTurnComplete, func(ctx context.Context, req *api.TurnCompleteRequest) (*api.TurnCompleteResponse, error) {
+			res, err := s.sandbox.TurnComplete(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxCreateSnapshot, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxCreateSnapshot, func(ctx context.Context, req *api.CreateSnapshotRequest) (*api.CreateSnapshotResponse, error) {
+			res, err := s.sandbox.CreateSnapshot(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxRollback, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxRollback, func(ctx context.Context, req *api.RollbackSessionRequest) (*api.RollbackSessionResponse, error) {
+			res, err := s.sandbox.RollbackSession(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxListSnapshots, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxListSnapshots, func(ctx context.Context, req *api.ListSnapshotsRequest) (*api.ListSnapshotsResponse, error) {
+			res, err := s.sandbox.ListSnapshots(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxHealthCheck, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxHealthCheck, func(ctx context.Context, req *api.HealthCheckRequest) (*api.HealthCheckResponse, error) {
+			res, err := s.sandbox.HealthCheck(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxExecuteStream, connect.NewServerStreamHandler(
+		ProcedureSandboxExecuteStream,
+		func(ctx context.Context, req *connect.Request[api.ExecuteToolRequest], stream *connect.ServerStream[api.ExecuteToolStreamMessage]) error {
+			recv, err := s.sandbox.ExecuteToolStream(ctx, req.Msg)
+			if err != nil {
+				return toConnectError(err)
+			}
+			defer recv.Close()
+			for {
+				msg, recvErr := recv.Recv()
+				if recvErr == nil {
+					if sendErr := stream.Send(msg); sendErr != nil {
+						return sendErr
+					}
+					continue
+				}
+				if errors.Is(recvErr, io.EOF) {
+					return nil
+				}
+				return toConnectError(recvErr)
+			}
+		},
+		opts...,
+	))
+}
+
+func (s *Server) registerEventHandlers(mux *http.ServeMux, opts []connect.HandlerOption) {
+	mux.Handle(ProcedureEventsStream, connect.NewServerStreamHandler(
+		ProcedureEventsStream,
+		func(ctx context.Context, req *connect.Request[api.StreamAgentEventsRequest], stream *connect.ServerStream[api.AgentEventEnvelope]) error {
+			recv, err := s.events.StreamAgentEvents(ctx, req.Msg)
+			if err != nil {
+				return toConnectError(err)
+			}
+			defer recv.Close()
+			for {
+				msg, recvErr := recv.Recv()
+				if recvErr == nil {
+					if msg == nil {
+						continue
+					}
+					if sendErr := stream.Send(msg); sendErr != nil {
+						return sendErr
+					}
+					continue
+				}
+				if errors.Is(recvErr, io.EOF) {
+					return nil
+				}
+				return toConnectError(recvErr)
+			}
+		},
+		opts...,
+	))
+}
+
+func (s *Server) registerAgentHandlers(mux *http.ServeMux, opts []connect.HandlerOption) {
+	mux.Handle(ProcedureAgentCreateSession, connect.NewUnaryHandlerSimple(
+		ProcedureAgentCreateSession, func(ctx context.Context, req *agentapi.CreateAgentSessionRequest) (*agentapi.CreateAgentSessionResponse, error) {
+			res, err := s.agent.CreateSession(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureAgentGetSession, connect.NewUnaryHandlerSimple(
+		ProcedureAgentGetSession, func(ctx context.Context, req *agentapi.GetAgentSessionRequest) (*agentapi.GetAgentSessionResponse, error) {
+			res, err := s.agent.GetSession(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureAgentListSessions, connect.NewUnaryHandlerSimple(
+		ProcedureAgentListSessions, func(ctx context.Context, req *agentapi.ListAgentSessionsRequest) (*agentapi.ListAgentSessionsResponse, error) {
+			res, err := s.agent.ListSessions(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureAgentResumeSession, connect.NewUnaryHandlerSimple(
+		ProcedureAgentResumeSession, func(ctx context.Context, req *agentapi.ResumeSessionRequest) (*agentapi.ResumeSessionResponse, error) {
+			res, err := s.agent.ResumeSession(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureAgentSteer, connect.NewUnaryHandlerSimple(
+		ProcedureAgentSteer, func(ctx context.Context, req *agentapi.SteerRequest) (*agentapi.SteerResponse, error) {
+			res, err := s.agent.Steer(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureAgentFollowUp, connect.NewUnaryHandlerSimple(
+		ProcedureAgentFollowUp, func(ctx context.Context, req *agentapi.FollowUpRequest) (*agentapi.FollowUpResponse, error) {
+			res, err := s.agent.FollowUp(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureAgentAbort, connect.NewUnaryHandlerSimple(
+		ProcedureAgentAbort, func(ctx context.Context, req *agentapi.AbortRequest) (*agentapi.AbortResponse, error) {
+			res, err := s.agent.Abort(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureAgentDestroySession, connect.NewUnaryHandlerSimple(
+		ProcedureAgentDestroySession, func(ctx context.Context, req *agentapi.DestroyAgentSessionRequest) (*agentapi.DestroyAgentSessionResponse, error) {
+			res, err := s.agent.DestroySession(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureAgentSendMessage, connect.NewServerStreamHandler(
+		ProcedureAgentSendMessage,
+		func(ctx context.Context, req *connect.Request[agentapi.SendMessageRequest], stream *connect.ServerStream[api.AgentEventEnvelope]) error {
+			recv, err := s.agent.SendMessage(ctx, req.Msg)
+			if err != nil {
+				return toConnectError(err)
+			}
+			defer recv.Close()
+			for {
+				msg, recvErr := recv.Recv()
+				if recvErr == nil {
+					if msg == nil {
+						continue
+					}
+					if sendErr := stream.Send(msg); sendErr != nil {
+						return sendErr
+					}
+					continue
+				}
+				if errors.Is(recvErr, io.EOF) {
+					return nil
+				}
+				return toConnectError(recvErr)
+			}
+		},
+		opts...,
+	))
+	mux.Handle(ProcedureAgentContinue, connect.NewServerStreamHandler(
+		ProcedureAgentContinue,
+		func(ctx context.Context, req *connect.Request[agentapi.ContinueRequest], stream *connect.ServerStream[api.AgentEventEnvelope]) error {
+			recv, err := s.agent.Continue(ctx, req.Msg)
+			if err != nil {
+				return toConnectError(err)
+			}
+			defer recv.Close()
+			for {
+				msg, recvErr := recv.Recv()
+				if recvErr == nil {
+					if msg == nil {
+						continue
+					}
+					if sendErr := stream.Send(msg); sendErr != nil {
+						return sendErr
+					}
+					continue
+				}
+				if errors.Is(recvErr, io.EOF) {
+					return nil
+				}
+				return toConnectError(recvErr)
+			}
+		},
+		opts...,
+	))
+	mux.Handle(ProcedureAgentSubscribeEvents, connect.NewServerStreamHandler(
+		ProcedureAgentSubscribeEvents,
+		func(ctx context.Context, req *connect.Request[agentapi.SubscribeEventsRequest], stream *connect.ServerStream[api.AgentEventEnvelope]) error {
+			recv, err := s.agent.SubscribeEvents(ctx, req.Msg)
+			if err != nil {
+				return toConnectError(err)
+			}
+			defer recv.Close()
+			for {
+				msg, recvErr := recv.Recv()
+				if recvErr == nil {
+					if msg == nil {
+						continue
+					}
+					if sendErr := stream.Send(msg); sendErr != nil {
+						return sendErr
+					}
+					continue
+				}
+				if errors.Is(recvErr, io.EOF) {
+					return nil
+				}
+				return toConnectError(recvErr)
+			}
+		},
+		opts...,
+	))
 }
 
 func (s *Server) streamTerminal(ctx context.Context, stream *connect.BidiStream[termmux.TerminalClientMessage, termmux.TerminalServerMessage]) error {

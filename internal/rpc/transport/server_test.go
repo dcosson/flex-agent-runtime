@@ -54,16 +54,20 @@ func TestTransportUnaryVersionAndAuth(t *testing.T) {
 	sandboxRPC := newSandboxRPCForTransport(t)
 	t.Cleanup(func() { _ = sandboxRPC.Close() })
 	events := rpcserver.NewAgentEventServer()
-	srv := NewServer(sandboxRPC, events, nil, ServerConfig{
-		APIVersion:    "v2",
-		MinAPIVersion: "v2",
-		AuthHook: func(_ context.Context, _ string, headers http.Header) error {
-			if headers.Get("authorization") != "Bearer good" {
-				return errors.New("unauthenticated")
-			}
-			return nil
+	srv := NewServer(
+		ServerConfig{
+			APIVersion:    "v2",
+			MinAPIVersion: "v2",
+			AuthHook: func(_ context.Context, _ string, headers http.Header) error {
+				if headers.Get("authorization") != "Bearer good" {
+					return errors.New("unauthenticated")
+				}
+				return nil
+			},
 		},
-	})
+		WithSandboxService(sandboxRPC),
+		WithAgentEventService(events),
+	)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -86,16 +90,20 @@ func TestTransportUnaryVersionAndAuth(t *testing.T) {
 func TestTransportAuthRejected(t *testing.T) {
 	sandboxRPC := newSandboxRPCForTransport(t)
 	t.Cleanup(func() { _ = sandboxRPC.Close() })
-	srv := NewServer(sandboxRPC, rpcserver.NewAgentEventServer(), nil, ServerConfig{
-		APIVersion:    "v1",
-		MinAPIVersion: "v1",
-		AuthHook: func(_ context.Context, _ string, headers http.Header) error {
-			if headers.Get("authorization") != "Bearer expected" {
-				return errors.New("unauthenticated")
-			}
-			return nil
+	srv := NewServer(
+		ServerConfig{
+			APIVersion:    "v1",
+			MinAPIVersion: "v1",
+			AuthHook: func(_ context.Context, _ string, headers http.Header) error {
+				if headers.Get("authorization") != "Bearer expected" {
+					return errors.New("unauthenticated")
+				}
+				return nil
+			},
 		},
-	})
+		WithSandboxService(sandboxRPC),
+		WithAgentEventService(rpcserver.NewAgentEventServer()),
+	)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -112,10 +120,14 @@ func TestTransportAuthRejected(t *testing.T) {
 func TestTransportVersionRejected(t *testing.T) {
 	sandboxRPC := newSandboxRPCForTransport(t)
 	t.Cleanup(func() { _ = sandboxRPC.Close() })
-	srv := NewServer(sandboxRPC, rpcserver.NewAgentEventServer(), nil, ServerConfig{
-		APIVersion:    "v2",
-		MinAPIVersion: "v2",
-	})
+	srv := NewServer(
+		ServerConfig{
+			APIVersion:    "v2",
+			MinAPIVersion: "v2",
+		},
+		WithSandboxService(sandboxRPC),
+		WithAgentEventService(rpcserver.NewAgentEventServer()),
+	)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -132,7 +144,7 @@ func TestTransportVersionRejected(t *testing.T) {
 func TestTransportExecuteToolStream(t *testing.T) {
 	sandboxRPC := newSandboxRPCForTransport(t)
 	t.Cleanup(func() { _ = sandboxRPC.Close() })
-	srv := NewServer(sandboxRPC, rpcserver.NewAgentEventServer(), nil, ServerConfig{})
+	srv := NewServer(ServerConfig{}, WithSandboxService(sandboxRPC), WithAgentEventService(rpcserver.NewAgentEventServer()))
 	ts := httptest.NewUnstartedServer(srv.Handler())
 	ts.EnableHTTP2 = true
 	ts.StartTLS()
@@ -181,7 +193,7 @@ func TestTransportAgentEventStream(t *testing.T) {
 	sandboxRPC := newSandboxRPCForTransport(t)
 	t.Cleanup(func() { _ = sandboxRPC.Close() })
 	eventRPC := rpcserver.NewAgentEventServer()
-	srv := NewServer(sandboxRPC, eventRPC, nil, ServerConfig{})
+	srv := NewServer(ServerConfig{}, WithSandboxService(sandboxRPC), WithAgentEventService(eventRPC))
 	ts := httptest.NewUnstartedServer(srv.Handler())
 	ts.EnableHTTP2 = true
 	ts.StartTLS()
@@ -251,7 +263,12 @@ func TestTransportTerminalBidiAttach(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	srv := NewServer(sandboxRPC, rpcserver.NewAgentEventServer(), sm, ServerConfig{})
+	srv := NewServer(
+		ServerConfig{},
+		WithSandboxService(sandboxRPC),
+		WithAgentEventService(rpcserver.NewAgentEventServer()),
+		WithSessionManager(sm),
+	)
 	ts := httptest.NewUnstartedServer(srv.Handler())
 	ts.EnableHTTP2 = true
 	ts.StartTLS()
