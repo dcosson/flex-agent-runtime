@@ -126,6 +126,14 @@ type AgentService interface {
     // this streams ALL events for the session lifecycle.
     SubscribeEvents(ctx context.Context, req *SubscribeEventsRequest) (AgentEventReceiver, error)
 
+    // ResumeSession creates a new session initialized with an existing conversation log.
+    // The agent picks up from the last message in the log.
+    // This enables:
+    //   - Crash recovery (orchestrator replays persisted conversation)
+    //   - Session forking (same conversation log → multiple new sessions)
+    //   - Cross-agent migration (conversation from one agent type resumed on another)
+    ResumeSession(ctx context.Context, req *ResumeSessionRequest) (*ResumeSessionResponse, error)
+
     // DestroySession tears down a session and releases all resources.
     DestroySession(ctx context.Context, req *DestroyAgentSessionRequest) (*DestroyAgentSessionResponse, error)
 }
@@ -210,6 +218,35 @@ type AbortRequest struct {
 }
 
 type AbortResponse struct{}
+
+type ResumeSessionRequest struct {
+    SessionID       string            // Optional; generated if empty
+    Driver          string
+    Model           string
+    Provider        string
+    SystemPrompt    string
+    Tools           []string
+    APIKey          string
+    Metadata        map[string]any
+    ToolEnvironment ToolEnvironmentConfig
+
+    // The conversation log to resume from. The agent starts in a state
+    // as if it had this conversation, ready for the next prompt.
+    ConversationLog []AgentMessageRecord
+}
+
+type AgentMessageRecord struct {
+    Turn      int
+    Role      string          // "user", "assistant", "tool_result"
+    Content   json.RawMessage // Serialized message content
+    CreatedAt time.Time
+}
+
+type ResumeSessionResponse struct {
+    SessionID       string
+    State           string
+    ConversationLen int
+}
 
 type SubscribeEventsRequest struct {
     SessionID string
@@ -297,6 +334,7 @@ Following the existing pattern in `internal/rpc/transport/server.go`:
 ```go
 // New procedures added to transport server
 ProcedureAgentCreateSession   = "/rpc.v1.AgentService/CreateSession"
+ProcedureAgentResumeSession   = "/rpc.v1.AgentService/ResumeSession"    // unary
 ProcedureAgentGetSession      = "/rpc.v1.AgentService/GetSession"
 ProcedureAgentSendMessage     = "/rpc.v1.AgentService/SendMessage"      // server stream
 ProcedureAgentContinue        = "/rpc.v1.AgentService/Continue"          // server stream
@@ -308,7 +346,7 @@ ProcedureAgentDestroySession  = "/rpc.v1.AgentService/DestroySession"   // unary
 ```
 
 **Handler types:**
-- CreateSession, GetSession, Steer, FollowUp, Abort, DestroySession → **unary** (`connect.NewUnaryHandlerSimple`)
+- CreateSession, ResumeSession, GetSession, Steer, FollowUp, Abort, DestroySession → **unary** (`connect.NewUnaryHandlerSimple`)
 - SendMessage, Continue, SubscribeEvents → **server stream** (`connect.NewServerStreamHandler`)
 
 ### 5.2 AgentRPCServer
@@ -570,7 +608,114 @@ sequenceDiagram
 
 ---
 
-## 10. Package Structure
+## 10. Session Recovery, Forking, and Cross-Agent Resume
+
+### 10.1 Design Principle: Orchestrator Owns Conversation State
+
+The agent loop server is **stateless** — it runs whatever conversation it's given. The **orchestrator** owns the durable conversation log (persisted in SQLite or equivalent). This clean separation enables powerful capabilities:
+
+- **Crash recovery:** Agent-server crashes → orchestrator sends conversation log to a new agent-server via `ResumeSession`
+- **Session forking:** Orchestrator copies conversation log at turn N → creates N new sessions with the same log but different follow-up prompts
+- **Cross-agent migration:** Conversation from one agent type (e.g., our native loop) resumed on a different agent type (e.g., Claude Code via termmux)
+
+The agent loop server never persists conversation state to disk. If it crashes, the session is gone from its perspective. The orchestrator is the recovery mechanism.
+
+### 10.2 ResumeSession Flow
+
+```mermaid
+sequenceDiagram
+    participant O as Orchestrator
+    participant DB as SQLite
+    participant AS as AgentLoopServer
+    participant A as Agent
+
+    Note over O: Agent-server crashed, or forking
+    O->>DB: Read conversation log for session X
+    DB-->>O: []AgentMessageRecord
+
+    O->>AS: ResumeSession(conversation log, config)
+    AS->>A: Create Agent + Driver
+    AS->>A: Replay conversation log into Agent.Session
+    A-->>AS: ready (state=idle, conversation loaded)
+    AS-->>O: sessionID, state=idle, conversationLen=N
+
+    O->>AS: SendMessage(sessionID, "Continue from where you left off")
+    AS->>A: agent.Prompt(ctx, message)
+    Note over A: Agent sees full conversation history,<br/>continues naturally
+```
+
+### 10.3 Session Forking
+
+```mermaid
+sequenceDiagram
+    participant O as Orchestrator
+    participant DB as SQLite
+    participant AS1 as AgentServer 1
+    participant AS2 as AgentServer 2
+    participant AS3 as AgentServer 3
+
+    O->>DB: Read conversation log (10 turns of shared context)
+
+    par Fork into 3 agents
+        O->>AS1: ResumeSession(log, config)
+        O->>AS2: ResumeSession(log, config)
+        O->>AS3: ResumeSession(log, config)
+    end
+
+    par Different instructions to each fork
+        O->>AS1: SendMessage("Work on the frontend")
+        O->>AS2: SendMessage("Work on the backend")
+        O->>AS3: SendMessage("Write the test suite")
+    end
+```
+
+### 10.4 Cross-Agent Resume (Our Loop → Claude Code)
+
+When the orchestrator wants to resume a conversation that was running on our native agent loop using Claude Code (or vice versa), it uses the existing bidirectional session log conversion in `internal/termmux/driver/claudecode/session_log.go`:
+
+1. Orchestrator reads conversation log from SQLite (`[]AgentMessageRecord`)
+2. Converts to canonical `[]ConversationEntry` format
+3. Calls `claudecode.WriteSessionLog(entries, writer)` → produces Claude Code's `session.jsonl`
+4. Writes the file into the sandbox filesystem at Claude Code's expected path
+5. Launches Claude Code via termmux → it picks up from the conversation
+
+**Conversion chain:**
+```
+AgentMessageRecord (orchestrator/SQLite)
+    → ai.Message (internal types)
+    → ConversationEntry (canonical termmux format)
+    → Claude Code session.jsonl (native format)
+```
+
+The reverse direction (Claude Code → our loop) uses `claudecode.ParseSessionLog()` to read the session.jsonl, convert to canonical, then to AgentMessageRecord for replay via ResumeSession.
+
+### 10.5 3rd Party Agent Restart
+
+For termmux-attached 3rd party agents (Claude Code, etc.) that crash or get stuck:
+
+1. The sandbox filesystem (ZFS) preserves all work — the agent's code changes, files, etc. are on disk
+2. Orchestrator reads the agent's native session log from the sandbox filesystem (e.g., Claude Code's session.jsonl)
+3. Parses it to canonical format, persists to SQLite
+4. Restarts the agent process in the sandbox (via `SandboxControl.LaunchProcess` or termmux restart)
+5. Optionally writes the conversation back to the agent's native session format so it can resume
+
+For Claude Code specifically, the agent itself supports resuming from its session.jsonl — so step 5 may not even be needed. Just restart the process in the same directory.
+
+---
+
+## 11. Event Streaming to Orchestrator
+
+The orchestrator persists conversation state by subscribing to the agent's event stream. Key events that update the conversation log:
+
+- `EventAgentMessageCompleted` — assistant message finalized → orchestrator persists it
+- `EventToolCompleted` — tool result → orchestrator persists it
+- `EventTurnCompleted` — turn boundary marker
+
+The orchestrator subscribes via `SubscribeEvents` (persistent stream) and writes each completed message to SQLite as it arrives. This means the orchestrator's copy of the conversation is always up-to-date, even if the agent-server crashes mid-turn (the orchestrator has everything up to the last completed message).
+
+---
+
+## 12. Package Structure
 
 ```
 internal/
@@ -603,7 +748,7 @@ cmd/
 
 ---
 
-## 11. Testing Strategy
+## 13. Testing Strategy
 
 ### 11.1 Unit Tests
 
@@ -615,6 +760,9 @@ cmd/
 - DestroySession → agent stopped, resources released
 - Concurrent operations on same session → serialized correctly
 - Multiple sessions → independent lifecycles
+- ResumeSession with conversation log → session created with history, state=idle
+- ResumeSession with empty log → equivalent to CreateSession
+- ResumeSession → SendMessage sees full prior conversation context
 
 **AgentRPCServer:**
 - Delegation to service (mirrors sandbox server test pattern)
@@ -633,6 +781,9 @@ cmd/
 - Multi-turn with follow-up
 - Steering during active turn
 - Abort during streaming
+- Resume from conversation log → continue where left off
+- Fork: resume same log into 3 sessions → each gets different prompt → independent execution
+- Cross-agent: conversation from native loop → WriteSessionLog → Claude Code session.jsonl → verify format
 
 **Remote agent loop (via loopback RPC):**
 - Same scenarios as in-process but over ConnectRPC
@@ -650,7 +801,7 @@ cmd/
 
 ---
 
-## 12. Implementation Order
+## 14. Implementation Order
 
 1. **AgentService interface + request/response types** (`internal/rpc/api/agent.go`, `agent_types.go`)
 2. **AgentLoopService** (`internal/agent/service.go`) — in-process implementation
@@ -666,7 +817,7 @@ cmd/
 
 ---
 
-## 13. Connected Components
+## 15. Connected Components
 
 ### 13.1 Modified Seams
 
@@ -703,7 +854,7 @@ internal/sandbox/control/native → internal/rpc/api (SandboxService)
 
 ---
 
-## 14. Open Questions
+## 16. Open Questions
 
 1. **Agent-server binary vs subcommand**: Should `agent-server` be its own binary in `cmd/agent-server/`, or a subcommand of an existing binary (e.g., `sandbox-host agent-serve`)? Separate binary is simpler; subcommand reduces deployment artifacts.
 
@@ -711,4 +862,4 @@ internal/sandbox/control/native → internal/rpc/api (SandboxService)
 
 3. **API key handling**: The `CreateAgentSessionRequest` includes an `APIKey` field. How is this secured in transit? ConnectRPC over TLS handles transport security, but should we support additional encryption or credential injection mechanisms?
 
-4. **Session recovery after agent-server restart**: If the agent-server process crashes and restarts, can it recover in-flight sessions? The agent's conversation log is in memory. Options: persist to disk, or accept that a crash loses the current session (orchestrator can retry).
+4. **~~Session recovery after agent-server restart~~**: Resolved — the orchestrator owns conversation state (§10). Agent-server is stateless. On crash, orchestrator calls `ResumeSession` with the persisted conversation log on a new agent-server instance.
