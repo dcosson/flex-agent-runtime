@@ -155,3 +155,71 @@ func TestSandboxServerIdempotencySweepEvictsExpired(t *testing.T) {
 		t.Fatalf("expected idempotency cache to be empty after sweep, size=%d", size)
 	}
 }
+
+func TestSandboxServerProcessLifecycle(t *testing.T) {
+	cfg := sandbox.DefaultServiceConfig()
+	cfg.StorageBackend = sandbox.StorageBackendLocalDisk
+	cfg.ContainerRuntime = sandbox.ContainerRuntimeNone
+	cfg.AdvertiseAddr = "127.0.0.1"
+	cfg.SessionsRootDir = t.TempDir()
+	host, err := sandbox.NewSandboxHostService(cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewSandboxHostService: %v", err)
+	}
+	ctx := context.Background()
+
+	srv := NewSandboxServer(host)
+	t.Cleanup(func() { _ = srv.Close() })
+	_, err = srv.CreateSession(ctx, &api.CreateSessionRequest{SessionID: "s1"})
+	if err != nil {
+		t.Fatalf("CreateSession error = %v", err)
+	}
+
+	launch, err := srv.LaunchProcess(ctx, &api.LaunchProcessRequest{
+		SessionID: "s1",
+		Binary:    "/bin/sh",
+		Args:      []string{"-c", "sleep 30"},
+	})
+	if err != nil {
+		t.Fatalf("LaunchProcess error = %v", err)
+	}
+	if launch.ProcessID == "" {
+		t.Fatalf("expected process ID")
+	}
+	if launch.Status != api.ProcessStatusRunning {
+		t.Fatalf("status = %q, want %q", launch.Status, api.ProcessStatusRunning)
+	}
+
+	status, err := srv.GetProcessStatus(ctx, &api.GetProcessStatusRequest{SessionID: "s1", ProcessID: launch.ProcessID})
+	if err != nil {
+		t.Fatalf("GetProcessStatus error = %v", err)
+	}
+	if status.Status != api.ProcessStatusRunning {
+		t.Fatalf("status = %q, want %q", status.Status, api.ProcessStatusRunning)
+	}
+	if status.ExitCode != nil {
+		t.Fatalf("exit code should be nil while running")
+	}
+
+	if _, err := srv.KillProcess(ctx, &api.KillProcessRequest{SessionID: "s1", ProcessID: launch.ProcessID}); err != nil {
+		t.Fatalf("KillProcess error = %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		status, err = srv.GetProcessStatus(ctx, &api.GetProcessStatusRequest{SessionID: "s1", ProcessID: launch.ProcessID})
+		if err != nil {
+			t.Fatalf("GetProcessStatus after kill error = %v", err)
+		}
+		if status.Status == api.ProcessStatusExited {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("process did not exit in time; status=%q", status.Status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if status.ExitCode == nil {
+		t.Fatalf("expected exit code after process exit")
+	}
+}

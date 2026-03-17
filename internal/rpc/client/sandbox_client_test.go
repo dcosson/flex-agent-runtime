@@ -51,6 +51,15 @@ func (f *fakeSandboxService) ResumeSession(context.Context, *api.ResumeSessionRe
 func (f *fakeSandboxService) DestroySession(context.Context, *api.DestroySessionRequest) (*api.DestroySessionResponse, error) {
 	return nil, errors.New("not implemented")
 }
+func (f *fakeSandboxService) LaunchProcess(context.Context, *api.LaunchProcessRequest) (*api.LaunchProcessResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeSandboxService) KillProcess(context.Context, *api.KillProcessRequest) (*api.KillProcessResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeSandboxService) GetProcessStatus(context.Context, *api.GetProcessStatusRequest) (*api.GetProcessStatusResponse, error) {
+	return nil, errors.New("not implemented")
+}
 func (f *fakeSandboxService) ExecuteTool(context.Context, *api.ExecuteToolRequest) (*api.ExecuteToolResponse, error) {
 	return nil, errors.New("not implemented")
 }

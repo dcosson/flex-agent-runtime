@@ -82,6 +82,38 @@ func (s *SandboxServer) DestroySession(ctx context.Context, req *api.DestroySess
 	return &api.DestroySessionResponse{}, nil
 }
 
+func (s *SandboxServer) LaunchProcess(ctx context.Context, req *api.LaunchProcessRequest) (*api.LaunchProcessResponse, error) {
+	if req == nil {
+		return nil, rpc.NewRPCError(rpc.CodeInvalidArgument, "nil request", nil)
+	}
+	resp, err := s.host.LaunchProcess(ctx, codec.ToLaunchProcessRequest(req))
+	if err != nil {
+		return nil, rpc.MapError(err)
+	}
+	return codec.FromLaunchProcessResponse(resp), nil
+}
+
+func (s *SandboxServer) KillProcess(ctx context.Context, req *api.KillProcessRequest) (*api.KillProcessResponse, error) {
+	if req == nil {
+		return nil, rpc.NewRPCError(rpc.CodeInvalidArgument, "nil request", nil)
+	}
+	if err := s.host.KillProcess(ctx, codec.ToKillProcessRequest(req)); err != nil {
+		return nil, rpc.MapError(err)
+	}
+	return &api.KillProcessResponse{}, nil
+}
+
+func (s *SandboxServer) GetProcessStatus(ctx context.Context, req *api.GetProcessStatusRequest) (*api.GetProcessStatusResponse, error) {
+	if req == nil {
+		return nil, rpc.NewRPCError(rpc.CodeInvalidArgument, "nil request", nil)
+	}
+	resp, err := s.host.GetProcessStatus(ctx, codec.ToGetProcessStatusRequest(req))
+	if err != nil {
+		return nil, rpc.MapError(err)
+	}
+	return codec.FromGetProcessStatusResponse(resp), nil
+}
+
 func (s *SandboxServer) ExecuteTool(ctx context.Context, req *api.ExecuteToolRequest) (*api.ExecuteToolResponse, error) {
 	if req == nil {
 		return nil, rpc.NewRPCError(rpc.CodeInvalidArgument, "nil request", nil)

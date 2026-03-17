@@ -139,6 +139,9 @@ func mergeDefaultConfig(cfg ServiceConfig) ServiceConfig {
 	if cfg.ShutdownTimeout == 0 {
 		cfg.ShutdownTimeout = d.ShutdownTimeout
 	}
+	if cfg.AdvertiseAddr == "" {
+		cfg.AdvertiseAddr = d.AdvertiseAddr
+	}
 	return cfg
 }
 
@@ -359,6 +362,8 @@ func (svc *SandboxHostService) DestroySession(ctx context.Context, sessionID str
 	}
 
 destroy:
+	svc.destroySessionProcesses(ctx, sess)
+
 	switch svc.config.StorageBackend {
 	case StorageBackendZFS:
 		_ = svc.zfs.DestroyDataset(ctx, sess.dataset, zfs.DestroyOptions{Recursive: true, Force: true})

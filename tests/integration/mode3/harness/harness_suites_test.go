@@ -754,6 +754,15 @@ func (c *chaosSandboxService) ResumeSession(ctx context.Context, req *api.Resume
 func (c *chaosSandboxService) DestroySession(ctx context.Context, req *api.DestroySessionRequest) (*api.DestroySessionResponse, error) {
 	return c.base.DestroySession(ctx, req)
 }
+func (c *chaosSandboxService) LaunchProcess(ctx context.Context, req *api.LaunchProcessRequest) (*api.LaunchProcessResponse, error) {
+	return c.base.LaunchProcess(ctx, req)
+}
+func (c *chaosSandboxService) KillProcess(ctx context.Context, req *api.KillProcessRequest) (*api.KillProcessResponse, error) {
+	return c.base.KillProcess(ctx, req)
+}
+func (c *chaosSandboxService) GetProcessStatus(ctx context.Context, req *api.GetProcessStatusRequest) (*api.GetProcessStatusResponse, error) {
+	return c.base.GetProcessStatus(ctx, req)
+}
 func (c *chaosSandboxService) ExecuteTool(ctx context.Context, req *api.ExecuteToolRequest) (*api.ExecuteToolResponse, error) {
 	return c.base.ExecuteTool(ctx, req)
 }

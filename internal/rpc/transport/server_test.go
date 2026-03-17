@@ -189,6 +189,60 @@ func TestTransportExecuteToolStream(t *testing.T) {
 	}
 }
 
+func TestTransportProcessRPCs(t *testing.T) {
+	cfg := sandbox.DefaultServiceConfig()
+	cfg.StorageBackend = sandbox.StorageBackendLocalDisk
+	cfg.ContainerRuntime = sandbox.ContainerRuntimeNone
+	cfg.AdvertiseAddr = "127.0.0.1"
+	cfg.SessionsRootDir = t.TempDir()
+	host, err := sandbox.NewSandboxHostService(cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewSandboxHostService: %v", err)
+	}
+	ctx := context.Background()
+	sandboxRPC := rpcserver.NewSandboxServer(host)
+	t.Cleanup(func() { _ = sandboxRPC.Close() })
+
+	srv := NewServer(ServerConfig{}, WithSandboxService(sandboxRPC), WithAgentEventService(rpcserver.NewAgentEventServer()))
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := NewSandboxClient(ts.Client(), ts.URL, ClientConfig{APIVersion: "v1"})
+
+	if _, err := client.CreateSession.CallUnary(ctx, connect.NewRequest(&api.CreateSessionRequest{SessionID: "s1"})); err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	launchResp, err := client.LaunchProcess.CallUnary(ctx, connect.NewRequest(&api.LaunchProcessRequest{
+		SessionID: "s1",
+		Binary:    "/bin/sh",
+		Args:      []string{"-c", "sleep 30"},
+	}))
+	if err != nil {
+		t.Fatalf("LaunchProcess failed: %v", err)
+	}
+	if launchResp.Msg.ProcessID == "" {
+		t.Fatalf("expected process ID")
+	}
+
+	statusResp, err := client.GetProcessStatus.CallUnary(ctx, connect.NewRequest(&api.GetProcessStatusRequest{
+		SessionID: "s1",
+		ProcessID: launchResp.Msg.ProcessID,
+	}))
+	if err != nil {
+		t.Fatalf("GetProcessStatus failed: %v", err)
+	}
+	if statusResp.Msg.Status != api.ProcessStatusRunning {
+		t.Fatalf("status = %q, want %q", statusResp.Msg.Status, api.ProcessStatusRunning)
+	}
+
+	if _, err := client.KillProcess.CallUnary(ctx, connect.NewRequest(&api.KillProcessRequest{
+		SessionID: "s1",
+		ProcessID: launchResp.Msg.ProcessID,
+	})); err != nil {
+		t.Fatalf("KillProcess failed: %v", err)
+	}
+}
+
 func TestTransportAgentEventStream(t *testing.T) {
 	sandboxRPC := newSandboxRPCForTransport(t)
 	t.Cleanup(func() { _ = sandboxRPC.Close() })

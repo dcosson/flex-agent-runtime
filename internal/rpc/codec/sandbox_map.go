@@ -85,6 +85,66 @@ func FromExecuteToolResponse(resp *sandbox.ExecuteToolResponse, req *api.Execute
 	}
 }
 
+func ToLaunchProcessRequest(req *api.LaunchProcessRequest) sandbox.LaunchProcessRequest {
+	if req == nil {
+		return sandbox.LaunchProcessRequest{}
+	}
+	return sandbox.LaunchProcessRequest{
+		SessionID:  req.SessionID,
+		Binary:     req.Binary,
+		Args:       append([]string(nil), req.Args...),
+		Env:        req.Env,
+		ExposePort: req.ExposePort,
+	}
+}
+
+func FromLaunchProcessResponse(resp *sandbox.LaunchProcessResponse) *api.LaunchProcessResponse {
+	if resp == nil {
+		return nil
+	}
+	return &api.LaunchProcessResponse{
+		ProcessID: resp.ProcessID,
+		Address:   resp.Address,
+		Status:    api.ProcessStatus(resp.Status),
+	}
+}
+
+func ToKillProcessRequest(req *api.KillProcessRequest) sandbox.KillProcessRequest {
+	if req == nil {
+		return sandbox.KillProcessRequest{}
+	}
+	return sandbox.KillProcessRequest{
+		SessionID: req.SessionID,
+		ProcessID: req.ProcessID,
+		Signal:    req.Signal,
+	}
+}
+
+func ToGetProcessStatusRequest(req *api.GetProcessStatusRequest) sandbox.GetProcessStatusRequest {
+	if req == nil {
+		return sandbox.GetProcessStatusRequest{}
+	}
+	return sandbox.GetProcessStatusRequest{
+		SessionID: req.SessionID,
+		ProcessID: req.ProcessID,
+	}
+}
+
+func FromGetProcessStatusResponse(resp *sandbox.GetProcessStatusResponse) *api.GetProcessStatusResponse {
+	if resp == nil {
+		return nil
+	}
+	var exitCode *int
+	if resp.ExitCode != nil {
+		code := *resp.ExitCode
+		exitCode = &code
+	}
+	return &api.GetProcessStatusResponse{
+		Status:   api.ProcessStatus(resp.Status),
+		ExitCode: exitCode,
+	}
+}
+
 func FromSnapshotResult(result *sandbox.SnapshotResult) *api.CreateSnapshotResponse {
 	if result == nil {
 		return nil

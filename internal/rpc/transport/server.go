@@ -158,6 +158,24 @@ func (s *Server) registerSandboxHandlers(mux *http.ServeMux, opts []connect.Hand
 			return res, toConnectError(err)
 		}, opts...,
 	))
+	mux.Handle(ProcedureSandboxLaunchProcess, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxLaunchProcess, func(ctx context.Context, req *api.LaunchProcessRequest) (*api.LaunchProcessResponse, error) {
+			res, err := s.sandbox.LaunchProcess(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxKillProcess, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxKillProcess, func(ctx context.Context, req *api.KillProcessRequest) (*api.KillProcessResponse, error) {
+			res, err := s.sandbox.KillProcess(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
+	mux.Handle(ProcedureSandboxGetProcessStatus, connect.NewUnaryHandlerSimple(
+		ProcedureSandboxGetProcessStatus, func(ctx context.Context, req *api.GetProcessStatusRequest) (*api.GetProcessStatusResponse, error) {
+			res, err := s.sandbox.GetProcessStatus(ctx, req)
+			return res, toConnectError(err)
+		}, opts...,
+	))
 	mux.Handle(ProcedureSandboxExecuteTool, connect.NewUnaryHandlerSimple(
 		ProcedureSandboxExecuteTool, func(ctx context.Context, req *api.ExecuteToolRequest) (*api.ExecuteToolResponse, error) {
 			res, err := s.sandbox.ExecuteTool(ctx, req)

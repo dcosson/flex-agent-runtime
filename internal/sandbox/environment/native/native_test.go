@@ -131,6 +131,18 @@ func (m *mockSandboxService) DestroySession(_ context.Context, req *api.DestroyS
 	return &api.DestroySessionResponse{}, nil
 }
 
+func (m *mockSandboxService) LaunchProcess(_ context.Context, _ *api.LaunchProcessRequest) (*api.LaunchProcessResponse, error) {
+	return nil, fmt.Errorf("LaunchProcess not implemented for native environment tests")
+}
+
+func (m *mockSandboxService) KillProcess(_ context.Context, _ *api.KillProcessRequest) (*api.KillProcessResponse, error) {
+	return &api.KillProcessResponse{}, nil
+}
+
+func (m *mockSandboxService) GetProcessStatus(_ context.Context, _ *api.GetProcessStatusRequest) (*api.GetProcessStatusResponse, error) {
+	return &api.GetProcessStatusResponse{Status: api.ProcessStatusRunning}, nil
+}
+
 func (m *mockSandboxService) ExecuteTool(_ context.Context, _ *api.ExecuteToolRequest) (*api.ExecuteToolResponse, error) {
 	return nil, fmt.Errorf("ExecuteTool not implemented; use ExecuteToolStream")
 }

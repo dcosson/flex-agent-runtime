@@ -89,6 +89,46 @@ type ListSnapshotsResponse struct {
 	Snapshots []Snapshot
 }
 
+type LaunchProcessRequest struct {
+	SessionID  string
+	Binary     string
+	Args       []string
+	Env        map[string]string
+	ExposePort int
+}
+
+type LaunchProcessResponse struct {
+	ProcessID string
+	Address   string
+	Status    ProcessStatus
+}
+
+type KillProcessRequest struct {
+	SessionID string
+	ProcessID string
+	Signal    int
+}
+
+type KillProcessResponse struct{}
+
+type GetProcessStatusRequest struct {
+	SessionID string
+	ProcessID string
+}
+
+type GetProcessStatusResponse struct {
+	Status   ProcessStatus
+	ExitCode *int
+}
+
+type ProcessStatus string
+
+const (
+	ProcessStatusStarting ProcessStatus = "starting"
+	ProcessStatusRunning  ProcessStatus = "running"
+	ProcessStatusExited   ProcessStatus = "exited"
+)
+
 type ExecuteToolRequest struct {
 	SessionID  string
 	ToolCallID string
@@ -202,6 +242,9 @@ type SandboxService interface {
 	PauseSession(ctx context.Context, req *PauseSessionRequest) (*PauseSessionResponse, error)
 	ResumeSession(ctx context.Context, req *ResumeSessionRequest) (*ResumeSessionResponse, error)
 	DestroySession(ctx context.Context, req *DestroySessionRequest) (*DestroySessionResponse, error)
+	LaunchProcess(ctx context.Context, req *LaunchProcessRequest) (*LaunchProcessResponse, error)
+	KillProcess(ctx context.Context, req *KillProcessRequest) (*KillProcessResponse, error)
+	GetProcessStatus(ctx context.Context, req *GetProcessStatusRequest) (*GetProcessStatusResponse, error)
 	ExecuteTool(ctx context.Context, req *ExecuteToolRequest) (*ExecuteToolResponse, error)
 	ExecuteToolStream(ctx context.Context, req *ExecuteToolRequest) (ExecuteToolStreamReceiver, error)
 	TurnComplete(ctx context.Context, req *TurnCompleteRequest) (*TurnCompleteResponse, error)

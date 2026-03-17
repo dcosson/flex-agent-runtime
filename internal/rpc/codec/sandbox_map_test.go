@@ -59,6 +59,62 @@ func TestFromExecuteToolResponse(t *testing.T) {
 	}
 }
 
+func TestProcessMappings(t *testing.T) {
+	if got := ToLaunchProcessRequest(nil); got.SessionID != "" || got.Binary != "" || got.ExposePort != 0 || got.Args != nil {
+		t.Fatalf("nil launch request should map to zero-ish value, got %+v", got)
+	}
+	lr := ToLaunchProcessRequest(&api.LaunchProcessRequest{
+		SessionID:  "s1",
+		Binary:     "flexagent",
+		Args:       []string{"serve", "agent"},
+		Env:        map[string]string{"K": "V"},
+		ExposePort: 9000,
+	})
+	if lr.SessionID != "s1" || lr.Binary != "flexagent" || lr.ExposePort != 9000 || len(lr.Args) != 2 {
+		t.Fatalf("bad launch request mapping: %+v", lr)
+	}
+
+	lresp := FromLaunchProcessResponse(&sandbox.LaunchProcessResponse{
+		ProcessID: "proc-s1-1",
+		Address:   "127.0.0.1:40000",
+		Status:    sandbox.ProcessStatusRunning,
+	})
+	if lresp == nil || lresp.ProcessID != "proc-s1-1" || lresp.Status != api.ProcessStatusRunning {
+		t.Fatalf("bad launch response mapping: %+v", lresp)
+	}
+	if FromLaunchProcessResponse(nil) != nil {
+		t.Fatalf("nil launch response should map to nil")
+	}
+
+	if got := ToKillProcessRequest(nil); got.SessionID != "" || got.ProcessID != "" || got.Signal != 0 {
+		t.Fatalf("nil kill request should map to zero-ish value, got %+v", got)
+	}
+	kr := ToKillProcessRequest(&api.KillProcessRequest{SessionID: "s1", ProcessID: "p1", Signal: 15})
+	if kr.SessionID != "s1" || kr.ProcessID != "p1" || kr.Signal != 15 {
+		t.Fatalf("bad kill request mapping: %+v", kr)
+	}
+
+	if got := ToGetProcessStatusRequest(nil); got.SessionID != "" || got.ProcessID != "" {
+		t.Fatalf("nil status request should map to zero-ish value, got %+v", got)
+	}
+	gr := ToGetProcessStatusRequest(&api.GetProcessStatusRequest{SessionID: "s1", ProcessID: "p1"})
+	if gr.SessionID != "s1" || gr.ProcessID != "p1" {
+		t.Fatalf("bad status request mapping: %+v", gr)
+	}
+
+	exitCode := 23
+	gresp := FromGetProcessStatusResponse(&sandbox.GetProcessStatusResponse{
+		Status:   sandbox.ProcessStatusExited,
+		ExitCode: &exitCode,
+	})
+	if gresp == nil || gresp.Status != api.ProcessStatusExited || gresp.ExitCode == nil || *gresp.ExitCode != 23 {
+		t.Fatalf("bad status response mapping: %+v", gresp)
+	}
+	if FromGetProcessStatusResponse(nil) != nil {
+		t.Fatalf("nil status response should map to nil")
+	}
+}
+
 func TestFromSnapshots(t *testing.T) {
 	if out := FromSnapshots(nil); len(out) != 0 {
 		t.Fatalf("nil snapshots should map to empty slice")

@@ -74,6 +74,8 @@ func MapError(err error) error {
 		return NewRPCError(CodeFailedPrecondition, err.Error(), err)
 	case errors.Is(err, sandbox.ErrSessionNotFound):
 		return NewRPCError(CodeNotFound, err.Error(), err)
+	case errors.Is(err, sandbox.ErrProcessNotFound):
+		return NewRPCError(CodeNotFound, err.Error(), err)
 	case errors.Is(err, sandbox.ErrSessionExists):
 		return NewRPCError(CodeAlreadyExists, err.Error(), err)
 	case errors.Is(err, sandbox.ErrSessionPaused),

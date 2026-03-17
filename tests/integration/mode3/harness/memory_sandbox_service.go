@@ -42,6 +42,7 @@ type MemorySandboxService struct {
 	baseSnapshots map[string]map[string][]byte
 	nextSession   int64
 	nextSnapshot  int64
+	nextProcess   int64
 	routes        []ToolRoute
 	executeCalls  atomic.Int64
 	started       time.Time
@@ -59,6 +60,7 @@ type memorySession struct {
 	snapshots []memorySnapshot
 	turnCount int
 	snapCount int
+	processes map[string]*memoryProcess
 }
 
 type memorySnapshot struct {
@@ -66,6 +68,13 @@ type memorySnapshot struct {
 	name    string
 	created time.Time
 	files   map[string][]byte
+}
+
+type memoryProcess struct {
+	id       string
+	status   api.ProcessStatus
+	exitCode *int
+	address  string
 }
 
 func NewMemorySandboxService() *MemorySandboxService {
@@ -144,6 +153,7 @@ func (m *MemorySandboxService) CreateSession(_ context.Context, req *api.CreateS
 		labels:     cloneLabels(req.Labels),
 		mountpoint: filepath.ToSlash(path.Join("/memory", sessionID)),
 		files:      cloneFileMap(base),
+		processes:  make(map[string]*memoryProcess),
 	}
 	sess.state = memoryStateActive
 	m.sessions[sessionID] = sess
@@ -241,6 +251,95 @@ func (m *MemorySandboxService) DestroySession(_ context.Context, req *api.Destro
 	sess.mu.Unlock()
 	delete(m.sessions, req.SessionID)
 	return &api.DestroySessionResponse{}, nil
+}
+
+func (m *MemorySandboxService) LaunchProcess(_ context.Context, req *api.LaunchProcessRequest) (*api.LaunchProcessResponse, error) {
+	if req == nil {
+		return nil, rpc.NewRPCError(rpc.CodeInvalidArgument, "nil request", nil)
+	}
+	if req.SessionID == "" || req.Binary == "" {
+		return nil, rpc.NewRPCError(rpc.CodeInvalidArgument, "session_id and binary are required", nil)
+	}
+	if req.ExposePort < 0 || req.ExposePort > 65535 {
+		return nil, rpc.NewRPCError(rpc.CodeInvalidArgument, "expose_port out of range", nil)
+	}
+
+	sess, err := m.getSession(req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	if sess.state != memoryStateActive {
+		return nil, rpc.NewRPCError(rpc.CodeFailedPrecondition, fmt.Sprintf("invalid state: %s", sess.state), sandbox.ErrInvalidState)
+	}
+
+	n := atomic.AddInt64(&m.nextProcess, 1)
+	processID := fmt.Sprintf("proc-%d", n)
+	address := ""
+	if req.ExposePort > 0 {
+		address = fmt.Sprintf("127.0.0.1:%d", 40000+n)
+	}
+	sess.processes[processID] = &memoryProcess{
+		id:      processID,
+		status:  api.ProcessStatusRunning,
+		address: address,
+	}
+	return &api.LaunchProcessResponse{
+		ProcessID: processID,
+		Address:   address,
+		Status:    api.ProcessStatusRunning,
+	}, nil
+}
+
+func (m *MemorySandboxService) KillProcess(_ context.Context, req *api.KillProcessRequest) (*api.KillProcessResponse, error) {
+	if req == nil || req.SessionID == "" || req.ProcessID == "" {
+		return nil, rpc.NewRPCError(rpc.CodeInvalidArgument, "session_id and process_id are required", nil)
+	}
+	sess, err := m.getSession(req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	proc, ok := sess.processes[req.ProcessID]
+	if !ok {
+		return nil, rpc.NewRPCError(rpc.CodeNotFound, "process not found", sandbox.ErrProcessNotFound)
+	}
+	if proc.status != api.ProcessStatusExited {
+		proc.status = api.ProcessStatusExited
+		code := 128 + req.Signal
+		if req.Signal == 0 {
+			code = 143
+		}
+		proc.exitCode = &code
+	}
+	return &api.KillProcessResponse{}, nil
+}
+
+func (m *MemorySandboxService) GetProcessStatus(_ context.Context, req *api.GetProcessStatusRequest) (*api.GetProcessStatusResponse, error) {
+	if req == nil || req.SessionID == "" || req.ProcessID == "" {
+		return nil, rpc.NewRPCError(rpc.CodeInvalidArgument, "session_id and process_id are required", nil)
+	}
+	sess, err := m.getSession(req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	sess.mu.RLock()
+	defer sess.mu.RUnlock()
+	proc, ok := sess.processes[req.ProcessID]
+	if !ok {
+		return nil, rpc.NewRPCError(rpc.CodeNotFound, "process not found", sandbox.ErrProcessNotFound)
+	}
+	var exitCode *int
+	if proc.exitCode != nil {
+		code := *proc.exitCode
+		exitCode = &code
+	}
+	return &api.GetProcessStatusResponse{
+		Status:   proc.status,
+		ExitCode: exitCode,
+	}, nil
 }
 
 func (m *MemorySandboxService) ExecuteTool(ctx context.Context, req *api.ExecuteToolRequest) (*api.ExecuteToolResponse, error) {

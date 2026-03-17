@@ -14,6 +14,7 @@ var (
 	ErrSessionExists         = errors.New("sandbox: session already exists")
 	ErrSessionPaused         = errors.New("sandbox: session is paused")
 	ErrSessionDestroying     = errors.New("sandbox: session is destroying")
+	ErrProcessNotFound       = errors.New("sandbox: process not found")
 	ErrRollbackInProgress    = errors.New("sandbox: rollback in progress")
 	ErrInvalidState          = errors.New("sandbox: invalid session state")
 	ErrMaxSessionsReached    = errors.New("sandbox: max sessions reached")
@@ -43,6 +44,8 @@ type Session struct {
 	activeTools atomic.Int32
 	rollingBack bool
 	snapshots   []SnapshotEntry
+	processes   map[string]*ManagedProcess
+	processSeq  uint64
 }
 
 type SnapshotEntry struct {
@@ -53,6 +56,8 @@ type SnapshotEntry struct {
 type ServiceConfig struct {
 	StorageBackend   StorageBackend
 	ContainerRuntime ContainerRuntime
+
+	AdvertiseAddr string
 
 	PoolName               string
 	BasesDataset           string
@@ -72,10 +77,49 @@ type ServiceConfig struct {
 	PerToolSnapshots       bool
 }
 
+type LaunchProcessRequest struct {
+	SessionID  string
+	Binary     string
+	Args       []string
+	Env        map[string]string
+	ExposePort int
+}
+
+type LaunchProcessResponse struct {
+	ProcessID string
+	Address   string
+	Status    ProcessStatus
+}
+
+type KillProcessRequest struct {
+	SessionID string
+	ProcessID string
+	Signal    int
+}
+
+type GetProcessStatusRequest struct {
+	SessionID string
+	ProcessID string
+}
+
+type GetProcessStatusResponse struct {
+	Status   ProcessStatus
+	ExitCode *int
+}
+
+type ProcessStatus string
+
+const (
+	ProcessStatusStarting ProcessStatus = "starting"
+	ProcessStatusRunning  ProcessStatus = "running"
+	ProcessStatusExited   ProcessStatus = "exited"
+)
+
 func DefaultServiceConfig() ServiceConfig {
 	return ServiceConfig{
 		StorageBackend:         StorageBackendZFS,
 		ContainerRuntime:       ContainerRuntimeGVisor,
+		AdvertiseAddr:          "127.0.0.1",
 		SnapshotPrefix:         "turn",
 		ToolTimeout:            5 * time.Minute,
 		PoolSpaceWarnThreshold: 0.85,

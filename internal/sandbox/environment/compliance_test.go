@@ -207,6 +207,18 @@ func (m *complianceMockService) DestroySession(_ context.Context, req *api.Destr
 	return &api.DestroySessionResponse{}, nil
 }
 
+func (m *complianceMockService) LaunchProcess(_ context.Context, _ *api.LaunchProcessRequest) (*api.LaunchProcessResponse, error) {
+	return nil, fmt.Errorf("LaunchProcess not implemented for compliance tests")
+}
+
+func (m *complianceMockService) KillProcess(_ context.Context, _ *api.KillProcessRequest) (*api.KillProcessResponse, error) {
+	return &api.KillProcessResponse{}, nil
+}
+
+func (m *complianceMockService) GetProcessStatus(_ context.Context, _ *api.GetProcessStatusRequest) (*api.GetProcessStatusResponse, error) {
+	return &api.GetProcessStatusResponse{Status: api.ProcessStatusRunning}, nil
+}
+
 func (m *complianceMockService) ExecuteTool(_ context.Context, req *api.ExecuteToolRequest) (*api.ExecuteToolResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
