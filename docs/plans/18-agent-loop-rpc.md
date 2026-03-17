@@ -715,7 +715,100 @@ The orchestrator subscribes via `SubscribeEvents` (persistent stream) and writes
 
 ---
 
-## 12. Package Structure
+## 12. Dual-View Streaming for Termmux Agents
+
+For 3rd party agents running via termmux (Claude Code, Codex, etc.), the orchestrator can expose two complementary views to UI clients:
+
+### 12.1 Structured Event View
+
+The orchestrator subscribes to the agent's event stream (via the session log tailer in `internal/termmux/eventsrc/sessionlog/`). The tailer watches the agent's native session log file (e.g., Claude Code's session.jsonl), parses it using the driver's `ParseSessionLog()`, converts to canonical `ConversationEntry` format, and emits structured `AgentEvent`s.
+
+This view powers:
+- Orchestrator's own persistence (conversation log to SQLite)
+- Structured UI rendering (message bubbles, tool call cards, thinking blocks)
+- Cross-agent interoperability (same event format regardless of agent type)
+
+### 12.2 Native Terminal View
+
+The orchestrator subscribes to the raw terminal output via the existing `TerminalService/StreamTerminal` RPC (bidirectional stream in `internal/rpc/transport/`). This streams the raw ANSI/VT100 bytes from the agent's PTY session.
+
+This view powers:
+- "See exactly what the agent sees" debugging view
+- Native Claude Code terminal rendering (xterm.js in web UI, or passthrough in TUI)
+- Interactive terminal access (send keystrokes, Ctrl+C, etc.)
+
+### 12.3 Orchestrator Relay
+
+The orchestrator relays both streams to its own clients. For each termmux agent session, it maintains:
+
+1. **Event subscription** → structured events forwarded to UI clients via the orchestrator's own event streaming API
+2. **Terminal subscription** → raw terminal bytes forwarded to UI clients via a terminal relay endpoint
+
+```mermaid
+graph LR
+    subgraph "Sandbox"
+        CC[Claude Code]
+        SL[session.jsonl]
+        PTY[PTY Session]
+    end
+
+    subgraph "Termmux Layer"
+        T[Session Log Tailer]
+        TS[Terminal Subscription]
+    end
+
+    subgraph "Orchestrator"
+        EP[Event Processor]
+        TR[Terminal Relay]
+        DB[(SQLite)]
+    end
+
+    subgraph "UI Client"
+        SV[Structured View]
+        TV[Terminal View]
+    end
+
+    CC -->|writes| SL
+    CC -->|output| PTY
+    SL -->|tail + parse| T
+    PTY -->|stream| TS
+    T -->|AgentEvents| EP
+    TS -->|raw bytes| TR
+    EP -->|persist| DB
+    EP -->|stream| SV
+    TR -->|stream| TV
+```
+
+### 12.4 AgentService Extension for Terminal Access
+
+For termmux-backed sessions, the AgentService needs an additional method to expose the terminal stream:
+
+```go
+// StreamTerminal opens a bidirectional terminal stream for a termmux-backed session.
+// Returns an error if the session is not backed by a termmux driver.
+// The orchestrator relays this to UI clients for native terminal rendering.
+StreamTerminal(ctx context.Context, req *StreamTerminalRequest) (TerminalStream, error)
+```
+
+```go
+type StreamTerminalRequest struct {
+    SessionID string
+}
+
+type TerminalStream interface {
+    // Send sends input (keystrokes) to the terminal
+    Send(data []byte) error
+    // Recv receives output (screen updates) from the terminal
+    Recv() ([]byte, error)
+    Close() error
+}
+```
+
+This is a **bidirectional stream** in the RPC transport, following the existing `ProcedureTerminalStream` pattern. The orchestrator acts as a relay: UI client ↔ orchestrator ↔ termmux terminal.
+
+---
+
+## 13. Package Structure
 
 ```
 internal/
