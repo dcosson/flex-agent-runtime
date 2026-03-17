@@ -4,7 +4,7 @@ GO_TEST_RACE := $(if $(filter 0 false no,$(RACE)),,-race)
 EXTERNAL_COMPOSE_FILE ?= tests/external/docker/docker-compose.e2e.yaml
 PKGS := $(shell $(GO) list ./...)
 
-.PHONY: help build build-llm-demo build-embedding-demo build-stubserver build-sandbox-host fmt fmt-check vet deps deps-staticcheck check test test-race test-integration \
+.PHONY: help build build-llm-demo build-embedding-demo build-stubserver build-sandbox-host build-flexagent fmt fmt-check vet deps deps-staticcheck check test test-race test-integration \
 	test-harness test-harness-t2 \
 	test-anthropic-harness-fast test-anthropic-harness-race \
 	test-harness-openai test-harness-google \
@@ -26,7 +26,8 @@ help:
 	@echo "  build-llm-demo                   Build llm-demo interactive CLI binary"
 	@echo "  build-embedding-demo             Build embedding-demo ranking CLI binary"
 	@echo "  build-stubserver                 Build stubserver test double binary"
-	@echo "  build-sandbox-host               Build sandbox-host service binary"
+	@echo "  build-sandbox-host               Build sandbox-host service binary (deprecated)"
+	@echo "  build-flexagent                  Build unified flexagent binary"
 	@echo "  fmt                              Run gofmt on all Go files (writes changes)"
 	@echo "  fmt-check                        Check gofmt formatting without modifying files"
 	@echo "  vet                              Run go vet across all packages"
@@ -88,7 +89,7 @@ help:
 # Build & Check
 # ---------------------------------------------------------------------------
 
-build: build-llm-demo build-embedding-demo build-stubserver build-sandbox-host
+build: build-llm-demo build-embedding-demo build-stubserver build-sandbox-host build-flexagent
 
 build-llm-demo:
 	@mkdir -p bin
@@ -105,6 +106,10 @@ build-stubserver:
 build-sandbox-host:
 	@mkdir -p bin
 	$(GO) build -o bin/sandbox-host ./cmd/sandbox-host
+
+build-flexagent:
+	@mkdir -p bin
+	$(GO) build -o bin/flexagent ./cmd/flexagent
 
 fmt:
 	gofmt -w .

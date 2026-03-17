@@ -21,6 +21,7 @@ import (
 func main() {
 	cfg := LoadConfig()
 	logger := slog.Default()
+	logger.Warn("cmd/sandbox-host is deprecated; use 'flexagent serve sandbox-host' instead")
 	if err := cfg.Validate(); err != nil {
 		logger.Error("invalid configuration", "error", err)
 		os.Exit(1)
