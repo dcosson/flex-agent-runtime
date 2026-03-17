@@ -88,26 +88,13 @@ func (svc *SandboxHostService) LaunchProcess(ctx context.Context, req LaunchProc
 	sess.processes[processID] = proc
 	sess.mu.Unlock()
 
-	var startErr error
-	if svc.config.ContainerRuntime == ContainerRuntimeGVisor {
-		startErr = svc.launchInGVisor(proc, req, mountpoint)
-	} else {
-		startErr = svc.launchDirect(proc, req, mountpoint)
-	}
-	if startErr != nil {
-		sess.mu.Lock()
-		delete(sess.processes, processID)
-		sess.mu.Unlock()
-		return nil, fmt.Errorf("launch process: %w", startErr)
-	}
-
 	if req.ExposePort > 0 {
 		proxy, err := svc.createPortProxy(req.ExposePort)
 		if err != nil {
-			_ = svc.killManagedProcess(proc, syscall.SIGKILL)
 			sess.mu.Lock()
 			delete(sess.processes, processID)
 			sess.mu.Unlock()
+			close(proc.done)
 			return nil, fmt.Errorf("setup port proxy: %w", err)
 		}
 		proc.mu.Lock()
@@ -115,7 +102,25 @@ func (svc *SandboxHostService) LaunchProcess(ctx context.Context, req LaunchProc
 		proc.mu.Unlock()
 	}
 
-	go svc.monitorProcess(sess, proc)
+	var startErr error
+	if svc.config.ContainerRuntime == ContainerRuntimeGVisor {
+		startErr = svc.launchInGVisor(proc, req, mountpoint)
+	} else {
+		startErr = svc.launchDirect(proc, req, mountpoint)
+	}
+	if startErr != nil {
+		proc.mu.RLock()
+		proxy := proc.proxy
+		proc.mu.RUnlock()
+		if proxy != nil {
+			proxy.close()
+		}
+		sess.mu.Lock()
+		delete(sess.processes, processID)
+		sess.mu.Unlock()
+		close(proc.done)
+		return nil, fmt.Errorf("launch process: %w", startErr)
+	}
 
 	proc.mu.RLock()
 	status := proc.status
@@ -124,6 +129,8 @@ func (svc *SandboxHostService) LaunchProcess(ctx context.Context, req LaunchProc
 		address = proc.proxy.address
 	}
 	proc.mu.RUnlock()
+
+	go svc.monitorProcess(sess, proc)
 
 	return &LaunchProcessResponse{
 		ProcessID: processID,
@@ -231,7 +238,7 @@ func (svc *SandboxHostService) launchInGVisor(proc *ManagedProcess, req LaunchPr
 	proc.cancel = cancel
 	proc.gvisorCtx = procCtx
 	proc.gvisorOpts = opts
-	proc.status = ProcessStatusRunning
+	proc.status = ProcessStatusStarting
 	proc.mu.Unlock()
 	return nil
 }
@@ -249,8 +256,17 @@ func (svc *SandboxHostService) monitorProcess(sess *Session, proc *ManagedProces
 		return
 	}
 	if gvisorCtx != nil && len(gvisorOpts.Command) > 0 {
+		svc.markProcessRunning(proc)
 		svc.monitorGVisorProcess(sess, proc, gvisorCtx, gvisorOpts)
 	}
+}
+
+func (svc *SandboxHostService) markProcessRunning(proc *ManagedProcess) {
+	proc.mu.Lock()
+	if proc.status == ProcessStatusStarting {
+		proc.status = ProcessStatusRunning
+	}
+	proc.mu.Unlock()
 }
 
 func (svc *SandboxHostService) monitorDirectProcess(sess *Session, proc *ManagedProcess, cmd *exec.Cmd) {
@@ -450,6 +466,7 @@ func (p *portProxy) handleConn(clientConn net.Conn) {
 		_, _ = io.Copy(clientConn, targetConn)
 		done <- struct{}{}
 	}()
+	<-done
 	<-done
 }
 

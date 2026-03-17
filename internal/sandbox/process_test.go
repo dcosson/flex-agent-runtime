@@ -202,8 +202,8 @@ func TestProcessLifecycleGVisor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LaunchProcess: %v", err)
 	}
-	if launch.Status != ProcessStatusRunning {
-		t.Fatalf("status = %q, want %q", launch.Status, ProcessStatusRunning)
+	if launch.Status != ProcessStatusStarting {
+		t.Fatalf("status = %q, want %q", launch.Status, ProcessStatusStarting)
 	}
 	select {
 	case <-started:
