@@ -2,6 +2,8 @@ package rpctest
 
 import (
 	"context"
+	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -12,7 +14,7 @@ import (
 
 func TestEF1_AgentRPCNoDroppedEvents(t *testing.T) {
 	stack := agenttest.NewAgentTestStack(t)
-	const messageCount = 120
+	const messageCount = 500
 	script := make([]agent.AgentEvent, 0, messageCount+2)
 	script = append(script, agent.AgentEvent{Type: agent.EventTurnStarted, Turn: 1})
 	for i := 0; i < messageCount; i++ {
@@ -49,10 +51,46 @@ func TestEF1_AgentRPCNoDroppedEvents(t *testing.T) {
 	}
 }
 
+func TestEF2_TerminalEventGuarantees(t *testing.T) {
+	stack := agenttest.NewAgentTestStack(t)
+	stack.DriverFactory.SetDriver("default", &agenttest.MockAgentDriver{TurnScript: []agent.AgentEvent{
+		{Type: agent.EventTurnStarted, Turn: 1},
+		{Type: agent.EventAgentMessageDelta, Turn: 1, Delta: "done"},
+		{Type: agent.EventTurnCompleted, Turn: 1},
+	}})
+
+	if _, err := stack.CreateAgentSession(context.Background(), "ef2"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	recv, err := stack.Client.SendMessage(context.Background(), &agentapi.SendMessageRequest{SessionID: "ef2", Message: "finish"})
+	if err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+
+	for {
+		_, err := recvWithTimeout(recv, 2*time.Second)
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("terminal recv error = %v, want io.EOF", err)
+		}
+		break
+	}
+
+	for i := 0; i < 2; i++ {
+		_, err := recvWithTimeout(recv, 2*time.Second)
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("recv after EOF #%d = %v, want io.EOF", i+1, err)
+		}
+	}
+}
+
 func TestEF3_EventOrderingAcrossRPC(t *testing.T) {
 	stack := agenttest.NewAgentTestStack(t)
+	const eventCount = 200
 	script := []agent.AgentEvent{{Type: agent.EventTurnStarted, Turn: 1}}
-	for i := 0; i < 25; i++ {
+	for i := 0; i < eventCount; i++ {
 		script = append(script, agent.AgentEvent{Type: agent.EventAgentMessageDelta, Turn: 1, Delta: "d", Metadata: map[string]any{"seq": i}})
 	}
 	script = append(script, agent.AgentEvent{Type: agent.EventTurnCompleted, Turn: 1})
@@ -85,8 +123,8 @@ func TestEF3_EventOrderingAcrossRPC(t *testing.T) {
 		}
 		seq++
 	}
-	if seq != 25 {
-		t.Fatalf("ordered delta count = %d, want 25", seq)
+	if seq != eventCount {
+		t.Fatalf("ordered delta count = %d, want %d", seq, eventCount)
 	}
 }
 
@@ -95,17 +133,27 @@ func TestEF4_DestroySessionClosesSubscriberStream(t *testing.T) {
 	if _, err := stack.CreateAgentSession(context.Background(), "ef4"); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	sub, err := stack.Service.SubscribeEvents(context.Background(), &agentapi.SubscribeEventsRequest{SessionID: "ef4"})
+	sub, err := stack.Client.SubscribeEvents(context.Background(), &agentapi.SubscribeEventsRequest{SessionID: "ef4"})
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
 	defer sub.Close()
 
-	if _, err := stack.Service.DestroySession(context.Background(), &agentapi.DestroyAgentSessionRequest{SessionID: "ef4"}); err != nil {
+	// SubscribeEvents pushes an initial state_change event to flush RPC
+	// response headers.  Drain it before testing the destroy-EOF path.
+	initEvt, initErr := sub.Recv()
+	if initErr != nil {
+		t.Fatalf("expected initial event, got error: %v", initErr)
+	}
+	if initEvt == nil {
+		t.Fatalf("expected initial event, got nil")
+	}
+
+	if _, err := stack.Client.DestroySession(context.Background(), &agentapi.DestroyAgentSessionRequest{SessionID: "ef4"}); err != nil {
 		t.Fatalf("destroy: %v", err)
 	}
 
-	err = agenttest.WaitForReceiverEOF(sub, 2*time.Second)
+	err = agenttest.WaitForReceiverEOF(sub, 5*time.Second)
 	if err != nil {
 		t.Fatalf("expected EOF, got %v", err)
 	}
@@ -136,4 +184,22 @@ func BenchmarkB3_AgentRPCOverheadVsInProcess(b *testing.B) {
 			}
 		}
 	})
+}
+
+func recvWithTimeout(recv agentapi.EventReceiver, timeout time.Duration) (*agentapi.AgentEvent, error) {
+	type result struct {
+		evt *agentapi.AgentEvent
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		evt, err := recv.Recv()
+		done <- result{evt: evt, err: err}
+	}()
+	select {
+	case out := <-done:
+		return out.evt, out.err
+	case <-time.After(timeout):
+		return nil, context.DeadlineExceeded
+	}
 }

@@ -111,6 +111,10 @@ func TestFK2_AgentRPCForkUnderLoad(t *testing.T) {
 				}
 				if err := drainReceiverErr(recv); err != nil {
 					errCh <- err
+					return
+				}
+				if _, err := stack.Client.DestroySession(ctx, &agentapi.DestroyAgentSessionRequest{SessionID: id}); err != nil {
+					errCh <- err
 				}
 			}(i)
 		}
@@ -127,7 +131,7 @@ func TestFK2_AgentRPCForkUnderLoad(t *testing.T) {
 	// Give shutdown goroutines a moment to settle and check for large leak deltas.
 	time.Sleep(100 * time.Millisecond)
 	after := runtime.NumGoroutine()
-	if after > baseG+80 {
+	if after > baseG+20 {
 		t.Fatalf("goroutine delta too high: before=%d after=%d", baseG, after)
 	}
 }

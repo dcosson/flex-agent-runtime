@@ -17,7 +17,7 @@ func TestP3_ResumeSessionValidationProperty(t *testing.T) {
 	var seq atomic.Uint64
 
 	rapid.Check(t, func(rt *rapid.T) {
-		sessionID := fmt.Sprintf("prop-resume-%d-%d", rapid.Int64().Draw(rt, "id"), seq.Add(1))
+		sessionID := fmt.Sprintf("prop-resume-%d", seq.Add(1))
 		log := agenttest.GenerateConversationLog(rt, 12)
 		malformed := rapid.Bool().Draw(rt, "malformed")
 		if malformed && len(log) > 0 {
@@ -41,6 +41,9 @@ func TestP3_ResumeSessionValidationProperty(t *testing.T) {
 		if resp.ConversationLen != len(log) {
 			t.Fatalf("conversation len = %d, want %d", resp.ConversationLen, len(log))
 		}
+
+		// Clean up session so it doesn't accumulate across iterations.
+		_, _ = stack.Client.DestroySession(ctx, &agentapi.DestroyAgentSessionRequest{SessionID: sessionID})
 	})
 }
 
@@ -50,7 +53,7 @@ func TestP6_CrossAgentResumeRoundTripProperty(t *testing.T) {
 	var seq atomic.Uint64
 
 	rapid.Check(t, func(rt *rapid.T) {
-		sessionID := fmt.Sprintf("prop-roundtrip-%d-%d", rapid.Int64().Draw(rt, "id"), seq.Add(1))
+		sessionID := fmt.Sprintf("prop-roundtrip-%d", seq.Add(1))
 		log := agenttest.GenerateConversationLog(rt, 8)
 
 		_, err := stack.Client.ResumeSession(ctx, &agentapi.ResumeSessionRequest{
@@ -81,5 +84,8 @@ func TestP6_CrossAgentResumeRoundTripProperty(t *testing.T) {
 		if getResp.ConversationLen < len(log) {
 			t.Fatalf("conversation shrank: got %d want >= %d", getResp.ConversationLen, len(log))
 		}
+
+		// Clean up session so it doesn't accumulate across iterations.
+		_, _ = stack.Client.DestroySession(ctx, &agentapi.DestroyAgentSessionRequest{SessionID: sessionID})
 	})
 }

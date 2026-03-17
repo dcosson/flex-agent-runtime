@@ -70,14 +70,16 @@ func NewAgentTestStack(t testing.TB, opts ...agent.ServiceOption) *AgentTestStac
 }
 
 func (s *AgentTestStack) Close() error {
+	var serviceErr error
+	if s.Service != nil {
+		serviceErr = s.Service.Close()
+		s.Service = nil
+	}
 	if s.transport != nil {
 		s.transport.Close()
 		s.transport = nil
 	}
-	if s.Service != nil {
-		return s.Service.Close()
-	}
-	return nil
+	return serviceErr
 }
 
 func (s *AgentTestStack) BaseConfig(sessionID string) agentapi.SessionConfig {

@@ -324,6 +324,18 @@ func (s *AgentLoopService) SubscribeEvents(ctx context.Context, req *agentapi.Su
 	}
 
 	receiver := newServiceEventReceiver(sessionStreamBufferSize)
+
+	// Push an initial state event so that RPC streaming handlers can flush
+	// HTTP response headers immediately instead of blocking until the first
+	// real event arrives.  Without this, ConnectRPC server-stream callers
+	// deadlock: CallServerStream waits for response headers while the handler
+	// waits on recv.Recv() — neither side makes progress.
+	receiver.push(normalizeSessionEvent(req.SessionID, AgentEvent{
+		Type:  EventStateChange,
+		State: ms.agent.State(),
+		At:    time.Now(),
+	}))
+
 	unsub := ms.agent.Subscribe(func(evt AgentEvent) {
 		event := normalizeSessionEvent(req.SessionID, evt)
 		if !receiver.push(event) {
