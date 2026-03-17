@@ -106,7 +106,7 @@ graph LR
         ais_env --> ais_fs[Sandbox Filesystem]
     end
 
-    subgraph "Agent outside Sandbox"
+    subgraph "Tools in Sandbox"
         aos_rc[RuntimeController] -->|lifecycle| aos_env[Sandbox Environment<br/>Native/E2B/Daytona/Fly]
         aos_agent[Agent Loop] -->|ExecuteTool| aos_env
     end
@@ -116,7 +116,7 @@ graph LR
 
 **Agent in Sandbox** -- The RuntimeController uses a sandbox environment (NativeSandboxEnvironment, E2BSandboxEnvironment, etc.) for lifecycle: create the sandbox, put the agent in it. The agent running *inside* the sandbox uses `LocalEnvironment` for tool execution (tools are local to that sandbox).
 
-**Agent outside Sandbox** -- The RuntimeController uses a sandbox environment for *both* lifecycle AND tool execution. The agent loop calls `ExecuteTool()` on the sandbox environment directly. Tool calls are dispatched to the sandbox infrastructure.
+**Tools in Sandbox** -- The RuntimeController uses a sandbox environment for *both* lifecycle AND tool execution. The agent loop calls `ExecuteTool()` on the sandbox environment directly. Tool calls are dispatched to the sandbox infrastructure.
 
 ### 2.3 Call Flow: Agent Loop to Environment
 
@@ -183,7 +183,7 @@ No circular imports. The environment interface package imports `internal/tools` 
 //   - All Local: LocalEnvironment (lifecycle no-ops, direct local exec)
 //   - Agent in Sandbox: agent inside uses LocalEnvironment; RuntimeController
 //     uses a sandbox environment for lifecycle
-//   - Agent outside Sandbox: sandbox environment for both lifecycle and tool exec
+//   - Tools in Sandbox: sandbox environment for both lifecycle and tool exec
 //
 // Implementations:
 //   - LocalEnvironment: direct local filesystem execution, no sandbox
@@ -547,7 +547,7 @@ func (e *LocalEnvironment) Rollback(ctx context.Context, snapshotID string) erro
 
 ### 5.2 NativeSandboxEnvironment
 
-Wraps the existing `SandboxClient` (ConnectRPC client) and delegates all calls to the `SandboxHostService`. This is a thin adapter -- the real work happens in plan 11's `SandboxHostService`. Used in **Agent outside Sandbox** mode with our own ZFS + gVisor stack, and by the RuntimeController for lifecycle management in **Agent in Sandbox** mode.
+Wraps the existing `SandboxClient` (ConnectRPC client) and delegates all calls to the `SandboxHostService`. This is a thin adapter -- the real work happens in plan 11's `SandboxHostService`. Used in **Tools in Sandbox** mode with our own ZFS + gVisor stack, and by the RuntimeController for lifecycle management in **Agent in Sandbox** mode.
 
 ```go
 // Package: internal/sandbox/environment/native
@@ -1048,7 +1048,7 @@ Agent Loop
   → ToolBackend.ExecuteTool(ctx, ToolRequest, onProgress)
     → LocalBackend.ExecuteTool (All Local, Agent in Sandbox)
       → direct filesystem/process execution
-    → SandboxBackend.ExecuteTool (Agent outside Sandbox)
+    → SandboxBackend.ExecuteTool (Tools in Sandbox)
       → SandboxToolClient.ExecuteTool(ctx, sessionID, ToolRequest, onProgress)
         → SandboxClient (internal/rpc/client) speaks ConnectRPC
           → SandboxHostService (internal/sandbox)
@@ -1061,13 +1061,13 @@ Agent Loop
   → ExecutionEnvironment.ExecuteTool(ctx, ToolRequest, onProgress)
     → LocalEnvironment (All Local, Agent in Sandbox internal)
       → direct filesystem/process execution
-    → NativeSandboxEnvironment (Agent outside Sandbox with our stack)
+    → NativeSandboxEnvironment (Tools in Sandbox with our stack)
       → SandboxClient → SandboxHostService
-    → E2BSandboxEnvironment (Agent outside Sandbox with E2B)
+    → E2BSandboxEnvironment (Tools in Sandbox with E2B)
       → E2B REST API
-    → DaytonaSandboxEnvironment (Agent outside Sandbox with Daytona)
+    → DaytonaSandboxEnvironment (Tools in Sandbox with Daytona)
       → Daytona REST API
-    → FlySandboxEnvironment (Agent outside Sandbox with Fly)
+    → FlySandboxEnvironment (Tools in Sandbox with Fly)
       → Fly Machines API + SSH
 ```
 

@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/rpc/api"
-	"flex-agent-runtime/internal/rpc/client"
-	"flex-agent-runtime/internal/rpc/server"
-	"flex-agent-runtime/internal/sandbox"
-	"flex-agent-runtime/internal/sandbox/zfs"
-	"flex-agent-runtime/internal/tools"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/client"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/server"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/anthropics/flex-agent-runtime/internal/tools"
 )
 
 func newBenchStack(b *testing.B) (*server.SandboxServer, *server.AgentEventServer, *client.SandboxClient) {

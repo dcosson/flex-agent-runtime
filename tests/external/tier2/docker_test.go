@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"flex-agent-runtime/internal/rpc/api"
-	"flex-agent-runtime/internal/rpc/transport"
-	"flex-agent-runtime/tests/external/common"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/transport"
+	"github.com/anthropics/flex-agent-runtime/tests/external/common"
 )
 
 func sandboxHostURL(t *testing.T) string {

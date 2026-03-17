@@ -9,10 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/sandbox/environment"
-	"flex-agent-runtime/internal/sandbox/gvisor"
-	"flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/environment"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/gvisor"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
 )
 
 type SandboxHostService struct {

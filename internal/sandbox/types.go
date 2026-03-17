@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"flex-agent-runtime/internal/sandbox/gvisor"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/gvisor"
 )
 
 var (

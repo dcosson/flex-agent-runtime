@@ -1,4 +1,4 @@
-module flex-agent-runtime
+module github.com/anthropics/flex-agent-runtime
 
 go 1.24.3
 

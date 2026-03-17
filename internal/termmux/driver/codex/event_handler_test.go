@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/termmux/monitor"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
 )
 
 func TestHandleOtelLogs_TurnComplete(t *testing.T) {

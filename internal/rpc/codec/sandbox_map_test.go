@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/rpc/api"
-	"flex-agent-runtime/internal/sandbox"
-	"flex-agent-runtime/internal/sandbox/zfs"
-	"flex-agent-runtime/internal/tools"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/anthropics/flex-agent-runtime/internal/tools"
 )
 
 func TestToCreateSessionRequest(t *testing.T) {

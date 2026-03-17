@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"flex-agent-runtime/internal/termmux/monitor"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
 )
 
 // Session represents a terminal multiplexer session with a PTY,

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 // --- Helper ---

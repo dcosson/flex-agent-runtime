@@ -4,12 +4,12 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/tests/external/common"
-	"flex-agent-runtime/tests/integration/harness"
-	mh "flex-agent-runtime/tests/integration/mode3/harness"
-	"flex-agent-runtime/tests/integration/testutil"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/tests/external/common"
+	"github.com/anthropics/flex-agent-runtime/tests/integration/harness"
+	mh "github.com/anthropics/flex-agent-runtime/tests/integration/mode3/harness"
+	"github.com/anthropics/flex-agent-runtime/tests/integration/testutil"
 )
 
 // parityScript is the shared scripted response for file ops parity tests.

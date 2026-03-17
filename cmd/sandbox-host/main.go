@@ -10,12 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	rpcserver "flex-agent-runtime/internal/rpc/server"
-	"flex-agent-runtime/internal/rpc/transport"
-	"flex-agent-runtime/internal/sandbox"
-	"flex-agent-runtime/internal/sandbox/gvisor"
-	"flex-agent-runtime/internal/sandbox/zfs"
-	"flex-agent-runtime/internal/termmux"
+	rpcserver "github.com/anthropics/flex-agent-runtime/internal/rpc/server"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/transport"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/gvisor"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux"
 )
 
 func main() {

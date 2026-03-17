@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/rpc/api"
-	"flex-agent-runtime/internal/rpc/client"
-	"flex-agent-runtime/internal/rpc/server"
-	"flex-agent-runtime/internal/tools"
-	"flex-agent-runtime/internal/tools/codeinterp"
-	"flex-agent-runtime/tests/integration/testutil"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/client"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/server"
+	"github.com/anthropics/flex-agent-runtime/internal/tools"
+	"github.com/anthropics/flex-agent-runtime/internal/tools/codeinterp"
+	"github.com/anthropics/flex-agent-runtime/tests/integration/testutil"
 )
 
 type RemoteEnv struct {

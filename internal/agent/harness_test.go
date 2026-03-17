@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 	"pgregory.net/rapid"
 )
 

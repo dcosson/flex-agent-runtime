@@ -1,7 +1,7 @@
 package common
 
 import (
-	"flex-agent-runtime/internal/sandbox/environment/native"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/environment/native"
 )
 
 // BackendConfig represents a named backend configuration for testing.

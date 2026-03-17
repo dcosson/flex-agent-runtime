@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
 )
 
 // EventConfidence indicates the fidelity of a normalized event.

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/sandbox/environment"
-	"flex-agent-runtime/internal/tools"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/environment"
+	"github.com/anthropics/flex-agent-runtime/internal/tools"
 )
 
 func TestLocalEnvironmentLifecycleAndState(t *testing.T) {

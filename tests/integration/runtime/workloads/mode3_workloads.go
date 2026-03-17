@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	rh "flex-agent-runtime/tests/integration/runtime/harness"
+	rh "github.com/anthropics/flex-agent-runtime/tests/integration/runtime/harness"
 )
 
 type Mode3ScenarioWorkload struct {

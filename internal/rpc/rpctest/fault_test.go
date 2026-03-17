@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/rpc"
-	"flex-agent-runtime/internal/rpc/api"
-	"flex-agent-runtime/internal/tools"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/tools"
 )
 
 // F1. Network flapping — simulated via intermittent errors on SandboxService.

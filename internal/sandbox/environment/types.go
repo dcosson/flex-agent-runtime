@@ -3,7 +3,7 @@ package environment
 import (
 	"time"
 
-	"flex-agent-runtime/internal/tools"
+	"github.com/anthropics/flex-agent-runtime/internal/tools"
 )
 
 // SessionConfig carries parameters for environment creation.

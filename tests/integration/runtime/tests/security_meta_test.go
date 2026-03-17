@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	rh "flex-agent-runtime/tests/integration/runtime/harness"
-	"flex-agent-runtime/tests/integration/runtime/workloads"
+	rh "github.com/anthropics/flex-agent-runtime/tests/integration/runtime/harness"
+	"github.com/anthropics/flex-agent-runtime/tests/integration/runtime/workloads"
 
 	"pgregory.net/rapid"
 )

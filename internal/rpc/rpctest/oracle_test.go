@@ -6,9 +6,9 @@ import (
 	"io"
 	"testing"
 
-	"flex-agent-runtime/internal/rpc"
-	"flex-agent-runtime/internal/rpc/api"
-	"flex-agent-runtime/internal/tools"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/tools"
 )
 
 // O1. Contract golden tests — verify each RPC method returns expected structures.

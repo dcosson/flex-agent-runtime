@@ -1,8 +1,8 @@
 package openai
 
 import (
-	"flex-agent-runtime/ai/provider"
-	internal "flex-agent-runtime/internal/ai/provider/openai"
+	"github.com/anthropics/flex-agent-runtime/ai/provider"
+	internal "github.com/anthropics/flex-agent-runtime/internal/ai/provider/openai"
 )
 
 // OpenAI supports chat/streaming and embeddings.

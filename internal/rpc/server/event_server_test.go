@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/rpc/api"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
 )
 
 func TestAgentEventServerStreamAndPublish(t *testing.T) {

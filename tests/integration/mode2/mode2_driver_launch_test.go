@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/termmux/monitor"
-	"flex-agent-runtime/tests/integration/mode2/harness"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
+	"github.com/anthropics/flex-agent-runtime/tests/integration/mode2/harness"
 )
 
 // S1: Driver launch with credential injection.

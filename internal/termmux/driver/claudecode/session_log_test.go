@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/termmux/driver"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux/driver"
 )
 
 func TestParseSessionLog_UserMessage(t *testing.T) {

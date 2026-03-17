@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/sandbox/gvisor"
-	"flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/gvisor"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
 )
 
 // mockGVisor is an enhanced mock for the GVisorManager interface.

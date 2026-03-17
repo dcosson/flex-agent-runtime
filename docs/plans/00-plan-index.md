@@ -79,11 +79,11 @@ Refactor the tool execution and sandbox session interfaces into a unified `Execu
 
 ## Batch 5: Integration & Polish
 
-Full system integration tests, Agent outside Sandbox and Agent in Sandbox E2E tests, and cross-cutting polish.
+Full system integration tests, Tools in Sandbox and Agent in Sandbox E2E tests, and cross-cutting polish.
 
 | Doc | Component | Description | Depends On | Status |
 |-----|-----------|-------------|------------|--------|
-| [14-mode3-e2e](./14-mode3-e2e.md) | Agent outside Sandbox E2E | End-to-end test: agent loop dispatching tool calls to remote sandbox host via RPC. Full lifecycle: create session, execute tools, take snapshots, rollback, pause/resume, destroy. | 13-rpc-layer, 08-agent-tools-e2e | Implementation Complete |
+| [14-mode3-e2e](./14-mode3-e2e.md) | Tools in Sandbox E2E | End-to-end test: agent loop dispatching tool calls to remote sandbox host via RPC. Full lifecycle: create session, execute tools, take snapshots, rollback, pause/resume, destroy. | 13-rpc-layer, 08-agent-tools-e2e | Implementation Complete |
 | [15-mode2-e2e](./15-mode2-e2e.md) | Agent in Sandbox E2E | End-to-end test: orchestrator launches 3rd party agent driver in sandbox via terminal mux. Credential injection, event normalization, session lifecycle. | 09-h2-termmux-port, 11-sandbox-host-service | Implementation Complete |
 | [16-runtime-test-harness](./16-runtime-test-harness.md) | Runtime test harness | Cross-cutting test harness: load testing (many concurrent agents), soak testing (long-running sessions), snapshot space growth analysis, container boot time benchmarks, RPC latency profiling. | 14-mode3-e2e, 15-mode2-e2e | Implementation Complete |
 

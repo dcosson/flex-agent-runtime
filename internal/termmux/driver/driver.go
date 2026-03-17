@@ -8,7 +8,7 @@ import (
 	"io"
 	"time"
 
-	"flex-agent-runtime/internal/termmux/monitor"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
 )
 
 // TermmuxDriverAdapter abstracts a 3rd party agent CLI for termmux session control.

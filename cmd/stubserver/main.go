@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"flex-agent-runtime/internal/ai/testutil/stubserver"
+	"github.com/anthropics/flex-agent-runtime/internal/ai/testutil/stubserver"
 )
 
 func main() {

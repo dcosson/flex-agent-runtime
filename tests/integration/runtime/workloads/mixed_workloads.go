@@ -3,7 +3,7 @@ package workloads
 import (
 	"time"
 
-	rh "flex-agent-runtime/tests/integration/runtime/harness"
+	rh "github.com/anthropics/flex-agent-runtime/tests/integration/runtime/harness"
 )
 
 func DefaultMixedWorkloads() []rh.Workload {

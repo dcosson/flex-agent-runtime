@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 var executeScriptSchema = json.RawMessage(`{

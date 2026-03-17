@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 func TestEmbeddingProvider_APIAndRegister(t *testing.T) {

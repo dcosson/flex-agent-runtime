@@ -1,8 +1,8 @@
 package anthropic
 
 import (
-	"flex-agent-runtime/ai/provider"
-	internal "flex-agent-runtime/internal/ai/provider/anthropic"
+	"github.com/anthropics/flex-agent-runtime/ai/provider"
+	internal "github.com/anthropics/flex-agent-runtime/internal/ai/provider/anthropic"
 )
 
 // Anthropic supports chat/streaming only.

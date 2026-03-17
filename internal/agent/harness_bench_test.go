@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 func BenchmarkB1EventFanoutThroughput(b *testing.B) {

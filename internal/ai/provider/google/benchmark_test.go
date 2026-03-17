@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/ai/testutil/stubserver"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai/testutil/stubserver"
 )
 
 // =====================================================================

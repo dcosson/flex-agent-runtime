@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
 type testDriver struct{}

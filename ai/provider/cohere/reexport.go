@@ -1,8 +1,8 @@
 package cohere
 
 import (
-	"flex-agent-runtime/ai/provider"
-	internal "flex-agent-runtime/internal/ai/provider/cohere"
+	"github.com/anthropics/flex-agent-runtime/ai/provider"
+	internal "github.com/anthropics/flex-agent-runtime/internal/ai/provider/cohere"
 )
 
 // Cohere supports embeddings only.

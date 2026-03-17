@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/rpc/api"
-	rpcserver "flex-agent-runtime/internal/rpc/server"
-	"flex-agent-runtime/internal/sandbox"
-	"flex-agent-runtime/internal/sandbox/gvisor"
-	"flex-agent-runtime/internal/sandbox/zfs"
-	"flex-agent-runtime/internal/termmux"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	rpcserver "github.com/anthropics/flex-agent-runtime/internal/rpc/server"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/gvisor"
+	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux"
 )
 
 type fakeGVisor struct{}

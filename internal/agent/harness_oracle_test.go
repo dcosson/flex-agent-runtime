@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/termmux/monitor"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
 )
 
 func TestO1_NativeVsAdapterEventParity(t *testing.T) {

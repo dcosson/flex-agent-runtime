@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/tests/integration/harness"
-	"flex-agent-runtime/tests/integration/testutil"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/tests/integration/harness"
+	"github.com/anthropics/flex-agent-runtime/tests/integration/testutil"
 )
 
 // TestL1_BasicMultiTurn verifies a three-provider-turn interaction:

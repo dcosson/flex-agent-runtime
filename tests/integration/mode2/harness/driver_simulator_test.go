@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/termmux/monitor"
+	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
 )
 
 func TestLoadReplayScript_FixtureRoundTrip(t *testing.T) {

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"flex-agent-runtime/internal/agent"
-	"flex-agent-runtime/internal/ai"
-	"flex-agent-runtime/internal/ai/provider/anthropic"
-	"flex-agent-runtime/internal/ai/testutil/stubserver"
-	"flex-agent-runtime/internal/tools"
+	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/anthropics/flex-agent-runtime/internal/ai/provider/anthropic"
+	"github.com/anthropics/flex-agent-runtime/internal/ai/testutil/stubserver"
+	"github.com/anthropics/flex-agent-runtime/internal/tools"
 )
 
 // fixturesDir returns the path to testdata/fixtures from the project root.
