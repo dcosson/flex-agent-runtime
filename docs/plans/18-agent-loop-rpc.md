@@ -1,10 +1,10 @@
 # 18: Agent Loop RPC Service
 
-**Status:** Draft (R1 + R2 reviews incorporated)
+**Status:** Draft (R1 + R2 + seam reviews incorporated)
 **Depends on:** 05-agent, 13-rpc-layer, 11-sandbox-host-service.add01
 **Depended on by:** Orchestrator application (future)
 **Scope:** Wrap the existing agent loop with a ConnectRPC interface so it can run as a standalone service, deployable anywhere. Adds a SandboxControl abstraction for unified sandbox lifecycle management across native and cloud providers.
-**Incorporated reviews:** 18-agent-loop-rpc-review-r1-a.md, 18-agent-loop-rpc-review-r1-b.md, 18-agent-loop-rpc-review-r2-a.md, 18-agent-loop-rpc-review-r2-b.md
+**Incorporated reviews:** 18-agent-loop-rpc-review-r1-a.md, 18-agent-loop-rpc-review-r1-b.md, 18-agent-loop-rpc-review-r2-a.md, 18-agent-loop-rpc-review-r2-b.md, 18-agent-loop-rpc-seam-review.md
 
 ---
 
@@ -183,10 +183,26 @@ type AgentService interface {
 // AgentService remains free of RPC-layer imports. The RPC layer adapts
 // between this interface and the wire-format AgentEventReceiver (which wraps
 // events in AgentEventEnvelope with a SessionID field for multiplexed streams).
+//
+// Error contract:
+//   - Recv() returns (*event, nil) for each event.
+//   - Recv() returns (nil, io.EOF) for normal stream end (turn completed,
+//     session destroyed, or Close() called by the consumer).
+//   - Recv() returns (nil, err) for abnormal termination (agent crash,
+//     internal error). The error is never io.EOF in this case.
+//   - After Recv() returns io.EOF or an error, subsequent calls return
+//     the same result (the stream is terminal).
+//   - Close() is idempotent. Calling Close() causes any blocked Recv()
+//     to return (nil, io.EOF).
+//
+// The RPC adapter (AgentRPCServer) maps these errors as follows:
+//   - io.EOF -> clean ConnectRPC stream closure (no error frame)
+//   - other errors -> toConnectError() mapping, then stream closure
 type EventReceiver interface {
-    // Recv returns the next event. Returns io.EOF when the stream is complete.
+    // Recv returns the next event. See error contract above.
     Recv() (*agent.AgentEvent, error)
     // Close releases resources associated with this receiver.
+    // Idempotent. Causes any blocked Recv() to return (nil, io.EOF).
     Close() error
 }
 ```
@@ -251,8 +267,13 @@ type GetAgentSessionResponse struct {
     SessionID       string
     State           string
     Metrics         agent.SessionMetrics // Reuse existing agent.SessionMetrics directly
-    ConversationLen int
+    ConversationLen int                  // Use Agent.ConversationLen() (lightweight, no clone)
 }
+
+// Note: GetSession should use a lightweight Agent.ConversationLen() method
+// that acquires the lock and returns just the count, rather than calling
+// Agent.Session() which clones the entire conversation log. For large
+// conversations (thousands of messages), cloning is wasteful for a count.
 
 type ListAgentSessionsRequest struct {
     // Filter by labels (optional)
@@ -354,6 +375,8 @@ type DestroyAgentSessionResponse struct{}
 4. Multiple concurrent `SendMessage` calls on the same session return `BusyError` -- only one turn can be active at a time (enforced by the existing `Agent.Start()`/`Agent.Prompt()` API).
 
 The per-turn stream and any active `SubscribeEvents` stream deliver the **same events simultaneously** (dual delivery). This is not a problem -- the per-turn stream is a convenience for callers who only care about one turn. The orchestrator typically uses `SubscribeEvents` for persistence and the per-turn stream is used by direct API callers.
+
+**Important:** Consumers MUST NOT count or persist events from both streams. The session-wide `SubscribeEvents` stream is the canonical source for persistence. The per-turn stream is a convenience for simple callers that do not use `SubscribeEvents`. If both streams are consumed, the consumer must deduplicate or choose one stream per purpose.
 
 ### 3.3 AgentMessageRecord Serialization Format
 
@@ -489,8 +512,8 @@ func WithMaxSessions(n int) ServiceOption // Defaults to 0 (unlimited)
 **SendMessage flow:**
 1. Look up session by ID
 2. Subscribe to session events and wrap in turn-scoped `EventReceiver` (see section 3.2). **This MUST happen before step 3** to avoid losing early events (`EventTurnStarted`, initial deltas) that the driver goroutine emits immediately after launch.
-3. If `!session.started`, call `agent.Start(session.ctx, session, message)` and set `started = true`. Otherwise, call `agent.Prompt(session.ctx, message)`. Note: turns use the **session-scoped context** (`session.ctx`), not the RPC request context. This ensures the turn survives RPC connection drops -- the orchestrator can still observe the turn via `SubscribeEvents`.
-4. If `Start()`/`Prompt()` fails, close and discard the subscription from step 2, return the error.
+3. If `!session.started`, call `agent.Start(session.ctx, session, message)`. If `Start()` succeeds, set `started = true`. Otherwise, call `agent.Prompt(session.ctx, message)`. Note: turns use the **session-scoped context** (`session.ctx`), not the RPC request context. This ensures the turn survives RPC connection drops -- the orchestrator can still observe the turn via `SubscribeEvents`.
+4. If `Start()`/`Prompt()` fails, close and discard the subscription from step 2, return the error. **Importantly, if `Start()` returns an error, `started` remains `false`.** The next `SendMessage` call will retry `Start()`, which is correct because `Agent.Start()` always accepts a session parameter and sets `a.session` from it. A failed `Start()` leaves `Agent.running = false` and a retry will work correctly.
 5. Increment `wg.Add(1)` for the active turn goroutine. The deferred cleanup in `NativeDriver.run()` calls `wg.Done()`.
 6. Return the turn-scoped event stream
 
@@ -547,6 +570,22 @@ ProcedureAgentDestroySession  = "/rpc.v1.AgentService/DestroySession"     // una
 **Handler types:**
 - CreateSession, GetSession, ListSessions, ResumeSession, Steer, FollowUp, Abort, DestroySession -> **unary** (`connect.NewUnaryHandlerSimple`)
 - SendMessage, Continue, SubscribeEvents -> **server stream** (`connect.NewServerStreamHandler`)
+
+**Prerequisite: transport.Server refactoring (change to plan 13).** The current `transport.Server` constructor takes `SandboxService`, `AgentEventService`, and `SessionManager` upfront, and `Handler()` unconditionally registers all sandbox procedures. This does not work for the agent-server binary, which needs to register `AgentService` procedures WITHOUT providing `SandboxService`. The `transport.Server` must be refactored to support optional service registration using functional options:
+
+```go
+// Refactored constructor (change to plan 13 / internal/rpc/transport/server.go):
+func NewServer(cfg ServerConfig, opts ...ServerOption) *Server
+
+type ServerOption func(*Server)
+
+func WithSandboxService(s api.SandboxService) ServerOption
+func WithAgentEventService(e api.AgentEventService) ServerOption
+func WithSessionManager(t *termmux.SessionManager) ServerOption
+func WithAgentService(a agentapi.AgentService) ServerOption
+```
+
+`Handler()` conditionally registers only the procedures for services that were provided. This refactoring is a prerequisite for step 8 in the implementation order and should be done as part of that step. Existing callers (sandbox-host binary) must be updated to use the new option-based constructor.
 
 ### 5.2 AgentRPCServer
 
@@ -626,12 +665,10 @@ This is the orchestrator-level abstraction for sandbox lifecycle. It is separate
 
 **How they coordinate:** `SandboxControl.CreateSandbox()` provisions a new sandbox and returns its ID and address. The orchestrator then passes this information (sandbox ID, sandbox-host address) to `CreateAgentSessionRequest.ToolEnvironment` so the agent loop can construct an `ExecutionEnvironment` pointing at the already-provisioned sandbox. They never both manage the same sandbox simultaneously -- SandboxControl hands off to ExecutionEnvironment.
 
-**Capabilities alignment:** `SandboxControl.SandboxCapabilities` embeds `environment.Capabilities` to avoid type drift:
+**Capabilities alignment:** `SandboxControl.SandboxCapabilities` defines its own fields with sandbox-appropriate names rather than embedding `environment.Capabilities`. This avoids semantic confusion where identical field names mean different things at different layers (e.g., `ConcurrentSessions` means concurrent tool executions at the environment level but concurrent sandbox instances at the control level; `MaxSessionDuration` means tool execution session lifetime vs. sandbox lifetime). The orchestrator is responsible for mapping between the two when needed:
 
 ```go
 // internal/sandbox/control/control.go
-
-import "flex-agent-runtime/internal/sandbox/environment"
 
 // SandboxControl manages sandbox lifecycle. The orchestrator uses this
 // to create/destroy sandboxes and launch processes inside them.
@@ -695,7 +732,7 @@ type CreateSandboxRequest struct {
 
 type CreateSandboxResponse struct {
     SandboxID    string
-    Address      string                    // How to reach this sandbox (host:port or URL)
+    Address      string                    // How to reach this sandbox ("host:port" string)
     Capabilities SandboxCapabilities
 }
 
@@ -709,9 +746,15 @@ type LaunchProcessRequest struct {
 
 type LaunchProcessResponse struct {
     ProcessID string
-    Address   string   // How to reach the launched process (proxy host:port)
+    Address   string   // How to reach the launched process ("host:port" string)
     Status    ProcessStatus
 }
+
+// AddressToURL converts a "host:port" address to an HTTP URL suitable for
+// ConnectRPC client construction. Example: "sandbox-host:9100" -> "http://sandbox-host:9100".
+// The orchestrator calls this when constructing an AgentServiceClient from
+// a LaunchProcessResponse.Address or CreateSandboxResponse.Address.
+func AddressToURL(addr string) string
 
 type KillProcessRequest struct {
     SandboxID string
@@ -737,20 +780,21 @@ const (
     ProcessStarting ProcessStatus = "starting"
 )
 
-// SandboxCapabilities extends environment.Capabilities with orchestrator-level flags.
-// Note: The embedding of environment.Capabilities prevents type drift between agent-level
-// and orchestrator-level capability reporting. However, some inherited fields
-// (e.g., StreamingProgress, TierRouting) are tool-execution-level concerns that are
-// not meaningful at the SandboxControl level. Orchestrator-level code should ignore
-// these fields -- they are present because of the embedding and reflect the underlying
-// environment's capabilities, not the sandbox control interface's semantics. The fields
-// that ARE meaningful at both levels are: MaxSessionDuration, ConcurrentSessions (with
-// the caveat that at the SandboxControl level, ConcurrentSessions refers to sandbox
-// instances, not concurrent tool executions).
+// SandboxCapabilities defines orchestrator-level capability flags for a sandbox provider.
+// Unlike environment.Capabilities (which describes tool-execution-level capabilities),
+// these fields use sandbox-appropriate names and semantics. No embedding of
+// environment.Capabilities -- the field names differ intentionally to prevent
+// semantic confusion (e.g., "ConcurrentSandboxes" vs "ConcurrentSessions",
+// "MaxSandboxDuration" vs "MaxSessionDuration"). The orchestrator maps between the
+// two when constructing ExecutionEnvironment configs from SandboxControl responses.
 type SandboxCapabilities struct {
-    environment.Capabilities           // Embed agent-level capabilities
-    LaunchProcess bool                 // Whether this provider supports LaunchProcess
-    DeepPause     bool                 // ZFS-to-S3 style cold storage (future)
+    Snapshots          bool          // Whether this provider supports filesystem snapshots
+    Rollback           bool          // Whether this provider supports rollback to snapshots
+    Pause              bool          // Whether this provider supports pause/resume
+    LaunchProcess      bool          // Whether this provider supports LaunchProcess
+    DeepPause          bool          // ZFS-to-S3 style cold storage (future)
+    ConcurrentSandboxes int          // Max concurrent sandbox instances (0 = unlimited)
+    MaxSandboxDuration  time.Duration // Max sandbox lifetime (0 = unlimited)
 }
 ```
 
@@ -766,7 +810,12 @@ type NativeSandboxControl struct {
 }
 ```
 
-- `CreateSandbox` -> calls `sandboxClient.CreateSession()`
+- `CreateSandbox` -> calls `sandboxClient.CreateSession()`. Field mapping:
+  - `CreateSandboxRequest.Template` -> `CreateSessionRequest.BaseSnapshot`
+  - `CreateSandboxRequest.Labels` -> `CreateSessionRequest.Labels`
+  - `CreateSandboxRequest.Resources` -> not present in `CreateSessionRequest` (logged as debug info, not transmitted; resource limits are set at the sandbox-host level via host config, not per-session)
+  - `CreateSessionRequest.Quota` -> uses a default value (configurable via `NativeSandboxControl` constructor option `WithDefaultQuota(bytes int64)`)
+  - `CreateSessionRequest.SessionID` -> generated by the sandbox-host (not pre-assigned by SandboxControl)
 - `DestroySandbox` -> calls `sandboxClient.DestroySession()`
 - `LaunchProcess` -> requires **new LaunchProcess RPC endpoint on sandbox-host**. The LaunchProcess specification (RPC types, lifecycle, port proxying, process monitoring) is defined in section 6 of this plan. A standalone addendum (`11-sandbox-host-service.add03`) should be created as a follow-up before implementation of NativeSandboxControl to give sandbox-host implementors a self-contained reference (see Follow-up Work section). Implementation: sandbox-host runs the process in gVisor (or directly if no gVisor), bind-mounting the sandbox's ZFS dataset, and proxies the exposed port via a TCP reverse proxy on a dynamically allocated port.
 - `KillProcess` -> sends signal to tracked PID
@@ -849,7 +898,7 @@ Operator configures the address. The orchestrator is told where agent-server is 
 
 ### 8.3 Launched Inside Sandbox
 
-The `SandboxControl.LaunchProcess()` call returns the address in `LaunchProcessResponse.Address`. The orchestrator uses this to create an `AgentServiceClient`.
+The `SandboxControl.LaunchProcess()` call returns the address in `LaunchProcessResponse.Address` as a `"host:port"` string. The orchestrator converts this to a URL via `control.AddressToURL()` (which prepends `http://`) before creating an `AgentServiceClient`.
 
 For native sandbox-host, the proxy approach:
 - Agent-server listens on a port inside the sandbox/container
@@ -1017,7 +1066,31 @@ AgentMessageRecord (orchestrator/SQLite)
     -> Claude Code session.jsonl (native format)
 ```
 
-**Known lossy steps:** The `agent.AgentMessage -> ConversationEntry` conversion flattens `ContentBlocks` to a single `Content string`. Multi-block messages, image content, and structured tool argument formatting are lost. This is acceptable for cross-agent resume where the target agent only needs the semantic content of the conversation. Tool name mapping assumes shared tool definitions; cross-tool-schema resume is not supported.
+#### AgentMessage -> ConversationEntry Conversion
+
+The `agent.AgentMessage -> ConversationEntry` conversion function lives in a new file `internal/agent/api/termmux_codec.go` (or in the termmux driver package if import constraints require it). This is the most complex step in the chain because `agent.AgentMessage` wraps the polymorphic `ai.Message` interface while `ConversationEntry` has a flat structure.
+
+```go
+// internal/agent/api/termmux_codec.go
+
+// AgentMessageToConversationEntries converts an agent.AgentMessage to one or
+// more canonical ConversationEntry records for cross-agent resume.
+// A single AgentMessage with an AssistantMessage containing text + tool_use
+// blocks produces MULTIPLE ConversationEntry records (one per content block),
+// matching the pattern used by claudecode.convertClaudeToCanonical().
+func AgentMessageToConversationEntries(msg agent.AgentMessage) []driver.ConversationEntry
+```
+
+**Field mapping by message type:**
+
+| ai.Message type | ConversationEntry.Role | Content mapping |
+|---|---|---|
+| `*ai.UserMessage` | `"user"` | Single entry. `Content` = text content of the message. |
+| `*ai.AssistantMessage` (text block) | `"assistant"` | One entry per text block. `Content` = block text. `Thinking` populated from thinking blocks. `Usage` populated from message-level usage. |
+| `*ai.AssistantMessage` (tool_use block) | `"tool_use"` | One entry per tool_use block. `ToolCall` = `&ToolCallRecord{ID: block.ID, Name: block.Name, Args: json.Marshal(block.Arguments)}`. |
+| `*ai.ToolResultMessage` | `"tool_result"` | Single entry. `Content` = flattened text of result content blocks (image blocks dropped). `ToolCall` = `&ToolCallRecord{ID: msg.ToolCallID, Name: msg.ToolName, Result: flattened content}`. `ToolCall.IsError` = `msg.IsError`. |
+
+**Known lossy steps:** Multi-block assistant messages are split into separate entries. Image content blocks are dropped (text description retained if present). Structured tool argument formatting is flattened to JSON string. This is acceptable for cross-agent resume where the target agent only needs the semantic content of the conversation. Tool name mapping assumes shared tool definitions; cross-tool-schema resume is not supported.
 
 The reverse direction (Claude Code -> our loop) uses `claudecode.ParseSessionLog()` to read the session.jsonl, convert to canonical, then to AgentMessageRecord for replay via ResumeSession.
 
@@ -1135,6 +1208,8 @@ internal/
       agent_types.go    # Request/response types
       codec.go          # AgentMessageRecord <-> AgentMessage conversion
       codec_test.go
+      termmux_codec.go  # AgentMessage -> ConversationEntry conversion (cross-agent resume)
+      termmux_codec_test.go
     service.go          # AgentLoopService (in-process implementation of AgentService)
     service_test.go
   rpc/
@@ -1182,6 +1257,8 @@ cmd/
 - DestroySession during active turn -> forceful cancel, events indicate abort
 - Concurrent operations on same session -> serialized correctly
 - Multiple sessions -> independent lifecycles
+- EventPublisher receives correct session ID and event types (using mock EventPublisher that records published events)
+- DestroySession stops publishing events to EventPublisher for that session
 - ResumeSession with conversation log -> session created with history, state=idle
 - ResumeSession with empty log -> equivalent to CreateSession
 - ResumeSession with invalid schema version -> error
@@ -1245,12 +1322,12 @@ cmd/
 5. **Agent error mapping** (extend `internal/rpc/errors.go`)
 6. **Wire-format codec** (`internal/rpc/codec/agent_map.go`) + unit tests
 7. **AgentRPCServer** (`internal/rpc/server/agent_server.go`) -- ConnectRPC handlers
-8. **Agent procedures in transport server** (`internal/rpc/transport/server.go`)
+8. **Refactor transport.Server + register agent procedures** (`internal/rpc/transport/server.go`) -- Refactor `NewServer` to use functional options (see section 5.1 prerequisite). Update existing sandbox-host callers. Register agent procedures conditionally. This is a change to the plan 13 (RPC layer) codebase.
 9. **AgentServiceClient** (`internal/rpc/client/agent_client.go`) -- ConnectRPC client
 10. **Integration tests** -- in-process and remote round-trip
 11. **cmd/agent-server binary** with graceful shutdown
 12. **SandboxControl interface** (`internal/sandbox/control/control.go`)
-13. **NativeSandboxControl** with mock sandbox-host for testing (real LaunchProcess depends on the `11-sandbox-host-service.add03` addendum being implemented -- see Follow-up Work)
+13. **NativeSandboxControl** with mock sandbox-host for testing. **Note:** Steps 12-13 are blocked for LaunchProcess/KillProcess/GetProcessStatus implementation until the `11-sandbox-host-service.add03` addendum is created and the corresponding sandbox-host RPC endpoint is implemented. CreateSandbox, DestroySandbox, PauseSandbox, and ResumeSandbox can proceed immediately as they wrap existing sandbox-host RPCs. Use a mock sandbox-host for LaunchProcess testing.
 14. **End-to-end test** -- orchestrator -> agent-server -> sandbox-host
 
 ---
@@ -1261,7 +1338,7 @@ cmd/
 
 | Seam | Change | Impact |
 |------|--------|--------|
-| `internal/rpc/transport/server.go` | Add agent service procedures | New HTTP handlers registered |
+| `internal/rpc/transport/server.go` | Refactor to functional options (change to plan 13) + add agent service procedures | Constructor signature change, conditional handler registration |
 | `internal/rpc/errors.go` | Add agent error -> ConnectRPC code mappings | Extended existing `MapError` function |
 | `cmd/sandbox-host` | Add LaunchProcess RPC endpoint (specified in section 6; standalone plan `11-sandbox-host-service.add03` to be extracted) | New capability on existing binary |
 
@@ -1281,7 +1358,7 @@ cmd/
 |------|----------|
 | `internal/agent/agent.go` | `AgentLoopService` creates and manages `Agent` instances via `Agent.Start()`, `Agent.Prompt()`, `Agent.Continue()`, `Agent.Steer()`, `Agent.FollowUp()`, `Agent.Abort()`, `Agent.Stop()`, `Agent.Subscribe()` |
 | `internal/agent/types.go` | `AgentMessage`, `SessionMetrics`, `AgentEvent`, `AgentEventType` used directly |
-| `internal/sandbox/environment` | `ExecutionEnvironment` and `Capabilities` consumed by `AgentLoopService` for tool execution setup |
+| `internal/sandbox/environment` | `ExecutionEnvironment` consumed by `AgentLoopService` for tool execution setup. `Capabilities` no longer embedded by `SandboxCapabilities` (replaced with explicit fields); orchestrator maps between the two when needed. |
 | `internal/rpc/api/types.go` | `AgentEventReceiver`, `AgentEventEnvelope` used by RPC transport layer (adapted from `EventReceiver` by `AgentRPCServer`) |
 | `internal/rpc/api/terminal.go` | `TerminalService` used by orchestrator for terminal access to termmux sessions (not added to AgentService) |
 | `internal/termmux/driver/driver.go` | `ConversationEntry` used in cross-agent resume conversion chain |
@@ -1295,6 +1372,7 @@ cmd/agent-server -> internal/agent (AgentLoopService)
                   -> internal/rpc/server (AgentRPCServer)
 
 internal/agent/api          -> internal/agent (AgentMessage, AgentEvent, SessionMetrics -- types only)
+                            -> internal/termmux/driver (ConversationEntry -- for termmux_codec.go only)
 internal/agent/service      -> internal/agent/api (AgentService interface, types, EventReceiver)
                             -> internal/agent (Agent, Driver)
                             -> internal/sandbox/environment (ExecutionEnvironment)
@@ -1309,7 +1387,7 @@ internal/rpc/codec/agent_map     -> internal/agent/api (types)
                                   -> internal/agent (AgentMessage, SessionMetrics)
                                   -> internal/sandbox/control (ResourceSpec)
 
-internal/sandbox/control         -> internal/sandbox/environment (Capabilities)
+internal/sandbox/control         -> (no imports from internal/sandbox/environment -- SandboxCapabilities uses its own fields)
 internal/sandbox/control/native  -> internal/rpc/api (SandboxService)
                                  -> internal/sandbox/control (SandboxControl)
 ```
@@ -1317,7 +1395,7 @@ internal/sandbox/control/native  -> internal/rpc/api (SandboxService)
 **Key invariants:**
 - `internal/agent` does NOT import `internal/rpc/api` or `internal/rpc/server`. The `EventPublisher` interface in `internal/agent` is implemented by `AgentEventServer` (in `internal/rpc/server`), preserving the import direction.
 - `internal/agent/api` does NOT import `internal/rpc/api`. The `EventReceiver` interface returns `*agent.AgentEvent` directly. The RPC layer (`internal/rpc/server/agent_server.go`) adapts between `EventReceiver` and `AgentEventReceiver`.
-- The `internal/agent/api -> internal/agent` import MUST remain types-only. If codec or interface logic ever needs to call `Agent` methods, those methods should be expressed as function parameters or interfaces defined in `internal/agent/api`, not direct imports of `internal/agent` functions.
+- The `internal/agent/api -> internal/agent` import MUST remain types-only. If codec or interface logic ever needs to call `Agent` methods, those methods should be expressed as function parameters or interfaces defined in `internal/agent/api`, not direct imports of `internal/agent` functions. This constraint is enforced by convention today; a CI linting tool (e.g., `go-import-lint` or a custom `go vet` analyzer) could enforce it automatically in the future.
 
 **Context propagation:** Turns use the session-scoped context (from `managedSession.ctx`), NOT the RPC request context. This is critical for RPC mode: when the `SendMessage` RPC connection drops, the turn continues running because it is attached to the session context, not the request context. The orchestrator can still observe the turn via `SubscribeEvents` (which has its own connection). The session context is cancelled only on `DestroySession` or `Close`.
 
@@ -1385,7 +1463,7 @@ Reviews incorporated: `18-agent-loop-rpc-review-r1-a.md` (Reviewer A), `18-agent
 
 Items identified during R2 review that should be completed before or during implementation:
 
-1. **`11-sandbox-host-service.add03` addendum:** Extract the LaunchProcess sandbox-host specification (RPC types, lifecycle, port proxying, PID tracking, gVisor integration for launched processes) from section 6 of this plan into a standalone addendum document. This gives sandbox-host implementors a self-contained reference and enables independent review. Must be created before implementation step 13 (NativeSandboxControl) begins.
+1. **`11-sandbox-host-service.add03` addendum (blocking for steps 12-13 LaunchProcess):** Extract the LaunchProcess sandbox-host specification (RPC types, lifecycle, port proxying, PID tracking, gVisor integration for launched processes) from section 6 of this plan into a standalone addendum document. This gives sandbox-host implementors a self-contained reference and enables independent review. Must be created before NativeSandboxControl.LaunchProcess/KillProcess/GetProcessStatus can be implemented. Without this, steps 12-13 can only implement CreateSandbox, DestroySandbox, PauseSandbox, and ResumeSandbox (which wrap existing sandbox-host RPCs).
 
 2. **`18-agent-loop-rpc-test-harness.md`:** Create the dedicated test harness document before or during implementation step 10 (integration tests). See section 14.3.
 
@@ -1404,7 +1482,7 @@ Reviews incorporated: `18-agent-loop-rpc-review-r2-a.md` (Reviewer A), `18-agent
 | A-F1 | `EventPublisher` placement in `internal/agent` vs `internal/agent/api` | A | P2 | **Acknowledged (no change)** | Left `EventPublisher` in `internal/agent/service.go`. Both placements work; current location keeps the interface next to its consumer (`AgentLoopService`). Implementor may move it to `internal/agent/api` during step 3 if preferred. |
 | A-F5 / B-F8 | `ResumeSession` validation does not check role alternation | A+B | P2 | **Incorporated** | Added role alternation check as rule 6 in section 3.4. Produces a warning (not error) since crash recovery can legitimately produce non-alternating sequences. Warning is preferable to surfacing cryptic provider API errors. |
 | B-F3 | Steer TOCTOU race between checking StateIdle and enqueueing the steer | B | P2 | **Incorporated** | Added explicit acknowledgment of the TOCTOU gap in section 4 Steer flow. The race is inherent and acceptable for best-effort steering semantics -- steers are silently discarded by the control queue if the turn ends between check and enqueue. |
-| B-F4 | `SandboxCapabilities` embedding `environment.Capabilities` leaks agent-level fields | B | P2 | **Incorporated** | Added documentation to `SandboxCapabilities` struct comment identifying which inherited fields are meaningful at the orchestrator level and which should be ignored. See section 6. |
+| B-F4 | `SandboxCapabilities` embedding `environment.Capabilities` leaks agent-level fields | B | P2 | **Incorporated** | Originally added documentation. Seam review (F6) escalated this to P1: replaced embedding with explicit fields (`Snapshots`, `Rollback`, `Pause`, `ConcurrentSandboxes`, `MaxSandboxDuration`). See section 6. |
 | A-F6 | Two codec locations (`codec.go` and `agent_map.go`) with unclear boundary | A | P2 | **Incorporated** | Rewrote section 5.5 to clearly explain the boundary: `internal/agent/api/codec.go` handles domain model conversion (AgentMessage <-> AgentMessageRecord), `internal/rpc/codec/agent_map.go` handles wire-format serialization for RPC transport. |
 | B-F5 | Missing `stop_reason` in assistant JSON schema | B | P3 | **Incorporated** | Added `stop_reason` and `error_message` fields to the assistant role JSON schema in section 3.3. Added note explaining why these are important for resume and why `API`/`Provider` are intentionally omitted. |
 | A-F8 / B-F6 | `ResourceSpec` import ambiguity in `CreateSandboxRequest` | A+B | P3 | **Incorporated** | Defined local `ResourceSpec` in `internal/sandbox/control/control.go` (two fields: `CPUs`, `MemMB`) to avoid cross-layer import of `internal/rpc/api`. RPC codec maps between `control.ResourceSpec` and `api.ResourceSpec`. See section 6 and updated import flow in section 16.4. |
@@ -1415,3 +1493,26 @@ Reviews incorporated: `18-agent-loop-rpc-review-r2-a.md` (Reviewer A), `18-agent
 | A-F7 | Wiring between `Agent.Subscribe()` and `EventPublisher` unspecified | A | P2 | **Acknowledged** | Straightforward wiring: `AgentLoopService` calls `agent.Subscribe(fn)` during CreateSession, the callback calls `publisher.Publish(sessionID, event)`. The `unsubscribe` function is stored in `managedSession.unsubscribe` and called during DestroySession. `Agent.Subscribe()` callbacks run synchronously in the event bus goroutine; `EventPublisher.Publish()` uses non-blocking channel sends so it does not slow the agent loop. |
 | A-F9 | Error mapping extends `MapError` adding `internal/agent` import | A | P3 | **Acknowledged** | Adding `internal/agent` as a dependency of `internal/rpc/errors.go` is acceptable -- the `rpc` package is already a cross-cutting concern that imports `internal/sandbox` and `internal/sandbox/zfs`. |
 | B-F4 context | `internal/agent/api` -> `internal/agent` import fragility | B | P2 | **Incorporated** | Added invariant note in section 16.4: the import MUST remain types-only. If codec logic needs Agent methods, use function parameters or interfaces in `internal/agent/api`. |
+
+---
+
+## Seam Review Disposition
+
+Review incorporated: `18-agent-loop-rpc-seam-review.md` (automated seam review).
+
+| # | Finding | Seam | Severity | Disposition | Notes |
+|---|---------|------|----------|-------------|-------|
+| F13 | transport.Server constructor requires all services upfront; Handler() unconditionally registers all sandbox procedures. Agent-server binary needs AgentService without SandboxService. | Agent-server <-> transport.Server | P0 | **Incorporated** | Documented transport.Server refactoring to functional options as a prerequisite in section 5.1. Updated implementation step 8 to include the refactoring (change to plan 13). Updated Modified Seams table. See sections 5.1, 15, 16.1. |
+| F1 | Agent.Start vs Agent.Prompt asymmetry creates fragile `started` flag branching; partial Start() failure could desync the flag. | AgentService <-> Agent | P1 | **Incorporated** | Documented that if `Start()` returns an error, `started` stays false and the next `SendMessage` retries `Start()`. Made this explicit in section 4 SendMessage flow step 4. |
+| F4 | EventReceiver error contract underspecified -- adapter must handle io.EOF vs ErrStreamClosed vs other errors correctly. | AgentService <-> RPC | P1 | **Incorporated** | Defined full error contract in the `EventReceiver` interface comment: (event, nil) for events, (nil, io.EOF) for normal end, (nil, err) for abnormal termination. Specified RPC adapter mapping. See section 3. |
+| F6 | SandboxCapabilities embedding environment.Capabilities creates semantic confusion -- same field names mean different things at different layers. | SandboxControl <-> ExecutionEnvironment | P1 | **Incorporated** | Replaced embedding with explicit fields. `SandboxCapabilities` now has its own fields (`Snapshots`, `Rollback`, `Pause`, `LaunchProcess`, `DeepPause`, `ConcurrentSandboxes`, `MaxSandboxDuration`). No embedding of `environment.Capabilities`. Orchestrator maps between the two when needed. See section 6. |
+| F10 | CreateSandbox -> CreateSession field mapping lossy -- Resources/Quota mismatch. | SandboxControl <-> Sandbox-Host RPC | P1 | **Incorporated** | Documented field mapping in section 6.1: Template -> BaseSnapshot, Labels -> Labels, Resources -> logged but not transmitted (host-level config), Quota -> default value via `WithDefaultQuota()` constructor option. |
+| F11 | LaunchProcess depends on nonexistent sandbox-host RPC endpoint. | SandboxControl <-> Sandbox-Host RPC | P1 | **Incorporated** | Already addressed in Follow-up Work section. Added explicit note that implementation steps 12-13 are blocked for LaunchProcess/KillProcess/GetProcessStatus until `11-sandbox-host-service.add03` addendum is created. See sections 15, Follow-up Work. |
+| F12 | agent.AgentMessage -> ConversationEntry conversion function unspecified -- gap in cross-agent resume chain. | Cross-agent resume chain | P1 | **Incorporated** | Added subsection to 10.4 specifying `AgentMessageToConversationEntries()` function in `internal/agent/api/termmux_codec.go`. Specified field mapping table by message type. Added file to package structure and import flow. See sections 10.4, 13, 16.4. |
+| F3 | GetSession clones full conversation just to compute ConversationLen -- wasteful for large conversations. | AgentService <-> Agent | P2 | **Incorporated** | Added note to `GetAgentSessionResponse` that `GetSession` should use a lightweight `Agent.ConversationLen()` method, not clone the full conversation. See section 3.1. |
+| F5 | Dual delivery double-counting risk -- consumers could persist events from both per-turn and session-wide streams. | AgentService <-> RPC | P2 | **Incorporated** | Added explicit warning in section 3.2 that consumers MUST NOT count/persist events from both streams. Session-wide stream is canonical for persistence. |
+| F7 | Address format ambiguity (host:port vs URL) between SandboxControl responses and AgentServiceClient constructor. | SandboxControl <-> ExecutionEnvironment | P2 | **Incorporated** | Standardized address format to "host:port" string. Added `AddressToURL()` helper function in `internal/sandbox/control`. Updated address field comments. See sections 6, 8.3. |
+| F8 | EventPublisher testing gap -- unit tests for AgentLoopService do not mention mocking EventPublisher. | AgentLoopService <-> EventPublisher | P2 | **Incorporated** | Added mock EventPublisher test cases to section 14.1: verify session ID propagation, event type correctness, and that destroyed sessions stop publishing. |
+| F2 | Agent.Abort() signature -- cleared, no issue found. | AgentService <-> Agent | P2 | **Acknowledged (no change)** | Signatures align. No action needed. |
+| F9 | EventPublisher.Publish is fire-and-forget -- persistence-critical events could be silently dropped under backpressure. | AgentLoopService <-> EventPublisher | P3 | **Acknowledged (no change)** | Consistent with existing `AgentEventServer` behavior. Already discussed in section 12.4 (backpressure policy). The orchestrator's persistence subscriber uses blocking writes; if buffer sizing is adequate, drops do not occur. |
+| F14 | Import constraint between internal/agent/api -> internal/agent enforced by convention only. | Import cycles | P3 | **Acknowledged** | Import flow is safe (no cycle). Added note in section 16.4 that CI linting (e.g., `go-import-lint`) could enforce the types-only constraint automatically in the future. |
