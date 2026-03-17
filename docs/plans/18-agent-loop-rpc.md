@@ -361,7 +361,7 @@ type DestroyAgentSessionResponse struct{}
 
 **Note on SessionMetrics:** The response types use `agent.SessionMetrics` directly from `internal/agent/types.go` rather than defining a duplicate. The RPC codec layer (see section 5.4) handles serialization/deserialization for the wire format, following the same pattern as the existing sandbox codec in `internal/rpc/codec/sandbox_map.go`.
 
-**Note on API key handling:** The `APIKey` field has been removed from `SessionConfig`. API keys must NOT be transmitted over the AgentService RPC. Instead, API keys are injected into the agent-server process via environment variables (through `SandboxControl.LaunchProcess.Env` for sandbox-launched mode, or standard env vars for standalone mode). The agent-server reads `ANTHROPIC_API_KEY` (or provider-specific equivalents) from its environment. This eliminates the risk of key exposure in RPC logs, in-memory retention, and compromised sandbox processes. See resolved Open Question 3 in section 17.
+**Note on API key handling:** The `APIKey` field has been removed from `SessionConfig`. API keys must NOT be transmitted over the AgentService RPC. Instead, API keys are injected into the agent process via environment variables (through `SandboxControl.LaunchProcess.Env` for sandbox-launched mode, or standard env vars for standalone mode). The `flexagent serve agent` process reads `ANTHROPIC_API_KEY` (or provider-specific equivalents) from its environment. This eliminates the risk of key exposure in RPC logs, in-memory retention, and compromised sandbox processes. See resolved Open Question 3 in section 17.
 
 ### 3.2 Turn-Scoped Event Streams
 
@@ -571,7 +571,7 @@ ProcedureAgentDestroySession  = "/rpc.v1.AgentService/DestroySession"     // una
 - CreateSession, GetSession, ListSessions, ResumeSession, Steer, FollowUp, Abort, DestroySession -> **unary** (`connect.NewUnaryHandlerSimple`)
 - SendMessage, Continue, SubscribeEvents -> **server stream** (`connect.NewServerStreamHandler`)
 
-**Prerequisite: transport.Server refactoring (change to plan 13).** The current `transport.Server` constructor takes `SandboxService`, `AgentEventService`, and `SessionManager` upfront, and `Handler()` unconditionally registers all sandbox procedures. This does not work for the agent-server binary, which needs to register `AgentService` procedures WITHOUT providing `SandboxService`. The `transport.Server` must be refactored to support optional service registration using functional options:
+**Prerequisite: transport.Server refactoring (change to plan 13).** The current `transport.Server` constructor takes `SandboxService`, `AgentEventService`, and `SessionManager` upfront, and `Handler()` unconditionally registers all sandbox procedures. This does not work for the `flexagent serve agent` mode, which needs to register `AgentService` procedures WITHOUT providing `SandboxService`. The `transport.Server` must be refactored to support optional service registration using functional options:
 
 ```go
 // Refactored constructor (change to plan 13 / internal/rpc/transport/server.go):
@@ -585,7 +585,7 @@ func WithSessionManager(t *termmux.SessionManager) ServerOption
 func WithAgentService(a agentapi.AgentService) ServerOption
 ```
 
-`Handler()` conditionally registers only the procedures for services that were provided. This refactoring is a prerequisite for step 8 in the implementation order and should be done as part of that step. Existing callers (sandbox-host binary) must be updated to use the new option-based constructor.
+`Handler()` conditionally registers only the procedures for services that were provided. This refactoring is a prerequisite for step 8 in the implementation order and should be done as part of that step. Existing callers (`flexagent serve sandbox-host`) must be updated to use the new option-based constructor.
 
 ### 5.2 AgentRPCServer
 
@@ -661,7 +661,7 @@ This is the orchestrator-level abstraction for sandbox lifecycle. It is separate
 | **Purpose** | Provision and manage sandbox instances | Execute tools within a sandbox |
 | **Who calls it** | Orchestrator / RuntimeController | Agent's NativeDriver |
 | **Lifecycle** | CreateSandbox, DestroySandbox, PauseSandbox, ResumeSandbox | Create, Destroy, Pause, Resume (within a session) |
-| **Unique capability** | LaunchProcess (deploy agent-server into sandbox) | ExecuteTool, TurnComplete, Snapshots |
+| **Unique capability** | LaunchProcess (deploy `flexagent serve agent` into sandbox) | ExecuteTool, TurnComplete, Snapshots |
 
 **How they coordinate:** `SandboxControl.CreateSandbox()` provisions a new sandbox and returns its ID and address. The orchestrator then passes this information (sandbox ID, sandbox-host address) to `CreateAgentSessionRequest.ToolEnvironment` so the agent loop can construct an `ExecutionEnvironment` pointing at the already-provisioned sandbox. They never both manage the same sandbox simultaneously -- SandboxControl hands off to ExecutionEnvironment.
 
@@ -696,7 +696,7 @@ type SandboxControl interface {
     // Process monitoring: The sandbox-host tracks PID and exit status.
     // If the process exits unexpectedly, the sandbox remains alive (not
     // automatically destroyed). The orchestrator detects the failure via
-    // connection loss to the agent-server and recovers via ResumeSession.
+    // connection loss to the agent process and recovers via ResumeSession.
     LaunchProcess(ctx context.Context, req LaunchProcessRequest) (*LaunchProcessResponse, error)
 
     // KillProcess terminates a previously launched process.
@@ -835,20 +835,26 @@ Stub interfaces for Batch 6. Not implemented in this plan:
 
 ## 7. Agent Loop Server Binary
 
+All server functionality is provided by the unified `flexagent` binary at `cmd/flexagent/main.go`, which uses subcommands under `flexagent serve` to run different server roles:
+
+- `flexagent serve agent` -- runs the agent loop server
+- `flexagent serve orchestrator` -- runs the orchestrator (future)
+- `flexagent serve sandbox-host` -- runs the sandbox-host service (migrated from `cmd/sandbox-host`)
+- `flexagent serve all` -- runs all services in a single process (convenience for local dev)
+
 ### 7.1 Standalone Mode
 
 ```go
-// cmd/agent-server/main.go (or a subcommand of an existing binary)
+// cmd/flexagent/main.go -- unified binary with subcommands
 
-func main() {
-    // Parse flags: --addr, --sandbox-host, --root-dir, --max-sessions, etc.
-    // Read API keys from environment variables (ANTHROPIC_API_KEY, etc.)
-    // Create AgentLoopService with WithMaxSessions
-    // Create AgentRPCServer wrapping the service
-    // Register procedures on transport.Server
-    // Set up graceful shutdown handler (see 7.4)
-    // ListenAndServe
-}
+// The "flexagent serve agent" subcommand:
+//   Parse flags: --addr, --sandbox-host, --root-dir, --max-sessions, etc.
+//   Read API keys from environment variables (ANTHROPIC_API_KEY, etc.)
+//   Create AgentLoopService with WithMaxSessions
+//   Create AgentRPCServer wrapping the service
+//   Register procedures on transport.Server
+//   Set up graceful shutdown handler (see 7.4)
+//   ListenAndServe
 ```
 
 ### 7.2 Embedded Mode
@@ -865,24 +871,24 @@ agentService := agent.NewAgentLoopService(publisher, agent.WithMaxSessions(10))
 
 When the sandbox-host launches the agent loop inside a sandbox via `LaunchProcess`:
 
-1. Sandbox-host starts the `agent-server` binary inside the sandbox (gVisor container or directly)
+1. Sandbox-host starts `flexagent serve agent` inside the sandbox (gVisor container or directly)
 2. API keys are injected via `LaunchProcessRequest.Env` -- never transmitted over AgentService RPC
-3. The binary listens on a configured port
+3. The process listens on a configured port
 4. Sandbox-host proxies that port (or returns the container's network address)
 5. Orchestrator connects to the returned address via `AgentServiceClient`
 
-The agent-server binary runs tools locally within the sandbox (using `LocalEnvironment`). From its perspective, it's just Mode 1 -- all local. The sandbox boundary is invisible to it.
+The `flexagent serve agent` process runs tools locally within the sandbox (using `LocalEnvironment`). From its perspective, it's just Mode 1 -- all local. The sandbox boundary is invisible to it.
 
 ### 7.4 Graceful Shutdown
 
-When the agent-server receives SIGTERM or SIGINT:
+When the `flexagent serve agent` process receives SIGTERM or SIGINT:
 
 1. **Stop accepting new sessions:** Set service to draining mode (new `CreateSession`/`ResumeSession` calls return `CodeUnavailable`)
 2. **Notify subscribers:** Emit `EventSessionEnded` with reason "server_shutdown" to all active event streams
 3. **Drain period:** Wait up to 30 seconds (configurable via `--shutdown-timeout`) for in-flight turns to complete naturally
 4. **Force shutdown:** After the drain deadline, cancel all remaining session contexts, close all event streams with EOF, and exit
 
-For sandbox-launched mode, the sandbox-host may kill the process at any time (SIGKILL). The orchestrator handles this via crash recovery (section 10.1) -- it detects connection loss and calls `ResumeSession` on a new agent-server.
+For sandbox-launched mode, the sandbox-host may kill the process at any time (SIGKILL). The orchestrator handles this via crash recovery (section 10.1) -- it detects connection loss and calls `ResumeSession` on a new `flexagent serve agent` instance.
 
 ---
 
@@ -894,7 +900,7 @@ No discovery needed. Direct Go function calls.
 
 ### 8.2 Standalone Process
 
-Operator configures the address. The orchestrator is told where agent-server is running (flag, config file, service discovery).
+Operator configures the address. The orchestrator is told where `flexagent serve agent` is running (flag, config file, service discovery).
 
 ### 8.3 Launched Inside Sandbox
 
@@ -959,13 +965,13 @@ sequenceDiagram
     SH-->>SC: sandboxID, capabilities
     SC-->>O: sandboxID, address
 
-    O->>SC: LaunchProcess(sandboxID, "agent-server", args, env={API_KEY=...})
+    O->>SC: LaunchProcess(sandboxID, "flexagent", ["serve","agent"], env={API_KEY=...})
     SC->>SH: LaunchProcess(sandboxID, ...)
-    Note over SH: Starts agent-server in sandbox,<br/>proxies port, injects env vars
+    Note over SH: Starts flexagent serve agent in sandbox,<br/>proxies port, injects env vars
     SH-->>SC: processID, address
     SC-->>O: address (e.g. sandbox-host:9100)
 
-    Note over O: Connect to launched agent-server
+    Note over O: Connect to launched flexagent serve agent
     O->>ALS: RPC CreateSession(tools=local)
     ALS->>A: Create Agent (tools run locally in sandbox)
     A-->>ALS: ready
@@ -986,13 +992,13 @@ sequenceDiagram
 
 The agent loop server is **ephemeral** (holds in-memory session state but does not persist to disk). The **orchestrator** is the durable state owner, persisting the conversation log in SQLite. This clean separation enables powerful capabilities:
 
-- **Crash recovery:** Agent-server crashes -> orchestrator sends conversation log to a new agent-server via `ResumeSession`
+- **Crash recovery:** Agent process crashes -> orchestrator sends conversation log to a new `flexagent serve agent` instance via `ResumeSession`
 - **Session forking:** Orchestrator copies conversation log at turn N -> creates N new sessions with the same log but different follow-up prompts
 - **Cross-agent migration:** Conversation from one agent type (e.g., our native loop) resumed on a different agent type (e.g., Claude Code via termmux)
 
 The agent loop server never persists conversation state to disk. If it crashes, the session is gone from its perspective. The orchestrator is the recovery mechanism.
 
-**Mid-turn crash behavior:** If the agent-server crashes while a tool is executing, the tool's side effects (file writes, bash commands) may have partially completed. `ResumeSession` replays the conversation log but does NOT replay or undo partial tool effects. The orchestrator handles this at the application level:
+**Mid-turn crash behavior:** If the agent process crashes while a tool is executing, the tool's side effects (file writes, bash commands) may have partially completed. `ResumeSession` replays the conversation log but does NOT replay or undo partial tool effects. The orchestrator handles this at the application level:
 - For sandbox-backed agents: ZFS snapshots taken at turn boundaries provide the rollback mechanism. The orchestrator can roll back to the last snapshot before resuming.
 - For local agents: Partial tool effects are not rolled back. The resumed agent sees the filesystem as-is and must handle any inconsistency (this is the same behavior as a human interrupting a coding agent mid-edit).
 
@@ -1116,7 +1122,7 @@ The orchestrator persists conversation state by subscribing to the agent's event
 - `EventToolCompleted` -- tool result -> orchestrator persists it
 - `EventTurnCompleted` -- turn boundary marker
 
-The orchestrator subscribes via `SubscribeEvents` (persistent stream) and writes each completed message to SQLite as it arrives. This means the orchestrator's copy of the conversation is always up-to-date, even if the agent-server crashes mid-turn (the orchestrator has everything up to the last completed message).
+The orchestrator subscribes via `SubscribeEvents` (persistent stream) and writes each completed message to SQLite as it arrives. This means the orchestrator's copy of the conversation is always up-to-date, even if the agent process crashes mid-turn (the orchestrator has everything up to the last completed message).
 
 **Relationship to existing AgentEventService:** `AgentService.SubscribeEvents` delegates internally to the existing `AgentEventService` infrastructure (`internal/rpc/server/event_server.go`). It is not a separate event system -- it is the per-session entry point to the same fan-out event bus. The existing `AgentEventService.StreamAgentEvents` RPC remains available as a lower-level entry point for direct subscribers who are not going through `AgentService`.
 
@@ -1144,7 +1150,7 @@ This view powers:
 - Native Claude Code terminal rendering (xterm.js in web UI, or passthrough in TUI)
 - Interactive terminal access (send keystrokes, Ctrl+C, etc.)
 
-**Terminal access routing:** The `AgentService` interface does NOT include a `StreamTerminal` method. Terminal streaming for termmux-backed sessions uses the existing `TerminalService` interface directly. The orchestrator maintains the mapping between agent session IDs and terminal session IDs, and connects to `TerminalService` on the appropriate sandbox-host or agent-server for terminal access. If the agent-server needs to expose terminal streaming, it registers the existing `TerminalService` procedures on its HTTP handler alongside the AgentService procedures -- no new interface needed.
+**Terminal access routing:** The `AgentService` interface does NOT include a `StreamTerminal` method. Terminal streaming for termmux-backed sessions uses the existing `TerminalService` interface directly. The orchestrator maintains the mapping between agent session IDs and terminal session IDs, and connects to `TerminalService` on the appropriate sandbox-host or agent server for terminal access. If the agent server needs to expose terminal streaming, it registers the existing `TerminalService` procedures on its HTTP handler alongside the AgentService procedures -- no new interface needed.
 
 ### 12.3 Orchestrator Relay
 
@@ -1233,8 +1239,8 @@ internal/
         native_test.go
 
 cmd/
-  agent-server/
-    main.go             # Standalone agent loop server binary
+  flexagent/
+    main.go             # Unified binary with subcommands (serve agent, serve orchestrator, serve sandbox-host, serve all)
 ```
 
 ---
@@ -1325,10 +1331,10 @@ cmd/
 8. **Refactor transport.Server + register agent procedures** (`internal/rpc/transport/server.go`) -- Refactor `NewServer` to use functional options (see section 5.1 prerequisite). Update existing sandbox-host callers. Register agent procedures conditionally. This is a change to the plan 13 (RPC layer) codebase.
 9. **AgentServiceClient** (`internal/rpc/client/agent_client.go`) -- ConnectRPC client
 10. **Integration tests** -- in-process and remote round-trip
-11. **cmd/agent-server binary** with graceful shutdown
+11. **`flexagent serve agent` subcommand** (`cmd/flexagent/`) with graceful shutdown. The existing `cmd/sandbox-host` migrates to `flexagent serve sandbox-host`.
 12. **SandboxControl interface** (`internal/sandbox/control/control.go`)
 13. **NativeSandboxControl** with mock sandbox-host for testing. **Note:** Steps 12-13 are blocked for LaunchProcess/KillProcess/GetProcessStatus implementation until the `11-sandbox-host-service.add03` addendum is created and the corresponding sandbox-host RPC endpoint is implemented. CreateSandbox, DestroySandbox, PauseSandbox, and ResumeSandbox can proceed immediately as they wrap existing sandbox-host RPCs. Use a mock sandbox-host for LaunchProcess testing.
-14. **End-to-end test** -- orchestrator -> agent-server -> sandbox-host
+14. **End-to-end test** -- orchestrator -> `flexagent serve agent` -> sandbox-host
 
 ---
 
@@ -1340,7 +1346,7 @@ cmd/
 |------|--------|--------|
 | `internal/rpc/transport/server.go` | Refactor to functional options (change to plan 13) + add agent service procedures | Constructor signature change, conditional handler registration |
 | `internal/rpc/errors.go` | Add agent error -> ConnectRPC code mappings | Extended existing `MapError` function |
-| `cmd/sandbox-host` | Add LaunchProcess RPC endpoint (specified in section 6; standalone plan `11-sandbox-host-service.add03` to be extracted) | New capability on existing binary |
+| `flexagent serve sandbox-host` (migrated from `cmd/sandbox-host`) | Add LaunchProcess RPC endpoint (specified in section 6; standalone plan `11-sandbox-host-service.add03` to be extracted) | New capability on existing subcommand |
 
 ### 16.2 New Seams
 
@@ -1366,10 +1372,10 @@ cmd/
 ### 16.4 Import Flow
 
 ```
-cmd/agent-server -> internal/agent (AgentLoopService)
-                  -> internal/agent/api (AgentService interface, types)
-                  -> internal/rpc/transport (Server)
-                  -> internal/rpc/server (AgentRPCServer)
+cmd/flexagent (serve agent) -> internal/agent (AgentLoopService)
+                            -> internal/agent/api (AgentService interface, types)
+                            -> internal/rpc/transport (Server)
+                            -> internal/rpc/server (AgentRPCServer)
 
 internal/agent/api          -> internal/agent (AgentMessage, AgentEvent, SessionMetrics -- types only)
                             -> internal/termmux/driver (ConversationEntry -- for termmux_codec.go only)
@@ -1403,13 +1409,13 @@ internal/sandbox/control/native  -> internal/rpc/api (SandboxService)
 
 ## 17. Resolved Open Questions
 
-1. **Agent-server binary vs subcommand**: Separate binary in `cmd/agent-server/`. Simpler deployment, clear process boundary, easier to launch in sandboxes.
+1. **Agent-server binary vs subcommand**: Unified `flexagent` binary in `cmd/flexagent/` with subcommands (`flexagent serve agent`, `flexagent serve orchestrator`, `flexagent serve sandbox-host`, `flexagent serve all`). Single binary simplifies deployment and distribution -- one artifact to build and ship into sandboxes. The existing `cmd/sandbox-host` migrates into `flexagent serve sandbox-host`.
 
 2. **Port proxying on sandbox-host**: Sandbox-host allocates a dynamic port on its own address and sets up a TCP reverse proxy to the container's exposed port. For non-gVisor mode, the process runs directly on the host and listens on a port -- no proxying needed. The LaunchProcess specification lives in section 6 of this plan; a standalone addendum (`11-sandbox-host-service.add03`) should be extracted before NativeSandboxControl implementation (see Follow-up Work section).
 
 3. **~~API key handling~~**: Resolved. API keys are injected via environment variables, never transmitted over the AgentService RPC. For sandbox-launched mode, keys are passed through `LaunchProcessRequest.Env`. For standalone mode, keys come from standard environment variables. The `APIKey` field has been removed from `SessionConfig`.
 
-4. **~~Session recovery after agent-server restart~~**: Resolved -- the orchestrator owns conversation state (section 10). Agent-server is ephemeral. On crash, orchestrator calls `ResumeSession` with the persisted conversation log on a new agent-server instance.
+4. **~~Session recovery after agent process restart~~**: Resolved -- the orchestrator owns conversation state (section 10). The agent process is ephemeral. On crash, orchestrator calls `ResumeSession` with the persisted conversation log on a new `flexagent serve agent` instance.
 
 ---
 
@@ -1421,7 +1427,7 @@ Reviews incorporated: `18-agent-loop-rpc-review-r1-a.md` (Reviewer A), `18-agent
 |---|---------|----------|----------|-------------|-------|
 | F1 | Circular import: AgentService in `internal/rpc/api` | A | P0 | **Incorporated** | Moved AgentService to new `internal/agent/api` package. Added `EventPublisher` interface to avoid reverse import. See sections 3, 4, 13, 16.4. |
 | P0 | SandboxControl conflicts with ExecutionEnvironment | B | P0 | **Incorporated** | Clarified complementary roles (orchestrator vs agent level). SandboxCapabilities now embeds `environment.Capabilities`. Added coordination table. See section 6. |
-| F2 | Missing Close/shutdown on AgentLoopService | A | P0 | **Incorporated** | Added `Close()` method with drain logic. Added graceful shutdown for agent-server binary. See sections 3, 4, 7.4. |
+| F2 | Missing Close/shutdown on AgentLoopService | A | P0 | **Incorporated** | Added `Close()` method with drain logic. Added graceful shutdown for `flexagent serve agent`. See sections 3, 4, 7.4. |
 | F3 | APIKey transmitted in plain struct over RPC | A | P0 | **Incorporated** | Removed `APIKey` from `SessionConfig`. Keys injected via env vars. See sections 3.1, 7.3, 17. |
 | F4 | Duplicate SessionMetrics type | A | P1 | **Incorporated** | Use `agent.SessionMetrics` directly. Wire-format codec handles serialization. See section 3.1 note. |
 | F5 | AgentMessageRecord to ai.Message conversion unspecified | A | P1 | **Incorporated** | Added section 3.3 with JSON schema per role, codec functions, and lossy conversion documentation. |
@@ -1442,7 +1448,7 @@ Reviews incorporated: `18-agent-loop-rpc-review-r1-a.md` (Reviewer A), `18-agent
 | P2-impl-order | Implementation ordering has dependency violation | B | P2 | **Incorporated** | Updated dependency header to include 11.add02. NativeSandboxControl uses mock for testing. Reordered steps. See section 15. |
 | P2-APIKey | APIKey security concern with no mitigation | B | P2 | **Incorporated** | Resolved via env var injection (see F3 above). |
 | P2-event-overlap | SubscribeEvents and SendMessage overlap underspecified | B | P2 | **Incorporated** | Documented dual delivery model in sections 3, 3.2. |
-| P2-shutdown | No graceful shutdown protocol for agent-server | B | P2 | **Incorporated** | Added section 7.4 with drain period, event delivery, and deadline behavior. |
+| P2-shutdown | No graceful shutdown protocol for agent server | B | P2 | **Incorporated** | Added section 7.4 with drain period, event delivery, and deadline behavior. |
 | F14 | ResourceSpec undefined in SandboxControl | A | P2 | **Incorporated (R2)** | Originally acknowledged. R2 review identified the cross-layer import issue. Now defines local `ResourceSpec` in `internal/sandbox/control`. See section 6 and R2 disposition. |
 | F15 | No idempotency for CreateSession/ResumeSession | A | P2 | **Incorporated** | Specified: duplicate session ID returns error. See sections 3, 4. |
 | F16 | Missing ListSessions method | A | P2 | **Incorporated** | Added `ListSessions` to AgentService interface. See section 3. |
@@ -1502,7 +1508,7 @@ Review incorporated: `18-agent-loop-rpc-seam-review.md` (automated seam review).
 
 | # | Finding | Seam | Severity | Disposition | Notes |
 |---|---------|------|----------|-------------|-------|
-| F13 | transport.Server constructor requires all services upfront; Handler() unconditionally registers all sandbox procedures. Agent-server binary needs AgentService without SandboxService. | Agent-server <-> transport.Server | P0 | **Incorporated** | Documented transport.Server refactoring to functional options as a prerequisite in section 5.1. Updated implementation step 8 to include the refactoring (change to plan 13). Updated Modified Seams table. See sections 5.1, 15, 16.1. |
+| F13 | transport.Server constructor requires all services upfront; Handler() unconditionally registers all sandbox procedures. `flexagent serve agent` mode needs AgentService without SandboxService. | `flexagent serve agent` <-> transport.Server | P0 | **Incorporated** | Documented transport.Server refactoring to functional options as a prerequisite in section 5.1. Updated implementation step 8 to include the refactoring (change to plan 13). Updated Modified Seams table. See sections 5.1, 15, 16.1. |
 | F1 | Agent.Start vs Agent.Prompt asymmetry creates fragile `started` flag branching; partial Start() failure could desync the flag. | AgentService <-> Agent | P1 | **Incorporated** | Documented that if `Start()` returns an error, `started` stays false and the next `SendMessage` retries `Start()`. Made this explicit in section 4 SendMessage flow step 4. |
 | F4 | EventReceiver error contract underspecified -- adapter must handle io.EOF vs ErrStreamClosed vs other errors correctly. | AgentService <-> RPC | P1 | **Incorporated** | Defined full error contract in the `EventReceiver` interface comment: (event, nil) for events, (nil, io.EOF) for normal end, (nil, err) for abnormal termination. Specified RPC adapter mapping. See section 3. |
 | F6 | SandboxCapabilities embedding environment.Capabilities creates semantic confusion -- same field names mean different things at different layers. | SandboxControl <-> ExecutionEnvironment | P1 | **Incorporated** | Replaced embedding with explicit fields. `SandboxCapabilities` now has its own fields (`Snapshots`, `Rollback`, `Pause`, `LaunchProcess`, `DeepPause`, `ConcurrentSandboxes`, `MaxSandboxDuration`). No embedding of `environment.Capabilities`. Orchestrator maps between the two when needed. See section 6. |
