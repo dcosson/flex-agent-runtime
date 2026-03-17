@@ -2,7 +2,6 @@ package agentrpc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -96,7 +95,6 @@ func TestE2E_OrchestratorAgentSandbox(t *testing.T) {
 		control.AddressToURL(address),
 		transport.ClientConfig{APIVersion: "v1"},
 	)
-	waitAgentReady(t, ctx, agentClient)
 
 	provider, model := pickAnyModel(t)
 	sessionID := "e2e-main"
@@ -176,7 +174,6 @@ func TestE2E_OrchestratorAgentSandbox(t *testing.T) {
 		control.AddressToURL(replacementAddr),
 		transport.ClientConfig{APIVersion: "v1"},
 	)
-	waitAgentReady(t, ctx, replacement)
 
 	_, err = replacement.ResumeSession(ctx, &agentapi.ResumeSessionRequest{
 		SessionConfig: agentapi.SessionConfig{
@@ -234,33 +231,61 @@ func launchHelperProcess(t *testing.T, ctx context.Context, ctrl control.Sandbox
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
 	}
-	port := reservePort(t)
-	launch, err := ctrl.LaunchProcess(ctx, control.LaunchProcessRequest{
-		SandboxID:  sandboxID,
-		Binary:     bin,
-		Args:       []string{"-test.run", "TestAgentRPCServeAgentHelperProcess", "--", "-listen", ":" + strconv.Itoa(port)},
-		Env:        map[string]string{helperProcessEnv: "1"},
-		ExposePort: port,
-	})
-	if err != nil {
-		t.Fatalf("LaunchProcess: %v", err)
+	const maxAttempts = 4
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// Reserve+bind is inherently TOCTOU. Mitigate flake risk by retrying with a
+		// fresh port when the helper cannot come up quickly on the selected port.
+		port := reservePort(t)
+		launch, launchErr := ctrl.LaunchProcess(ctx, control.LaunchProcessRequest{
+			SandboxID:  sandboxID,
+			Binary:     bin,
+			Args:       []string{"-test.run", "TestAgentRPCServeAgentHelperProcess", "--", "-listen", ":" + strconv.Itoa(port)},
+			Env:        map[string]string{helperProcessEnv: "1"},
+			ExposePort: port,
+		})
+		if launchErr != nil {
+			lastErr = launchErr
+			continue
+		}
+		if launch.ProcessID == "" || launch.Address == "" {
+			lastErr = fmt.Errorf("invalid launch response: %+v", launch)
+			continue
+		}
+		client := rpcclient.NewAgentServiceClient(
+			&http.Client{Timeout: 2 * time.Second},
+			control.AddressToURL(launch.Address),
+			transport.ClientConfig{APIVersion: "v1"},
+		)
+		readyCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		readyErr := waitAgentReady(readyCtx, client)
+		cancel()
+		if readyErr == nil {
+			return launch.ProcessID, launch.Address
+		}
+		lastErr = readyErr
+		_ = ctrl.KillProcess(context.Background(), control.KillProcessRequest{
+			SandboxID: sandboxID,
+			ProcessID: launch.ProcessID,
+			Signal:    int(syscall.SIGKILL),
+		})
+		_, _ = ctrl.GetProcessStatus(context.Background(), control.GetProcessStatusRequest{
+			SandboxID: sandboxID,
+			ProcessID: launch.ProcessID,
+		})
 	}
-	if launch.ProcessID == "" || launch.Address == "" {
-		t.Fatalf("invalid launch response: %+v", launch)
-	}
-	return launch.ProcessID, launch.Address
+	t.Fatalf("launch helper process failed after %d attempts: %v", maxAttempts, lastErr)
+	return "", ""
 }
 
-func waitAgentReady(t *testing.T, ctx context.Context, c *rpcclient.AgentServiceClient) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+func waitAgentReady(ctx context.Context, c *rpcclient.AgentServiceClient) error {
 	for {
 		_, err := c.ListSessions(ctx, &agentapi.ListAgentSessionsRequest{})
 		if err == nil {
-			return
+			return nil
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("agent service did not become ready: %v", err)
+		if ctx.Err() != nil {
+			return fmt.Errorf("agent service not ready before deadline: %w", err)
 		}
 		time.Sleep(30 * time.Millisecond)
 	}
@@ -419,6 +444,28 @@ func verifyCrossAgentRoundTrip(t *testing.T) {
 	if len(parsed) == 0 {
 		t.Fatalf("expected parsed entries")
 	}
+	if parsed[0].Role != driver.RoleUser {
+		t.Fatalf("first parsed role = %q, want %q", parsed[0].Role, driver.RoleUser)
+	}
+	var hasToolUse, hasToolResult bool
+	for _, entry := range parsed {
+		switch entry.Role {
+		case driver.RoleToolUse:
+			if entry.ToolCall != nil && entry.ToolCall.CallID == "tc-1" && entry.ToolCall.Name == "read_file" {
+				hasToolUse = true
+			}
+		case driver.RoleToolResult:
+			if entry.ToolCall != nil && entry.ToolCall.CallID == "tc-1" && entry.ToolCall.Result != "" {
+				hasToolResult = true
+			}
+		}
+	}
+	if !hasToolUse {
+		t.Fatalf("parsed session log missing tool_use for tc-1/read_file")
+	}
+	if !hasToolResult {
+		t.Fatalf("parsed session log missing tool_result for tc-1")
+	}
 }
 
 func mustRecord(t *testing.T, msg agentapi.AgentMessage) agentapi.AgentMessageRecord {
@@ -440,7 +487,7 @@ func helperListenAddr() string {
 }
 
 func runHelperAgentServer(listenAddr string) error {
-	service := agent.NewAgentLoopService(nil, agent.WithCloseDrainTimeout(5*time.Second))
+	service := agent.NewAgentLoopService(&agenttest.MockEventPublisher{}, agent.WithCloseDrainTimeout(5*time.Second))
 	drivers := agenttest.NewMockDriverFactory()
 	drivers.SetDriver("default", &agenttest.MockAgentDriver{
 		TurnScript: []agent.AgentEvent{
@@ -488,10 +535,5 @@ func TestHelperArgParsing(t *testing.T) {
 	os.Args = []string{"testbin", "-test.run", "X", "--", "-listen", ":12345"}
 	if got := helperListenAddr(); got != ":12345" {
 		t.Fatalf("helperListenAddr() = %q, want :12345", got)
-	}
-	m := map[string]any{"x": 1}
-	b, err := json.Marshal(m)
-	if err != nil || len(b) == 0 {
-		t.Fatalf("json marshal failed: %v", err)
 	}
 }
