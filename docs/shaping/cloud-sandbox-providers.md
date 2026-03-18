@@ -15,7 +15,9 @@ shaping: true
 > adapters for 3rd party cloud sandbox providers so callers can swap sandbox
 > backends without changing agent code.
 >
-> **Providers to evaluate:** E2B, Daytona, Fly.io Machines, and direct EC2.
+> **Providers to evaluate:** E2B, Daytona, Fly.io Machines, and EC2 in two
+> distinct roles: (1) as an infrastructure provisioner for our native sandbox,
+> and (2) as a lightweight non-isolated sandbox for multi-agent collaboration.
 >
 > **Run modes to assess:**
 > - **Tools in Sandbox** — Agent loop runs externally; individual tool calls are
@@ -35,15 +37,19 @@ capability set (instant snapshots, rollback, pause/resume, two-tier execution)
 but requires us to operate our own infrastructure: EC2 instances, ZFS pools,
 gVisor, and the sandbox-host service. Many users and deployment scenarios would
 benefit from delegating sandbox infrastructure to a managed 3rd party provider
-at the cost of reduced capabilities. We need to understand which providers can
-implement which parts of our interfaces, and where the gaps are.
+at the cost of reduced capabilities. Additionally, we need a way to scale the
+native sandbox to multiple machines with automated provisioning, and a simpler
+option for collaborative agent teams that do not require per-agent isolation.
+We need to understand which providers and EC2 usage patterns can implement which
+parts of our interfaces, and where the gaps are.
 
 ## Outcome
 
-A clear capability mapping of four cloud sandbox providers (E2B, Daytona,
-Fly.io Machines, EC2 Direct) against our `ExecutionEnvironment` and
-`SandboxControl` interfaces, with an assessment of which run modes are feasible
-for each provider, what trade-offs each introduces, and a recommendation for
+A clear capability mapping of cloud sandbox providers (E2B, Daytona,
+Fly.io Machines) and two distinct EC2 roles (EC2 as infra provisioner for our
+native sandbox, EC2 as lightweight sandbox) against our `ExecutionEnvironment`
+and `SandboxControl` interfaces, with an assessment of which run modes are
+feasible for each, what trade-offs each introduces, and a recommendation for
 implementation priority.
 
 ---
@@ -163,77 +169,116 @@ API, full VM lifecycle control, suspend/resume, volumes, and global deployment.
 
 ---
 
-### Shape D: EC2 Direct
+### Shape D1: EC2 as Infra Provisioner
 
-[AWS EC2](https://aws.amazon.com/ec2/) instances used directly as sandboxes,
-with EBS for storage, EBS snapshots for point-in-time capture, and SSM or SSH
-for command execution.
+[AWS EC2](https://aws.amazon.com/ec2/) instances used as the underlying
+infrastructure for our native sandbox. In this shape, `SandboxControl.CreateSandbox`
+provisions an EC2 instance, installs and starts the sandbox-host service, then
+delegates all actual sandbox management (ZFS snapshots, gVisor isolation,
+tool execution) to `NativeSandboxControl`. EC2 sits BELOW `SandboxControl` as an
+infrastructure provisioner, not alongside E2B/Daytona/Fly as a sandbox provider.
+This enables scaling our native sandbox — which has the richest feature set — to
+multiple machines.
 
 | Part | Mechanism | Notes |
 |------|-----------|:-----:|
-| **D1: Create/Destroy** | `RunInstances` / `TerminateInstances` API. Full instance lifecycle. Launch from AMI or EBS snapshot. | |
-| **D2: Execute commands** | AWS Systems Manager `SendCommand` with `AWS-RunShellScript`. Alternatively, SSH. No SDK-level command execution — must poll for results via `ListCommandInvocations`. | **Polling-based** |
-| **D3: Streaming output** | SSM does not provide real-time streaming. Must poll `GetCommandInvocation` for output after completion. SSH can stream but requires managing connections. | **No native streaming** |
-| **D4: Filesystem persistence** | EBS volumes persist across instance stop/start. Instance store volumes do not survive stop. | |
-| **D5: Snapshots** | EBS snapshots via `CreateSnapshot`. Incremental, stored in S3. Creation takes seconds to minutes depending on volume size and change delta. Lazy-loading on restore causes I/O latency (solvable with Fast Snapshot Restore at extra cost). | **Slow (seconds-minutes)** |
-| **D6: Rollback** | Create new EBS volume from snapshot, detach old, attach new, or launch new instance from snapshot. Not in-place. Multi-step process taking 30s-minutes. | **Slow** |
-| **D7: Pause/Resume** | `StopInstances` / `StartInstances`. EBS-backed instances preserve EBS volumes. Memory state is NOT preserved. Running processes are killed. Restart takes 10-90s depending on instance type and AMI. | **Lossy, slow** |
-| **D8: Long-running process** | Run any process on the instance. Full OS control. | |
-| **D9: Expose ports** | Security groups control inbound/outbound. Elastic IPs or instance public IPs. Full port control. | |
-| **D10: Network access** | Full outbound by default (configurable via security groups and NACLs). VPC networking. | |
-| **D11: Resource limits** | Fixed per instance type at launch. Cannot resize without stop/start and instance type change. Hundreds of instance types from t3.nano (2 vCPU/0.5GB) to metal instances. | **Fixed at launch** |
-| **D12: Max lifetime** | No limit. Instances run until terminated. | |
-| **D13: Cold start** | New instance launch: 10-90s. Restart stopped instance: 10-30s. | **Slow** |
-| **D14: Cost** | Per-second billing (Linux). t3.medium ~$0.042/hr. m6i.xlarge ~$0.192/hr. Stopped instances: EBS storage cost only ($0.08/GB/month gp3). | |
+| **D1-1: Create/Destroy** | `RunInstances` / `TerminateInstances` provisions the underlying EC2 instance. Instance is set up with ZFS + gVisor + sandbox-host via user data or AMI. Once sandbox-host is running, `NativeSandboxControl` handles sandbox creation on the instance. | **Provisioning layer** |
+| **D1-2: Execute commands** | Delegated to `NativeSandboxEnvironment` via sandbox-host RPC once the instance is running. Full native command execution with streaming. | **Via native sandbox** |
+| **D1-3: Streaming output** | Delegated to native sandbox. Full gRPC streaming via sandbox-host. | **Via native sandbox** |
+| **D1-4: Filesystem persistence** | ZFS datasets on EBS. Full persistence managed by native sandbox. | **Via native sandbox** |
+| **D1-5: Snapshots** | ZFS snapshots via native sandbox. Instant, in-place. | **Via native sandbox** |
+| **D1-6: Rollback** | `zfs rollback` via native sandbox. Instant, in-place. | **Via native sandbox** |
+| **D1-7: Pause/Resume** | Sandbox-level pause/resume managed by native sandbox (gVisor container pause). Instance-level stop/start possible for cost savings but slower (10-30s restart, sandbox-host must re-initialize). | **Full via native sandbox** |
+| **D1-8: Long-running process** | Full support via native sandbox's `LaunchProcess`. | **Via native sandbox** |
+| **D1-9: Expose ports** | Security groups + native sandbox port forwarding. | **Via native sandbox** |
+| **D1-10: Network access** | Full outbound via VPC. Sandbox network policy managed by gVisor. | **Via native sandbox** |
+| **D1-11: Resource limits** | Instance type determines total resources. Native sandbox manages per-sandbox resource allocation within the instance. | **Two-level** |
+| **D1-12: Max lifetime** | No limit. Instance runs until terminated. | |
+| **D1-13: Cold start** | Instance provisioning: 10-90s (one-time). Subsequent sandbox creation on the running instance: same speed as native sandbox. AMI pre-baking reduces setup time. | **Instance boot is slow, sandbox creation fast** |
+| **D1-14: Cost** | EC2 instance cost (e.g., t3.medium ~$0.042/hr) plus EBS storage. Same cost model as current native sandbox but with automated provisioning. | |
 
 **Run mode assessment:**
 
-- **Tools in Sandbox:** Poor fit for per-tool-call dispatch due to slow cold start. Only viable if the instance stays running for the entire session (no per-call spin-up). SSM command execution is polling-based with no streaming. Would need a custom daemon for real-time tool execution.
-- **Agent in Sandbox:** Good fit if the instance stays running. Run agent binary directly. Full OS control. Slow pause/resume (10-30s restart, no memory preservation). Cost-inefficient during LLM thinking time if instance stays running.
-- **All in Sandbox:** Same as Agent in Sandbox.
+- **Tools in Sandbox:** Excellent. Once the instance is provisioned and sandbox-host is running, all capabilities are identical to the native sandbox — the richest feature set of any option. Instant ZFS snapshots, gVisor isolation, native streaming.
+- **Agent in Sandbox:** Excellent. Full native sandbox capabilities including long-running processes, port exposure, and no lifetime limits.
+- **All in Sandbox:** Excellent. Full native sandbox capabilities.
+
+---
+
+### Shape D2: EC2 as Lightweight Sandbox
+
+[AWS EC2](https://aws.amazon.com/ec2/) instances used directly as non-isolated
+execution environments. Multiple agents share one instance without separate
+sandboxes. Good for collaborative agent teams that do not need isolation — like
+running `flexagent serve all` for N agents sharing a filesystem. Sits alongside
+E2B/Daytona/Fly as a simpler, lower-isolation option.
+
+| Part | Mechanism | Notes |
+|------|-----------|:-----:|
+| **D2-1: Create/Destroy** | `RunInstances` / `TerminateInstances` API. Launch from AMI. The instance IS the sandbox — no additional isolation layer. | **No isolation** |
+| **D2-2: Execute commands** | SSH or a lightweight daemon running on the instance. Multiple agents execute commands on the same OS. No per-agent isolation. | **Shared execution** |
+| **D2-3: Streaming output** | SSH can stream. A custom daemon can provide gRPC/HTTP streaming. SSM polling is also available but inferior. | **Custom daemon or SSH** |
+| **D2-4: Filesystem persistence** | EBS volumes persist across instance stop/start. All agents share the same filesystem. | **Shared filesystem** |
+| **D2-5: Snapshots** | EBS snapshots via `CreateSnapshot`. Incremental, stored in S3. Seconds to minutes depending on volume size. Captures the entire shared filesystem — no per-agent granularity. | **Slow, no per-agent granularity** |
+| **D2-6: Rollback** | Create new EBS volume from snapshot, detach old, attach new. Not in-place. Multi-step process (30s-minutes). Rolls back ALL agents' state, not individual. | **Slow, all-or-nothing** |
+| **D2-7: Pause/Resume** | `StopInstances` / `StartInstances`. EBS preserved. Memory state NOT preserved. Running processes killed. Restart 10-30s. | **Lossy, slow** |
+| **D2-8: Long-running process** | Run any process on the instance. Full OS control. Multiple agent processes coexist. | |
+| **D2-9: Expose ports** | Security groups control inbound/outbound. Elastic IPs or instance public IPs. Full port control. | |
+| **D2-10: Network access** | Full outbound by default (configurable via security groups and NACLs). VPC networking. | |
+| **D2-11: Resource limits** | Fixed per instance type at launch. Resources shared across all agents on the instance. No per-agent enforcement without OS-level cgroups. | **Shared, fixed at launch** |
+| **D2-12: Max lifetime** | No limit. Instances run until terminated. | |
+| **D2-13: Cold start** | New instance launch: 10-90s. Restart stopped instance: 10-30s. | **Slow** |
+| **D2-14: Cost** | Per-second billing (Linux). Cost shared across all agents on the instance. t3.medium ~$0.042/hr. Stopped instances: EBS storage cost only ($0.08/GB/month gp3). | **Cost-efficient when shared** |
+
+**Run mode assessment:**
+
+- **Agent in Sandbox (multi-agent, no isolation):** Best fit. Multiple agents share one instance, each running as a process. Like running `flexagent serve all` for N agents on a shared filesystem. No per-agent isolation, but simple and cost-efficient for collaborative teams.
+- **Tools in Sandbox:** Works but without per-tool isolation. All tool calls execute on the same OS with the same filesystem. Snapshots and rollback affect all agents, not individual ones.
+- **All in Sandbox:** Works for single-agent or collaborative multi-agent. Not suitable when isolation between agents or tools is needed.
 
 ---
 
 ## Capability Comparison Table
 
-| Capability | A: E2B | B: Daytona | C: Fly.io | D: EC2 Direct |
-|------------|--------|------------|-----------|----------------|
-| **Create/Destroy** | Native API, ~80-200ms | Native API, ~27-90ms | Native API, ~1-3s | AWS API, ~10-90s |
-| **Execute commands** | `commands.run()` | `process.exec()` | SSH or custom daemon | SSM RunCommand or SSH |
-| **Streaming output** | gRPC callbacks | SDK callbacks | Custom only | No native streaming |
-| **FS persistence** | Full (within session) | Full (within session) | Root FS + Volumes | EBS volumes |
-| **Snapshot** | Full VM state (fs+memory+procs) | Checkpoints (fs + config) | Volume snapshots (daily auto, on-demand) | EBS snapshots (seconds-minutes) |
-| **Rollback** | New sandbox from snapshot (~200ms) | Checkpoint restore | New volume from snapshot (minutes) | New volume from snapshot (minutes) |
-| **Pause/Resume** | Full state preservation | Lossy (filesystem only) | Full state (Firecracker snapshot) | Lossy (filesystem only), 10-30s restart |
-| **Long-running process** | Background commands, 24h max | Background sessions, auto-stop risk | Machine IS the process, no limit | Full OS, no limit |
-| **Expose ports** | `getHost(port)`, public URL | Per-sandbox firewall | Fly proxy, anycast | Security groups, EIPs |
-| **Network access** | Outbound by default | Full stack, firewall configurable | Full outbound, WireGuard | Full, VPC configurable |
-| **Resource limits** | 1-8 vCPU, 512M-8G RAM | 1-4 vCPU, 1-8G RAM, 3-10G disk | Flexible presets, up to 16x/128G | Fixed per instance type |
-| **Max lifetime** | 24h (Pro) | No hard max | No limit | No limit |
-| **Cold start** | 80-200ms | 27-90ms | 1-3s (cold), ~hundreds ms (resume) | 10-90s |
-| **Cost model** | $0.05/hr/vCPU, per-second | $0.067/hr (1vCPU/1G), per-second | Per-second, presets | Per-second, instance type |
-| **Tools in Sandbox** | Excellent | Good (lossy pause) | Requires custom daemon | Poor (slow, no streaming) |
-| **Agent in Sandbox** | Good (24h limit) | Feasible (auto-stop risk) | Excellent | Good (cost-inefficient) |
+| Capability | A: E2B | B: Daytona | C: Fly.io | D1: EC2 Infra Provisioner | D2: EC2 Lightweight Sandbox |
+|------------|--------|------------|-----------|---------------------------|------------------------------|
+| **Create/Destroy** | Native API, ~80-200ms | Native API, ~27-90ms | Native API, ~1-3s | EC2 boot 10-90s, then native sandbox | AWS API, ~10-90s |
+| **Execute commands** | `commands.run()` | `process.exec()` | SSH or custom daemon | Via native sandbox (full) | SSH or custom daemon |
+| **Streaming output** | gRPC callbacks | SDK callbacks | Custom only | Via native sandbox (gRPC) | Custom daemon or SSH |
+| **FS persistence** | Full (within session) | Full (within session) | Root FS + Volumes | ZFS on EBS (via native sandbox) | EBS volumes (shared) |
+| **Snapshot** | Full VM state (fs+memory+procs) | Checkpoints (fs + config) | Volume snapshots (daily auto, on-demand) | ZFS snapshots (instant, via native sandbox) | EBS snapshots (seconds-minutes) |
+| **Rollback** | New sandbox from snapshot (~200ms) | Checkpoint restore | New volume from snapshot (minutes) | `zfs rollback` (instant, via native sandbox) | New volume from snapshot (minutes) |
+| **Pause/Resume** | Full state preservation | Lossy (filesystem only) | Full state (Firecracker snapshot) | gVisor container pause (via native sandbox) | Lossy (filesystem only), 10-30s restart |
+| **Long-running process** | Background commands, 24h max | Background sessions, auto-stop risk | Machine IS the process, no limit | Via native sandbox, no limit | Full OS, no limit |
+| **Expose ports** | `getHost(port)`, public URL | Per-sandbox firewall | Fly proxy, anycast | Security groups + native sandbox | Security groups, EIPs |
+| **Network access** | Outbound by default | Full stack, firewall configurable | Full outbound, WireGuard | Full, VPC + gVisor policy | Full, VPC configurable |
+| **Resource limits** | 1-8 vCPU, 512M-8G RAM | 1-4 vCPU, 1-8G RAM, 3-10G disk | Flexible presets, up to 16x/128G | Instance type (total) + native sandbox (per-sandbox) | Shared, fixed per instance type |
+| **Max lifetime** | 24h (Pro) | No hard max | No limit | No limit | No limit |
+| **Cold start** | 80-200ms | 27-90ms | 1-3s (cold), ~hundreds ms (resume) | 10-90s (instance), fast (sandbox) | 10-90s |
+| **Cost model** | $0.05/hr/vCPU, per-second | $0.067/hr (1vCPU/1G), per-second | Per-second, presets | Per-second, instance type | Per-second, shared across agents |
+| **Isolation** | Per-sandbox (Firecracker) | Per-sandbox (OCI) | Per-Machine (Firecracker) | Per-sandbox (gVisor, via native sandbox) | None (shared OS) |
+| **Tools in Sandbox** | Excellent | Good (lossy pause) | Requires custom daemon | Excellent (via native sandbox) | Works (no per-tool isolation) |
+| **Agent in Sandbox** | Good (24h limit) | Feasible (auto-stop risk) | Excellent | Excellent (via native sandbox) | Best fit (multi-agent, no isolation) |
 
 ---
 
-## Fit Check: R x {A, B, C, D}
+## Fit Check: R x {A, B, C, D1, D2}
 
-| Req | Requirement | A: E2B | B: Daytona | C: Fly.io | D: EC2 |
-|-----|-------------|--------|------------|-----------|--------|
-| R0 | Create/Destroy sandbox | Yes | Yes | Yes | Yes |
-| R1 | Execute commands | Yes (native) | Yes (native) | Partial (SSH/custom) | Partial (SSM/SSH) |
-| R2 | Streaming output | Yes (gRPC) | Yes (callbacks) | No (custom needed) | No (polling only) |
-| R3 | FS persistence between tool calls | Yes | Yes | Yes | Yes |
-| R4 | Snapshot/rollback | Yes (spawn new sandbox) | Yes (checkpoints) | Partial (volume-level, slow) | Partial (EBS, slow) |
-| R5 | Pause/Resume with state preservation | Yes (full) | Partial (lossy) | Yes (full) | Partial (lossy, slow) |
-| R6 | Launch long-running process | Yes (24h limit) | Yes (auto-stop risk) | Yes (no limit) | Yes (no limit) |
-| R7 | Expose ports | Yes | Yes | Yes | Yes |
-| R8 | Network access for LLM calls | Yes | Yes | Yes | Yes |
-| R9 | Resource limits | Yes (1-8 vCPU) | Yes (1-4 vCPU) | Yes (flexible) | Yes (fixed at launch) |
-| R10 | Max lifetime for agent sessions | Partial (24h cap) | Yes | Yes | Yes |
-| R11 | Cold start < 5s | Yes (~80-200ms) | Yes (~27-90ms) | Yes (~1-3s) | No (10-90s) |
-| R12 | Cost-efficient at scale | Yes (pause = zero cost) | Yes (stop = disk only) | Yes (suspend = storage only) | Partial (stop = EBS only, slow restart) |
+| Req | Requirement | A: E2B | B: Daytona | C: Fly.io | D1: EC2 Infra Provisioner | D2: EC2 Lightweight Sandbox |
+|-----|-------------|--------|------------|-----------|---------------------------|------------------------------|
+| R0 | Create/Destroy sandbox | Yes | Yes | Yes | Yes (EC2 + native sandbox) | Yes (EC2 instance) |
+| R1 | Execute commands | Yes (native) | Yes (native) | Partial (SSH/custom) | Yes (via native sandbox) | Partial (SSH/custom daemon) |
+| R2 | Streaming output | Yes (gRPC) | Yes (callbacks) | No (custom needed) | Yes (via native sandbox gRPC) | Partial (custom daemon or SSH) |
+| R3 | FS persistence between tool calls | Yes | Yes | Yes | Yes (ZFS) | Yes (shared EBS) |
+| R4 | Snapshot/rollback | Yes (spawn new sandbox) | Yes (checkpoints) | Partial (volume-level, slow) | Yes (ZFS, instant, in-place) | Partial (EBS, slow, all-or-nothing) |
+| R5 | Pause/Resume with state preservation | Yes (full) | Partial (lossy) | Yes (full) | Yes (gVisor container pause) | Partial (lossy, slow) |
+| R6 | Launch long-running process | Yes (24h limit) | Yes (auto-stop risk) | Yes (no limit) | Yes (via native sandbox, no limit) | Yes (no limit) |
+| R7 | Expose ports | Yes | Yes | Yes | Yes | Yes |
+| R8 | Network access for LLM calls | Yes | Yes | Yes | Yes | Yes |
+| R9 | Resource limits | Yes (1-8 vCPU) | Yes (1-4 vCPU) | Yes (flexible) | Yes (instance + per-sandbox) | Partial (shared, fixed at launch) |
+| R10 | Max lifetime for agent sessions | Partial (24h cap) | Yes | Yes | Yes | Yes |
+| R11 | Cold start < 5s | Yes (~80-200ms) | Yes (~27-90ms) | Yes (~1-3s) | Partial (instance boot slow, sandbox creation fast) | No (10-90s) |
+| R12 | Cost-efficient at scale | Yes (pause = zero cost) | Yes (stop = disk only) | Yes (suspend = storage only) | Yes (standard EC2 + native sandbox efficiency) | Yes (cost shared across agents) |
 
 ### Summary of gaps by provider
 
@@ -250,11 +295,17 @@ for command execution.
 - R1/R2 no native command execution or streaming API. Must build and deploy a tool execution daemon inside the VM. Highest implementation effort.
 - R4 volume snapshots are slow (not instant). Rollback requires new volume creation.
 
-**D (EC2 Direct):**
-- R1/R2 SSM is polling-based with no real-time streaming. SSH streaming possible but requires connection management.
-- R4 EBS snapshots are slow (seconds to minutes). Rollback is a multi-step process.
+**D1 (EC2 Infra Provisioner):**
+- R11 initial instance boot is slow (10-90s), but this is a one-time cost per machine. Subsequent sandbox creation on a running instance is fast. Pre-baked AMIs mitigate boot time.
+- Requires operational investment in EC2 instance management (auto-scaling, health checks, AMI updates), but this is the cost of scaling the native sandbox to multiple machines.
+
+**D2 (EC2 Lightweight Sandbox):**
+- R1/R2 no native command execution or streaming API. Must use SSH or build a custom daemon.
+- R4 EBS snapshots are slow (seconds to minutes) and affect all agents on the instance (no per-agent granularity).
 - R5 stop/start is lossy and slow (10-30s).
+- R9 resources are shared across all agents with no built-in per-agent enforcement.
 - R11 cold start exceeds 5s for new instances.
+- No isolation between agents — all share the same OS and filesystem.
 
 ---
 
@@ -266,10 +317,11 @@ The agent loop runs externally and dispatches individual tool calls to the sandb
 
 | Provider | Feasibility | Key trade-offs |
 |----------|------------|----------------|
-| **A: E2B** | **Excellent** | Best semantic fit. `commands.run()` maps directly to `ExecuteTool`. Snapshots capture full state. Pause/resume preserves everything. Main limitation is 24h max lifetime. |
+| **A: E2B** | **Excellent** | Best semantic fit among 3rd party providers. `commands.run()` maps directly to `ExecuteTool`. Snapshots capture full state. Pause/resume preserves everything. Main limitation is 24h max lifetime. |
 | **B: Daytona** | **Good** | `process.exec()` works for tool dispatch. Checkpoints provide rollback. Lossy pause means agent must be resilient to process loss on resume. |
 | **C: Fly.io** | **Feasible but high effort** | No native command execution. Must deploy a custom tool-execution daemon inside the VM. Once built, filesystem and suspend/resume are excellent. Volume-level snapshots are slow for per-tool-call granularity. |
-| **D: EC2** | **Poor** | Too slow for per-tool-call dispatch (cold start 10-90s). Must keep instance running continuously. SSM has no streaming. Would need a custom daemon. Not recommended for this mode. |
+| **D1: EC2 Infra Provisioner** | **Excellent** | Supports all run modes because it provisions machines for our native sandbox. Once the instance is running, tool execution goes through NativeSandboxEnvironment with full capabilities: instant ZFS snapshots, gVisor isolation, native gRPC streaming. Richest feature set of any option. |
+| **D2: EC2 Lightweight Sandbox** | **Feasible (limited)** | Works but without per-tool isolation. All tool calls execute on the same OS with the same filesystem. Snapshots and rollback affect the entire instance, not individual tool sessions. Best suited for cases where isolation is not needed. |
 
 ### Agent in Sandbox
 
@@ -280,7 +332,8 @@ The agent loop runs inside the sandbox as a long-running process.
 | **A: E2B** | **Good** | Launch agent via `commands.start()`. Port exposure via `getHost()`. 24h max lifetime requires session checkpointing for longer runs. |
 | **B: Daytona** | **Feasible** | Must disable auto-stop. Agent process must handle being killed on sandbox stop. Port exposure and network work. |
 | **C: Fly.io** | **Excellent** | The Machine IS the agent process. No lifetime limit. Full suspend/resume with process state. Best fit for long-running agents. |
-| **D: EC2** | **Good** | Full OS control. No lifetime limit. But cost-inefficient (instance runs during LLM thinking). Stop/start is slow and lossy. |
+| **D1: EC2 Infra Provisioner** | **Excellent** | Full native sandbox capabilities. Launch agent process via NativeSandboxControl. No lifetime limits. Pause/resume via gVisor container pause. |
+| **D2: EC2 Lightweight Sandbox** | **Best fit (multi-agent, no isolation)** | Multiple agents share one instance, each running as a process on the same OS. Like running `flexagent serve all` for N agents sharing a filesystem. No per-agent isolation, but simple and cost-efficient for collaborative teams. |
 
 ### All in Sandbox
 
@@ -288,41 +341,61 @@ Everything runs in one sandbox (orchestrator + agent loop + tools).
 
 Same assessment as Agent in Sandbox for each provider, since the additional
 orchestrator requirements (launching sub-processes, managing state) are
-subsumed by full OS/VM access that all providers offer.
+subsumed by full OS/VM access that all providers offer. Note that D2 works
+for this mode for single-agent or collaborative multi-agent scenarios, but
+is not suitable when isolation between agents or tools is needed.
 
 ---
 
 ## Implementation Priority Recommendation
 
-1. **E2B (Shape A)** — Implement first. Best semantic fit for Tools in Sandbox
-   mode, which is the primary use case. Native command execution API with
+1. **EC2 Infra Provisioner (Shape D1)** — Implement first. This enables scaling
+   our native sandbox — which has the richest feature set of any option — to
+   multiple machines with automated provisioning. The native sandbox already
+   supports all capabilities (instant ZFS snapshots, gVisor isolation, native
+   streaming, full pause/resume). D1 adds the infrastructure automation layer:
+   `SandboxControl.CreateSandbox` provisions an EC2 instance, installs
+   sandbox-host, then delegates to `NativeSandboxControl`. This is high priority
+   because it unlocks horizontal scaling of the backend we already have and know
+   works well, without depending on any 3rd party provider.
+
+2. **E2B (Shape A)** — Implement second. Best semantic fit among 3rd party
+   providers for Tools in Sandbox mode. Native command execution API with
    streaming maps cleanly to `ExecuteTool`. Snapshot and pause/resume align with
-   our interface semantics. Lowest implementation effort. The 24h lifetime cap
-   is manageable by snapshotting and re-creating for longer sessions.
+   our interface semantics. Lowest implementation effort of the 3rd party
+   options. The 24h lifetime cap is manageable by snapshotting and re-creating
+   for longer sessions.
 
-2. **Fly.io (Shape C)** — Implement second. Best fit for Agent in Sandbox mode.
-   Full VM control with no lifetime limits and true suspend/resume. Requires
-   building a tool-execution daemon (significant effort), but this daemon could
-   be reused across Fly.io and EC2 shapes. Volume-level snapshots are coarser
-   than ideal but functional.
+3. **Fly.io (Shape C)** — Implement third. Best 3rd party fit for Agent in
+   Sandbox mode. Full VM control with no lifetime limits and true
+   suspend/resume. Requires building a tool-execution daemon (significant
+   effort), but this daemon could be reused across Fly.io and D2 shapes.
+   Volume-level snapshots are coarser than ideal but functional.
 
-3. **Daytona (Shape B)** — Implement third. Similar API surface to E2B but with
+4. **Daytona (Shape B)** — Implement fourth. Similar API surface to E2B but with
    lossy pause semantics and tighter resource limits. Good option for users
    who want an alternative to E2B or prefer Daytona's pricing/ecosystem.
 
-4. **EC2 Direct (Shape D)** — Defer or skip. Highest implementation effort, slowest
-   lifecycle operations, no native streaming. The native sandbox backend
-   (ZFS + gVisor on EC2) already covers this infrastructure better. EC2 Direct
-   only makes sense for users who want maximum control and cannot use any
-   managed provider, which is a niche case.
+5. **EC2 Lightweight Sandbox (Shape D2)** — Implement last or defer. Simplest
+   option but provides no isolation. Best suited for collaborative agent teams
+   that share a filesystem and do not need per-agent sandboxing. Low
+   implementation effort (SSH/daemon for command execution, no sandbox
+   management layer), but limited capability set. Consider implementing when
+   there is demand for a no-isolation multi-agent shared environment.
 
 ---
 
 ## Adapter Architecture Sketch
 
-Each provider adapter implements both `ExecutionEnvironment` and
+Each 3rd party provider adapter implements both `ExecutionEnvironment` and
 `SandboxControl`. The adapter translates our interface methods to
 provider-specific API calls.
+
+The EC2 Infra Provisioner (D1) is different: it sits below `SandboxControl` as
+an infrastructure layer, provisioning EC2 instances and then delegating to the
+existing `NativeSandboxControl`/`NativeSandboxEnvironment`. The EC2 Lightweight
+Sandbox (D2) implements the interfaces directly but with reduced capabilities
+(no isolation, shared filesystem).
 
 ```mermaid
 graph TD
@@ -336,7 +409,7 @@ graph TD
         NC[NativeSandboxControl<br/>sandbox-host RPC]
     end
 
-    subgraph "New Adapters (Batch 6)"
+    subgraph "New: 3rd Party Adapters"
         E2B_E[E2BSandboxEnvironment]
         E2B_C[E2BSandboxControl]
         FLY_E[FlySandboxEnvironment]
@@ -345,15 +418,29 @@ graph TD
         DAY_C[DaytonaSandboxControl]
     end
 
+    subgraph "New: EC2 Infra Provisioner (D1)"
+        EC2P[EC2InfraProvisioner<br/>Provisions EC2 + sandbox-host]
+    end
+
+    subgraph "New: EC2 Lightweight Sandbox (D2)"
+        EC2L_E[EC2LightweightEnvironment<br/>SSH/daemon, shared OS]
+        EC2L_C[EC2LightweightControl<br/>EC2 lifecycle, no isolation]
+    end
+
     EE --> NE
     EE --> E2B_E
     EE --> FLY_E
     EE --> DAY_E
+    EE --> EC2L_E
 
     SC --> NC
     SC --> E2B_C
     SC --> FLY_C
     SC --> DAY_C
+    SC --> EC2L_C
+
+    EC2P -->|provisions instance,<br/>then delegates to| NC
+    EC2P -->|provisions instance,<br/>then delegates to| NE
 
     style EE fill:#e1f5fe
     style SC fill:#e1f5fe
@@ -365,6 +452,9 @@ graph TD
     style FLY_C fill:#d1c4e9
     style DAY_E fill:#d1c4e9
     style DAY_C fill:#d1c4e9
+    style EC2P fill:#c8e6c9
+    style EC2L_E fill:#ffecb3
+    style EC2L_C fill:#ffecb3
 ```
 
 ### Key adapter design considerations
@@ -382,18 +472,35 @@ graph TD
    `PausePreservesProcesses` capability flag to know whether memory/process
    state survives.
 
-3. **Fly.io needs a tool-execution daemon.** The adapter cannot implement
-   `ExecuteTool` without a companion binary that runs inside the Machine and
-   accepts tool call requests. This daemon should be a small standalone binary
-   built from this repo that implements a simple HTTP/gRPC server accepting
-   `ToolRequest` and returning `ToolResponse` with streaming `ToolProgress`.
+3. **Fly.io and D2 need a tool-execution daemon.** These adapters cannot
+   implement `ExecuteTool` without a companion binary that runs inside the
+   VM/instance and accepts tool call requests. This daemon should be a small
+   standalone binary built from this repo that implements a simple HTTP/gRPC
+   server accepting `ToolRequest` and returning `ToolResponse` with streaming
+   `ToolProgress`. The same daemon can be reused across Fly.io and D2.
 
-4. **Capability reporting.** Each adapter's `Capabilities()` method must
+4. **EC2 Infra Provisioner (D1) is a provisioning layer, not a sandbox
+   adapter.** D1 wraps `SandboxControl` by managing EC2 instance lifecycle:
+   `CreateSandbox` provisions an EC2 instance (from a pre-baked AMI or via
+   user data), waits for sandbox-host to be healthy, then hands off to
+   `NativeSandboxControl` for all sandbox operations. The caller gets the
+   full native sandbox feature set. D1 needs to manage instance pooling,
+   health checks, and teardown, but does not need to re-implement any
+   sandbox logic.
+
+5. **EC2 Lightweight Sandbox (D2) has no isolation.** The adapter must
+   clearly report via `Capabilities()` that there is no per-agent or per-tool
+   isolation. Snapshots and rollback affect the entire instance. This shape
+   is intentionally simple — it is for teams that want shared-filesystem
+   collaboration, not sandboxed execution.
+
+6. **Capability reporting.** Each adapter's `Capabilities()` method must
    accurately report what it supports. For example, E2B would return
    `Snapshots: true, Rollback: true, Pause: true, MaxSessionDuration: 24h`.
    Fly.io would return `Snapshots: true` (volume-level) but could introduce
    a `SnapshotGranularity` field to distinguish volume-level from filesystem-
-   level snapshots.
+   level snapshots. D1 would report the same capabilities as the native
+   sandbox. D2 would report `Isolation: false, SnapshotGranularity: instance`.
 
 ---
 
@@ -406,12 +513,15 @@ snapshot and re-create the sandbox before the 24h limit. Should this be handled
 transparently inside the adapter (auto-rotate), or should the caller be
 responsible for monitoring `MaxSessionDuration` and managing rotation?
 
-### OQ2: Fly.io tool-execution daemon
+### OQ2: Fly.io / D2 tool-execution daemon
 
-The daemon running inside Fly.io Machines needs to implement the tool execution
-logic. Should this be a generic "remote tool executor" binary that could also be
-used for EC2 Direct? Or should it be Fly.io-specific? A generic approach would
-reduce duplication but may add complexity.
+The daemon running inside Fly.io Machines and D2 instances needs to implement
+the tool execution logic. Should this be a generic "remote tool executor" binary
+shared across both shapes? A generic approach would reduce duplication and is
+recommended given that both need the same core functionality (accept tool call
+requests, stream output). Fly.io-specific concerns (Machine lifecycle hooks)
+and D2-specific concerns (multi-agent coordination) could be handled via
+configuration or small adapter layers on top of the shared daemon.
 
 ### OQ3: Capability system extension
 
@@ -435,6 +545,33 @@ session (paying per-second even during LLM thinking), or should it be
 paused/resumed between tool calls? E2B and Fly.io support fast enough
 pause/resume that inter-call pausing could save significant cost at scale,
 but adds latency to each tool call.
+
+### OQ6: EC2 Infra Provisioner (D1) instance pooling
+
+D1's cold start is dominated by EC2 instance boot time (10-90s). Should D1
+maintain a warm pool of pre-provisioned instances with sandbox-host already
+running, so that `CreateSandbox` can immediately assign a warm instance
+instead of waiting for boot? This would improve cold start at the cost of
+maintaining idle instances. How should the pool size be managed (static,
+auto-scaling based on demand, predictive)?
+
+### OQ7: EC2 Infra Provisioner (D1) multi-sandbox per instance
+
+A single EC2 instance running sandbox-host can host multiple sandboxes (the
+native sandbox already supports this via ZFS datasets and gVisor containers).
+Should D1 pack multiple sandboxes onto a single instance to improve cost
+efficiency, or maintain a 1:1 mapping of instances to sandboxes for simplicity
+and isolation? Packing improves cost but requires resource accounting and
+introduces noisy-neighbor risk.
+
+### OQ8: EC2 Lightweight Sandbox (D2) agent coordination
+
+When multiple agents share a D2 instance, how should filesystem access be
+coordinated? Options include: (a) no coordination — agents use conventions
+to avoid conflicts, (b) per-agent working directories with a shared common
+area, (c) a lightweight coordination daemon that manages file locks or
+workspace assignments. The right answer likely depends on whether agents are
+collaborating on the same files or working on independent tasks.
 
 ---
 
