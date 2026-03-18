@@ -180,6 +180,11 @@ func TestBuildNodeOrFleetControlFleetMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildNodeOrFleetControl() error = %v", err)
 	}
+	if closer, ok := control.(interface{ Close() error }); ok {
+		t.Cleanup(func() {
+			_ = closer.Close()
+		})
+	}
 	if _, ok := control.(*fleet.FleetSandboxControl); !ok {
 		t.Fatalf("buildNodeOrFleetControl() type = %T, want *fleet.FleetSandboxControl", control)
 	}
