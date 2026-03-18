@@ -5,7 +5,7 @@
 **Depended on by:** Orchestrator application (future), production-scale native sandbox deployment
 **Scope:** Implement `FleetSandboxControl`, an in-process fleet manager that implements `SandboxControl` by managing a pool of sandbox-host EC2 instances. Provider-agnostic via `InstanceProvisioner` interface with EC2 as the first implementation. Includes fleet control loop (scaling, health, warm pool), capacity-aware routing, and SandboxID-encoded instance routing.
 **Shaping source:** docs/shaping/ec2-fleet-management.md (Shape A selected: in-process fleet management with provider-agnostic InstanceProvisioner)
-**Incorporated reviews:** docs/plans/20-fleet-management-review-coder-1-sea.md, docs/plans/20-fleet-management-review-r1-b.md, docs/plans/20-fleet-management-seam-review.md, docs/plans/20-fleet-management-review-r2-b.md
+**Incorporated reviews:** docs/plans/20-fleet-management-review-coder-1-sea.md, docs/plans/20-fleet-management-review-r1-b.md, docs/plans/20-fleet-management-seam-review.md, docs/plans/20-fleet-management-review-r2-b.md, docs/plans/19-20-seam-review.md
 
 ---
 
@@ -104,19 +104,26 @@ graph TD
 ### 2.2 Import Flow
 
 ```
+internal/sandbox/control/instance     -- InstanceProvisioner interface + types (shared by Direct and Fleet)
+
 internal/sandbox/control/fleet        -> internal/sandbox/control (SandboxControl, types)
+                                      -> internal/sandbox/control/instance (InstanceProvisioner, InstanceConfig, etc.)
                                       -> internal/sandbox/control/native (NodeSandboxControl)
                                       -> internal/rpc/api (SandboxService, HealthCheckResponse -- used in FleetNodeClient interface)
                                       -> internal/rpc/client (SandboxClient constructor -- wrapped in FleetNodeClient)
 
-internal/sandbox/control/fleet/ec2    -> internal/sandbox/control/fleet (InstanceProvisioner)
+internal/sandbox/control/fleet/ec2    -> internal/sandbox/control/instance (InstanceProvisioner)
                                       -> aws-sdk-go-v2/service/ec2
+
+internal/sandbox/control/direct       -> internal/sandbox/control (SandboxControl, types)
+                                      -> internal/sandbox/control/instance (InstanceProvisioner, InstanceConfig, etc.)
+                                      -- Does NOT import internal/sandbox/control/fleet
 
 cmd/flexagent (serve orchestrator)    -> internal/sandbox/control/fleet (FleetSandboxControl)
                                       -> internal/sandbox/control/fleet/ec2 (EC2InstanceProvisioner)
 ```
 
-No circular imports. The fleet package depends on `control` for the interface it implements and `native` for per-instance delegation. The `ec2` sub-package depends only on `fleet` for the provisioner interface and the AWS SDK.
+No circular imports. The `InstanceProvisioner` interface and its associated types live in `internal/sandbox/control/instance/`, a shared package imported by both `fleet` and `direct` independently. This eliminates the coupling where `direct` would otherwise import `fleet` solely for the provisioner interface. The `ec2` sub-package depends only on the shared `instance` package for the provisioner interface and the AWS SDK.
 
 ---
 
@@ -124,8 +131,10 @@ No circular imports. The fleet package depends on `control` for the interface it
 
 `InstanceProvisioner` is the thin abstraction over cloud provider instance lifecycle. Each cloud provider implements this interface. The fleet control loop uses it for all provisioning operations and never touches cloud APIs directly.
 
+The interface and all its associated types (`InstanceConfig`, `InstanceInfo`, `InstanceStatus`, `InstanceFilter`, `CloudInstanceState`) live in the shared package `internal/sandbox/control/instance/`, NOT in the fleet package. This allows both the `fleet` and `direct` adapters to import them independently without creating a coupling between the two adapter packages (per seam review finding F3).
+
 ```go
-// internal/sandbox/control/fleet/provisioner.go
+// internal/sandbox/control/instance/provisioner.go
 
 // InstanceProvisioner manages cloud instance lifecycle. Implementations exist
 // for each cloud provider (EC2, GCP, Azure). The fleet control loop calls
@@ -243,10 +252,14 @@ The first implementation, using AWS SDK v2. AWS-specific launch configuration (s
 // EC2LaunchConfig holds AWS-specific instance launch parameters.
 // These are provider-specific and are NOT part of the shared InstanceConfig.
 type EC2LaunchConfig struct {
-    SecurityGroupIDs []string // VPC security groups to attach
-    SubnetID         string   // VPC subnet to launch into
-    KeyName          string   // SSH key pair name (optional, for debugging)
-    IAMRole          string   // IAM instance profile for cloud API access
+    SecurityGroupIDs    []string // VPC security groups to attach
+    SubnetID            string   // VPC subnet to launch into
+    KeyName             string   // SSH key pair name (optional, for debugging)
+    InstanceProfileName string   // IAM instance profile NAME (not ARN, not role name).
+                                 // This is the instance profile that gets associated with the
+                                 // EC2 instance via the IamInstanceProfile.Name parameter in
+                                 // RunInstances. The instance profile must already exist and
+                                 // have the desired IAM role attached to it.
 }
 
 // EC2InstanceProvisioner implements InstanceProvisioner using the AWS EC2 API.
@@ -318,7 +331,7 @@ Every `InstanceProvisioner` implementation must pass a shared contract test suit
 // may acquire FleetSandboxControl.mu while holding any ManagedInstance.mu.
 // This prevents deadlocks between the control loop and concurrent callers.
 type FleetSandboxControl struct {
-    provisioner    InstanceProvisioner
+    provisioner    instance.InstanceProvisioner  // from internal/sandbox/control/instance/
     config         FleetConfig
     instances      map[string]*ManagedInstance // guarded by mu
     mu             sync.RWMutex
@@ -354,7 +367,7 @@ type SandboxClientFactory func(addr string) (FleetNodeClient, error)
 // FleetConfig controls fleet behavior.
 type FleetConfig struct {
     // Instance provisioning
-    InstanceConfig InstanceConfig // Template for launching new instances
+    InstanceConfig instance.InstanceConfig // Template for launching new instances (from shared package)
 
     // Fleet sizing
     MinInstances   int // Floor -- never scale below this (default: 1)
@@ -386,7 +399,7 @@ type FleetConfig struct {
 func DefaultFleetConfig() FleetConfig
 
 func NewFleetSandboxControl(
-    provisioner InstanceProvisioner,
+    provisioner instance.InstanceProvisioner,
     clientFactory SandboxClientFactory,
     cfg FleetConfig,
     opts ...FleetOption,
@@ -584,6 +597,8 @@ func (f *FleetSandboxControl) LaunchProcess(ctx context.Context, req control.Lau
 
 The same request-rewriting pattern applies to `KillProcess`, `GetProcessStatus`, `PauseSandbox`, and `ResumeSandbox` -- each constructs a new request struct with `SandboxID` set to `sessionID`.
 
+**LaunchProcess response address assumption:** Fleet expects the `LaunchProcessResponse.Address` returned by the per-instance `NodeSandboxControl` to be routable from the orchestrator (i.e., using the instance's advertised IP, not `localhost` or `127.0.0.1`). The sandbox-host's `AdvertiseAddr` must be configured to return the host's actual IP. If the returned address contains `localhost` or `127.0.0.1`, Fleet should log a warning and attempt to rewrite it using the instance's known `PrivateIP`. This is a best-effort fix; the root cause would be a misconfigured `AdvertiseAddr` on the sandbox-host.
+
 The fleet layer is a thin router that:
 1. Parses the SandboxID to extract instance identity and session identity.
 2. Looks up the `FleetNodeClient` for that instance.
@@ -620,6 +635,8 @@ func (f *FleetSandboxControl) Close() error
 
 `FleetSandboxControl` also implements `io.Closer`, so generic cleanup code can use type assertion (`if closer, ok := sc.(io.Closer); ok { closer.Close() }`). Note that `Close()` is intentionally NOT part of the `SandboxControl` interface: `NodeSandboxControl` has no background goroutines and does not need `Close()`. The orchestrator is responsible for knowing the concrete type and calling `Close()` on fleet providers. The `Close()` method has no context parameter; shutdown duration is bounded by `DrainTimeout` in `FleetConfig`.
 
+**Cross-cutting concern:** Both Fleet and Direct (Plan 19) implement `io.Closer` but `SandboxControl` does not include `Close()`. This means the orchestrator must use type assertions for cleanup. Adding `Close() error` to `SandboxControl` (with a no-op for `NodeSandboxControl`) would simplify lifecycle management. This is tracked as a cross-cutting improvement for future work.
+
 In-flight `CreateSandbox` calls that have already claimed a slot (section 4.1.1) are allowed to complete their RPC. The `Close` method waits for all in-flight operations to finish before beginning the drain sequence.
 
 ### 4.5 Capabilities
@@ -629,16 +646,31 @@ In-flight `CreateSandbox` calls that have already claimed a slot (section 4.1.1)
 ```go
 func (f *FleetSandboxControl) Capabilities() control.SandboxCapabilities {
     return control.SandboxCapabilities{
-        Snapshots:          true,
-        Rollback:           true,
-        Pause:              true,
-        LaunchProcess:      true,
+        Snapshots:           true,
+        Rollback:            true,
+        Pause:               true,  // Lossless: delegates to Native (gVisor container pause preserves process state)
+        LaunchProcess:       true,
+        DeepPause:           false, // ZFS-to-S3 cold storage; not yet implemented
         ConcurrentSandboxes: f.config.MaxInstances * f.config.MaxSessionsPerInstance,
     }
 }
 ```
 
 Note: `ConcurrentSandboxes` is the theoretical ceiling (`MaxInstances * MaxSessionsPerInstance`). Actual available capacity depends on fleet state (how many instances are provisioned, healthy, and have headroom). The orchestrator should use `ErrNoCapacity` as the primary backpressure signal for admission control, not `ConcurrentSandboxes`. The capability value is useful for capacity planning and display purposes.
+
+**Note on pause semantics:** Fleet's pause is **lossless** -- it delegates to `NodeSandboxControl` which uses gVisor container pause to preserve full process state. This differs from Direct's **lossy** pause (EC2 stop kills processes, only EBS survives). Both adapters report `Pause: true` but the fidelity differs. See Plan 19 OQ5 for the proposed `PausePreservesProcesses` capability flag.
+
+**Note on `DeepPause`:** Explicitly set to `false`. `DeepPause` refers to ZFS-to-S3 cold storage archival, not whether processes survive pause. When DeepPause is implemented in the future, Fleet will need to be updated to report it.
+
+**ToolEnvironmentConfig for fleet-launched agents:** The orchestrator creates agent sessions on fleet-managed instances by passing `ToolEnvSandbox` with the instance's sandbox-host address and the session ID:
+```go
+ToolEnvironmentConfig{
+    Type:             ToolEnvSandbox,
+    SandboxHostAddr:  "{instancePrivateIP}:{SandboxHostPort}",
+    SandboxSessionID: "{sessionID}",  // the session-local part from parseSandboxID
+}
+```
+This causes the `AgentLoopService` to create a `NativeSandboxEnvironment` pointing at the sandbox-host. The flow is implicitly correct because Fleet delegates to Node, which delegates to sandbox-host, following the same pattern as Plan 18 section 9.2.
 
 ---
 
@@ -878,9 +910,16 @@ Example:
 fleet:i-0abc123def456:sess-7890xyz
 ```
 
-- `fleet:` prefix distinguishes fleet-managed sandbox IDs from single-instance IDs.
+- `fleet:` prefix distinguishes fleet-managed sandbox IDs from other adapters.
 - `<instanceID>` is the cloud provider's instance identifier.
 - `<sessionID>` is the session ID returned by the sandbox-host's `CreateSession`.
+
+**Cross-adapter SandboxID prefix convention:** Each adapter uses a distinct prefix so the orchestrator can cheaply route operations to the correct adapter by inspecting the SandboxID prefix:
+- `direct:{instanceID}` -- Direct adapter (Plan 19)
+- `fleet:{instanceID}:{sessionID}` -- Fleet adapter (this plan)
+- Raw session IDs (no prefix) -- Node/Native adapter (prefix convention can be added later)
+
+This prefix convention ensures that passing a SandboxID from one adapter to another produces a clear error (wrong prefix), not silent corruption.
 
 ### 7.2 Parsing
 
@@ -1021,17 +1060,21 @@ internal/
       control.go                    # SandboxControl interface (existing)
       native/
         native.go                   # NodeSandboxControl (existing)
+      instance/
+        provisioner.go              # InstanceProvisioner interface + associated types
+                                    # (InstanceConfig, InstanceInfo, InstanceStatus,
+                                    #  InstanceFilter, CloudInstanceState)
+                                    # Shared by fleet/ and direct/ -- neither imports the other.
       fleet/
         fleet.go                    # FleetSandboxControl: SandboxControl implementation
         fleet_test.go               # Unit tests with mock InstanceProvisioner
-        provisioner.go              # InstanceProvisioner interface + types
         control_loop.go             # Fleet control loop: scaling, health, warm pool
         control_loop_test.go        # Control loop unit tests
         routing.go                  # Capacity-aware instance selection
         routing_test.go             # Routing unit tests
         instance_state.go           # ManagedInstance, InstanceState, state transitions
         instance_state_test.go      # State machine unit tests
-        sandbox_id.go               # SandboxID encoding/parsing
+        sandbox_id.go               # SandboxID encoding/parsing (fleet: prefix)
         sandbox_id_test.go          # SandboxID round-trip tests
         config.go                   # FleetConfig, DefaultFleetConfig
         ec2/
@@ -1267,7 +1310,7 @@ The `SandboxClientFactory` in tests returns a mock `FleetNodeClient` that implem
 
 | Seam | Description |
 |------|-------------|
-| `internal/sandbox/control/fleet/provisioner.go` | `InstanceProvisioner` interface -- consumed by future GCP/Azure implementations |
+| `internal/sandbox/control/instance/provisioner.go` | `InstanceProvisioner` interface and associated types -- shared by Fleet and Direct adapters, consumed by future GCP/Azure implementations |
 | `internal/sandbox/control/fleet/fleet.go` | `FleetSandboxControl` -- consumed by orchestrator as a `SandboxControl` implementation |
 | `internal/sandbox/control/fleet/ec2/ec2_provisioner.go` | `EC2InstanceProvisioner` -- first `InstanceProvisioner` implementation |
 
@@ -1284,24 +1327,27 @@ cmd/flexagent (orchestrator)
 
 internal/sandbox/control/fleet
   -> internal/sandbox/control            (SandboxControl interface, types)
+  -> internal/sandbox/control/instance   (InstanceProvisioner, InstanceConfig, InstanceInfo, etc.)
   -> internal/sandbox/control/native     (NodeSandboxControl)
   -> internal/rpc/api                    (SandboxService, HealthCheck types)
   -> internal/rpc/client                 (NewSandboxClient)
 
 internal/sandbox/control/fleet/ec2
-  -> internal/sandbox/control/fleet      (InstanceProvisioner, InstanceConfig, InstanceInfo)
+  -> internal/sandbox/control/instance   (InstanceProvisioner, InstanceConfig, InstanceInfo)
   -> github.com/aws/aws-sdk-go-v2/service/ec2
 ```
 
-Key invariant: `internal/sandbox/control/fleet` does NOT import `internal/sandbox/control/fleet/ec2`. The concrete provisioner is injected by the caller (orchestrator). This keeps the fleet package provider-agnostic.
+Key invariants:
+- `internal/sandbox/control/fleet` does NOT import `internal/sandbox/control/fleet/ec2`. The concrete provisioner is injected by the caller (orchestrator). This keeps the fleet package provider-agnostic.
+- `internal/sandbox/control/fleet` does NOT import `internal/sandbox/control/direct`, and vice versa. Both import from the shared `instance` package independently.
 
 ---
 
 ## 13. Implementation Order
 
-1. **InstanceProvisioner interface + types** (`fleet/provisioner.go`, `fleet/config.go`)
-   - Define `InstanceProvisioner` (including `ListInstances`), `InstanceFilter`, `InstanceConfig`, `InstanceInfo`, `InstanceStatus`, `CloudInstanceState`
-   - Define `FleetConfig`, `DefaultFleetConfig()`
+1. **InstanceProvisioner interface + types** (`instance/provisioner.go`, `fleet/config.go`)
+   - Define `InstanceProvisioner` (including `ListInstances`), `InstanceFilter`, `InstanceConfig`, `InstanceInfo`, `InstanceStatus`, `CloudInstanceState` in the shared `internal/sandbox/control/instance/` package
+   - Define `FleetConfig`, `DefaultFleetConfig()` in `fleet/config.go`
 
 2. **SandboxID encoding/parsing** (`fleet/sandbox_id.go`) + unit tests
    - `encodeSandboxID`, `parseSandboxID`
@@ -1452,6 +1498,23 @@ func (f *FleetSandboxControl) FleetStatus() FleetStatusResponse
 
 ---
 
+## 15.4 Error Classification
+
+Errors surfaced by `FleetSandboxControl` to the orchestrator, classified for retry guidance:
+
+| Error | Retry-safe? | Description |
+|-------|-------------|-------------|
+| `ErrNoCapacity` | Yes (with backoff) | No instance has available session slots. The fleet may be scaling up. Caller should wait briefly and retry. The singleflight provision path (section 5.3) handles deduplication automatically. |
+| `ErrFleetClosed` | No | The fleet manager is shutting down. No new sandboxes will be accepted. |
+| `parseSandboxID` error | No | The SandboxID is malformed (wrong prefix, missing components). This is a programming error, not a transient condition. |
+| Node RPC errors (delegated) | Depends | Errors from `NodeSandboxControl` RPC calls pass through. Network errors and timeouts are retry-safe. Application-level errors (session not found, etc.) are not. |
+| `InstanceProvisioner` errors | Depends | `LaunchInstance` cloud API errors may be transient (rate limiting, throttling) or permanent (invalid config, quota exceeded). The provisioner handles internal retries for transient failures. |
+| Claim-slot rollback errors | N/A | Not surfaced to caller. Claim-slot rollback happens internally on RPC failure. The reconciliation loop (section 4.1.3) corrects any drift. |
+
+**Note on shared error taxonomy:** Each adapter currently defines its own sentinel errors. A shared error set in `internal/sandbox/control/errors.go` (e.g., `control.ErrSandboxNotFound`, `control.ErrNoCapacity`, `control.ErrProviderClosed`) that all adapters wrap or return would simplify orchestrator error handling. This is tracked as a cross-cutting improvement for future work.
+
+---
+
 ## 16. Review Disposition Table
 
 Findings from `docs/plans/20-fleet-management-review-coder-1-sea.md` and `docs/plans/20-fleet-management-review-r1-b.md`, tracked with disposition.
@@ -1501,5 +1564,22 @@ Findings from `docs/plans/20-fleet-management-review-coder-1-sea.md` and `docs/p
 |---|--------|----------|---------|-------------|-------------------|
 | 32 | r2-b P2 | P2 | `DestroySandbox` decrement-before-RPC briefly violates `>=` count invariant (fleet_count < actual_sessions during failed RPC window) | **Acknowledged, no change.** The window is narrow (duration of one failed RPC) and the re-increment on failure closes it. The reconciliation loop (4.1.3) provides ultimate correctness. The invariant statement in 4.1.1 applies strictly to the `CreateSandbox` path; `DestroySandbox` uses the inverse pattern where brief undercount is acceptable because drain decisions wait for count to reach 0 regardless. |
 | 33 | r2-b P3 | P3 | `Close()` has no context parameter for caller-controlled shutdown timeout | **Deferred.** `DrainTimeout` already bounds the wait. Adding `Close(ctx context.Context) error` can be done in a follow-up if independent timeout control is needed. | -- |
+
+### Cross-Adapter Seam Review Findings (docs/plans/19-20-seam-review.md)
+
+| # | Source | Priority | Finding | Disposition | Section(s) Updated |
+|---|--------|----------|---------|-------------|-------------------|
+| 34 | F1 | P2 | Fleet does not explicitly set `DeepPause: false` in Capabilities | **Fixed.** Added explicit `DeepPause: false` to `Capabilities()` with doc comment. | 4.5 |
+| 35 | F2 | P2 | `Pause: true` means different things for Direct (lossy) vs Native/Fleet (lossless) | **Accepted.** Added note to section 4.5 documenting that Fleet's pause is lossless (delegates to Native) and clarifying the difference from Direct's lossy pause. `PausePreservesProcesses` tracked in Plan 19 OQ5. | 4.5 |
+| 36 | F3 | P1 | Import coupling: Direct imports Fleet solely for InstanceProvisioner | **Fixed.** Extracted `InstanceProvisioner` and associated types to shared package `internal/sandbox/control/instance/`. Updated import flow (2.2), package structure (9), connected components (12.2, 12.4), constructor, struct type, and all references. | 2.2, 3, 4.1, 9, 12.2, 12.4, 13 |
+| 37 | F4 | P3 | `IAMRole` naming inconsistency in `EC2LaunchConfig` | **Fixed.** Renamed `IAMRole` to `InstanceProfileName` with doc comment clarifying it takes the instance profile name (not a role name or ARN). | 3.1 |
+| 38 | F5 | P1 | No prefix-based SandboxID disambiguation across adapters | **Accepted (Plan 19 change).** Direct added `direct:` prefix. Fleet already uses `fleet:` prefix. Documented the cross-adapter prefix convention in section 7.1. | 7.1 |
+| 39 | F6 | P2 | Inconsistent `Address` semantics across adapters | **Acknowledged.** Fleet's address rewriting is already documented (section 4.2). Added future work note about splitting `Address` into `HostAddress` and `WorkspacePath` in Plan 19. |
+| 40 | F7 | P3 | Plan 20 does not explicitly document the ToolEnvironmentConfig flow for fleet-launched agents | **Fixed.** Added ToolEnvironmentConfig documentation to section 4.5 showing the orchestrator passes `ToolEnvSandbox` with the instance's sandbox-host address and session ID. | 4.5 |
+| 41 | F10 | P2 | Fleet's `LaunchProcess` does not document response address rewriting assumptions (expects non-localhost) | **Fixed.** Added "LaunchProcess response address assumption" note to section 4.3 documenting that Fleet expects routable addresses and will warn/rewrite localhost addresses. | 4.3 |
+| 42 | F11 | P2 | No shared error taxonomy across adapters | **Noted for future work.** Added note to new section 15.4 recommending shared sentinel errors in `internal/sandbox/control/errors.go`. | 15.4 |
+| 43 | F12 | P3 | Inconsistent retry guidance; Plan 20 lacks an error classification table | **Fixed.** Added section 15.4 with error classification table for orchestrator-facing errors. | 15.4 |
+| 44 | F13 | P2 | `Close()` not in `SandboxControl` interface, requiring type assertions for cleanup | **Noted for future work.** Added cross-cutting concern note to section 4.4 tracking the potential addition of `Close() error` to the `SandboxControl` interface. | 4.4 |
+| 45 | F14 | P1 | Direct `Close()` has no mechanism to wait for in-flight `CreateSandbox` | **Accepted (Plan 19 change).** Plan 19 updated with `closing` flag and `inflightWg` WaitGroup. No change needed in Plan 20 -- Fleet already handles this correctly. | -- |
 
 **All P0 and P1 findings resolved. All P2 findings resolved, acknowledged, or explicitly deferred with justification. All P3 findings resolved or deferred.**
