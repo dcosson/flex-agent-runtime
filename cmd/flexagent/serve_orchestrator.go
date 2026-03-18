@@ -6,10 +6,15 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,11 +24,14 @@ import (
 	"github.com/dcosson/flex-agent-runtime/internal/agent"
 	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
 	"github.com/dcosson/flex-agent-runtime/internal/orchestrator"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
 	rpcclient "github.com/dcosson/flex-agent-runtime/internal/rpc/client"
 	"github.com/dcosson/flex-agent-runtime/internal/rpc/transport"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control"
 	directcontrol "github.com/dcosson/flex-agent-runtime/internal/sandbox/control/direct"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control/fleet"
 	ec2provisioner "github.com/dcosson/flex-agent-runtime/internal/sandbox/control/fleet/ec2"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control/instance"
 	nodecontrol "github.com/dcosson/flex-agent-runtime/internal/sandbox/control/node"
 )
 
@@ -117,9 +125,6 @@ func (cfg serveOrchestratorConfig) validate() error {
 	hasSandboxHost := strings.TrimSpace(cfg.SandboxHostAddr) != ""
 	if !hasDirect && !hasSandboxHost {
 		errs = append(errs, fmt.Errorf("at least one backend must be configured: direct or sandbox-host"))
-	}
-	if hasSandboxHost && len(splitCommaList(cfg.SandboxHostAddr)) > 1 {
-		errs = append(errs, fmt.Errorf("fleet mode (multiple sandbox-host addresses) is not yet supported"))
 	}
 	if hasDirect {
 		if strings.TrimSpace(cfg.DirectSubnetID) == "" {
@@ -309,7 +314,7 @@ func splitCommaList(raw string) []string {
 // buildNodeOrFleetControl constructs Node or Fleet SandboxControl based on
 // the number of sandbox-host addresses.
 // - 1 host  -> NodeSandboxControl
-// - N hosts -> FleetSandboxControl (future: not yet wired in this bead)
+// - N hosts -> FleetSandboxControl
 func buildNodeOrFleetControl(addrs []string, cfg serveOrchestratorConfig, logger *slog.Logger) (control.SandboxControl, error) {
 	if len(addrs) == 0 {
 		return nil, fmt.Errorf("no sandbox-host addresses provided")
@@ -330,9 +335,73 @@ func buildNodeOrFleetControl(addrs []string, cfg serveOrchestratorConfig, logger
 		)
 		return nodecontrol.NewNodeSandboxControl(sandboxSvc, nodecontrol.WithLogger(logger)), nil
 	}
-	// Multiple hosts: FleetSandboxControl will be wired in a follow-up.
-	// For now, return error since Fleet requires additional config (InstanceProvisioner, etc.)
-	return nil, fmt.Errorf("fleet mode (multiple sandbox-host addresses) is not yet wired in serve_orchestrator")
+
+	parsed := make([]parsedSandboxHostAddr, 0, len(addrs))
+	for _, raw := range addrs {
+		entry, err := parseSandboxHostAddr(raw)
+		if err != nil {
+			return nil, err
+		}
+		parsed = append(parsed, entry)
+	}
+	port := parsed[0].port
+	for _, entry := range parsed[1:] {
+		if entry.port != port {
+			return nil, fmt.Errorf("fleet mode requires sandbox-host addresses to use the same port; got %d and %d", port, entry.port)
+		}
+	}
+
+	provisioner := newStaticFleetProvisioner(parsed)
+	clientFactory := func(addr string) (fleet.FleetNodeClient, error) {
+		baseURL := addr
+		if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+			baseURL = control.AddressToURL(baseURL)
+		}
+		clientCfg := transport.ClientConfig{APIVersion: cfg.APIVersion}
+		if cfg.AuthToken != "" {
+			clientCfg.HeaderInjector = transport.HeaderTokenAuth("authorization", "Bearer "+cfg.AuthToken)
+		}
+		sandboxSvc := rpcclient.NewSandboxServiceClient(
+			&http.Client{Timeout: 30 * time.Second},
+			baseURL,
+			clientCfg,
+		)
+		nodeSvc := nodecontrol.NewNodeSandboxControl(sandboxSvc, nodecontrol.WithLogger(logger))
+		return &fleetNodeClientAdapter{
+			SandboxControl: nodeSvc,
+			sandboxService: sandboxSvc,
+		}, nil
+	}
+
+	fleetCfg := fleet.DefaultFleetConfig()
+	fleetCfg.MinInstances = 0
+	fleetCfg.MaxInstances = len(parsed)
+	fleetCfg.WarmPoolTarget = len(parsed)
+	fleetCfg.SandboxHostPort = port
+	fleetCfg.HealthCheckInterval = cfg.HealthCheckInterval
+	if cfg.MaxSessions > 0 {
+		fleetCfg.MaxSessionsPerInstance = cfg.MaxSessions
+	} else {
+		fleetCfg.MaxSessionsPerInstance = math.MaxInt32
+	}
+	fleetCfg.InstanceConfig = instance.InstanceConfig{
+		Tags: map[string]string{
+			"ManagedBy": "flex-agent-runtime",
+			"adapter":   "fleet-static",
+		},
+	}
+
+	fleetControl, err := fleet.NewFleetSandboxControl(
+		provisioner,
+		clientFactory,
+		fleetCfg,
+		fleet.WithLogger(logger),
+		fleet.WithLeaveInstancesOnClose(true),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return fleetControl, nil
 }
 
 func instanceProfileName(raw string) string {
@@ -344,4 +413,139 @@ func instanceProfileName(raw string) string {
 		return trimmed[idx+1:]
 	}
 	return trimmed
+}
+
+type parsedSandboxHostAddr struct {
+	host string
+	port int
+}
+
+var _ instance.InstanceProvisioner = (*staticFleetProvisioner)(nil)
+var _ fleet.FleetNodeClient = (*fleetNodeClientAdapter)(nil)
+
+func parseSandboxHostAddr(raw string) (parsedSandboxHostAddr, error) {
+	addr := strings.TrimSpace(raw)
+	if addr == "" {
+		return parsedSandboxHostAddr{}, fmt.Errorf("sandbox-host address must not be empty")
+	}
+	hostPort := addr
+	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
+		parsedURL, err := url.Parse(addr)
+		if err != nil {
+			return parsedSandboxHostAddr{}, fmt.Errorf("invalid sandbox-host address %q: %w", raw, err)
+		}
+		if parsedURL.Host == "" {
+			return parsedSandboxHostAddr{}, fmt.Errorf("invalid sandbox-host address %q: missing host", raw)
+		}
+		if parsedURL.Path != "" && parsedURL.Path != "/" {
+			return parsedSandboxHostAddr{}, fmt.Errorf("invalid sandbox-host address %q: URL path is not allowed", raw)
+		}
+		hostPort = parsedURL.Host
+	}
+	host, portRaw, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		return parsedSandboxHostAddr{}, fmt.Errorf("sandbox-host address %q must be host:port", raw)
+	}
+	port, err := strconv.Atoi(portRaw)
+	if err != nil || port <= 0 || port > 65535 {
+		return parsedSandboxHostAddr{}, fmt.Errorf("sandbox-host address %q has invalid port %q", raw, portRaw)
+	}
+	if strings.TrimSpace(host) == "" {
+		return parsedSandboxHostAddr{}, fmt.Errorf("sandbox-host address %q has empty host", raw)
+	}
+	return parsedSandboxHostAddr{host: host, port: port}, nil
+}
+
+type staticFleetProvisioner struct {
+	mu         sync.Mutex
+	instances  []instance.InstanceInfo
+	nextLaunch int
+}
+
+func newStaticFleetProvisioner(hosts []parsedSandboxHostAddr) *staticFleetProvisioner {
+	instances := make([]instance.InstanceInfo, 0, len(hosts))
+	for i, host := range hosts {
+		instances = append(instances, instance.InstanceInfo{
+			InstanceID: fmt.Sprintf("static-%03d", i+1),
+			PrivateIP:  host.host,
+			State:      instance.CloudInstanceRunning,
+		})
+	}
+	return &staticFleetProvisioner{instances: instances}
+}
+
+func (p *staticFleetProvisioner) LaunchInstance(_ context.Context, _ instance.InstanceConfig) (*instance.InstanceInfo, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.nextLaunch >= len(p.instances) {
+		return nil, fmt.Errorf("no additional static fleet hosts available")
+	}
+	info := p.instances[p.nextLaunch]
+	p.nextLaunch++
+	return &info, nil
+}
+
+func (p *staticFleetProvisioner) TerminateInstance(context.Context, string) error {
+	return nil
+}
+
+func (p *staticFleetProvisioner) StopInstance(context.Context, string) error {
+	return nil
+}
+
+func (p *staticFleetProvisioner) StartInstance(_ context.Context, instanceID string) (*instance.InstanceInfo, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i := range p.instances {
+		if p.instances[i].InstanceID == instanceID {
+			info := p.instances[i]
+			return &info, nil
+		}
+	}
+	return nil, fmt.Errorf("unknown static instance %q", instanceID)
+}
+
+func (p *staticFleetProvisioner) DescribeInstance(_ context.Context, instanceID string) (*instance.InstanceStatus, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i := range p.instances {
+		if p.instances[i].InstanceID == instanceID {
+			return &instance.InstanceStatus{
+				InstanceID: instanceID,
+				State:      instance.CloudInstanceRunning,
+				PrivateIP:  p.instances[i].PrivateIP,
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("unknown static instance %q", instanceID)
+}
+
+func (p *staticFleetProvisioner) ListInstances(_ context.Context, _ instance.InstanceFilter) ([]instance.InstanceInfo, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]instance.InstanceInfo, len(p.instances))
+	copy(out, p.instances)
+	return out, nil
+}
+
+type fleetNodeClientAdapter struct {
+	control.SandboxControl
+	sandboxService api.SandboxService
+}
+
+func (c *fleetNodeClientAdapter) HealthCheck(ctx context.Context) (*fleet.HealthCheckResult, error) {
+	resp, err := c.sandboxService.HealthCheck(ctx, &api.HealthCheckRequest{})
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("sandbox health check returned nil response")
+	}
+	return &fleet.HealthCheckResult{
+		Status:       resp.Status,
+		SessionCount: resp.SessionCount,
+		ActiveTools:  resp.ActiveTools,
+		Uptime:       resp.Uptime,
+		Errors:       append([]string(nil), resp.Errors...),
+	}, nil
 }

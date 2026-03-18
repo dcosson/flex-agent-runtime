@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control/fleet"
 )
 
 func TestParseServeOrchestratorConfigDefaults(t *testing.T) {
@@ -153,7 +155,7 @@ func TestInstanceProfileName(t *testing.T) {
 	}
 }
 
-func TestServeOrchestratorConfigValidateFleetModeRejected(t *testing.T) {
+func TestServeOrchestratorConfigValidateFleetModeAccepted(t *testing.T) {
 	cfg := serveOrchestratorConfig{
 		ListenAddr:           ":8080",
 		SandboxHostAddr:      "host1:8082,host2:8082",
@@ -164,11 +166,71 @@ func TestServeOrchestratorConfigValidateFleetModeRejected(t *testing.T) {
 		APIVersion:           "v1",
 		MinAPIVersion:        "v1",
 	}
-	err := cfg.validate()
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate() unexpected error for multiple sandbox-host addresses: %v", err)
+	}
+}
+
+func TestBuildNodeOrFleetControlFleetMode(t *testing.T) {
+	cfg := serveOrchestratorConfig{
+		APIVersion:          "v1",
+		HealthCheckInterval: 5 * time.Second,
+	}
+	control, err := buildNodeOrFleetControl([]string{"host1:8082", "host2:8082"}, cfg, nil)
+	if err != nil {
+		t.Fatalf("buildNodeOrFleetControl() error = %v", err)
+	}
+	if _, ok := control.(*fleet.FleetSandboxControl); !ok {
+		t.Fatalf("buildNodeOrFleetControl() type = %T, want *fleet.FleetSandboxControl", control)
+	}
+}
+
+func TestBuildNodeOrFleetControlFleetModeRejectsMixedPorts(t *testing.T) {
+	cfg := serveOrchestratorConfig{
+		APIVersion:          "v1",
+		HealthCheckInterval: 5 * time.Second,
+	}
+	_, err := buildNodeOrFleetControl([]string{"host1:8082", "host2:8083"}, cfg, nil)
 	if err == nil {
-		t.Fatal("validate() expected error for multiple sandbox-host addresses")
+		t.Fatal("buildNodeOrFleetControl() expected error for mixed ports")
 	}
-	if !strings.Contains(err.Error(), "fleet mode") {
-		t.Fatalf("validate() error = %v, want fleet mode rejection", err)
+	if !strings.Contains(err.Error(), "same port") {
+		t.Fatalf("buildNodeOrFleetControl() error = %v, want same-port validation", err)
 	}
+}
+
+func TestParseSandboxHostAddr(t *testing.T) {
+	t.Run("host port", func(t *testing.T) {
+		got, err := parseSandboxHostAddr("10.0.0.10:8082")
+		if err != nil {
+			t.Fatalf("parseSandboxHostAddr() error = %v", err)
+		}
+		if got.host != "10.0.0.10" || got.port != 8082 {
+			t.Fatalf("parseSandboxHostAddr() = %+v, want host=10.0.0.10 port=8082", got)
+		}
+	})
+
+	t.Run("url", func(t *testing.T) {
+		got, err := parseSandboxHostAddr("http://10.0.0.11:8082")
+		if err != nil {
+			t.Fatalf("parseSandboxHostAddr() error = %v", err)
+		}
+		if got.host != "10.0.0.11" || got.port != 8082 {
+			t.Fatalf("parseSandboxHostAddr() = %+v, want host=10.0.0.11 port=8082", got)
+		}
+	})
+
+	t.Run("missing port", func(t *testing.T) {
+		_, err := parseSandboxHostAddr("host1")
+		if err == nil {
+			t.Fatal("parseSandboxHostAddr() expected error for missing port")
+		}
+	})
+
+	t.Run("url path not allowed", func(t *testing.T) {
+		_, err := parseSandboxHostAddr("http://host1:8082/path")
+		if err == nil {
+			t.Fatal("parseSandboxHostAddr() expected error for URL path")
+		}
+	})
 }
