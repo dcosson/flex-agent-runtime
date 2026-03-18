@@ -5,7 +5,7 @@
 **Depended on by:** Orchestrator application (future), production-scale native sandbox deployment
 **Scope:** Implement `FleetSandboxControl`, an in-process fleet manager that implements `SandboxControl` by managing a pool of sandbox-host EC2 instances. Provider-agnostic via `InstanceProvisioner` interface with EC2 as the first implementation. Includes fleet control loop (scaling, health, warm pool), capacity-aware routing, and SandboxID-encoded instance routing.
 **Shaping source:** docs/shaping/ec2-fleet-management.md (Shape A selected: in-process fleet management with provider-agnostic InstanceProvisioner)
-**Incorporated reviews:** docs/plans/20-fleet-management-review-coder-1-sea.md, docs/plans/20-fleet-management-review-r1-b.md
+**Incorporated reviews:** docs/plans/20-fleet-management-review-coder-1-sea.md, docs/plans/20-fleet-management-review-r1-b.md, docs/plans/20-fleet-management-seam-review.md, docs/plans/20-fleet-management-review-r2-b.md
 
 ---
 
@@ -106,8 +106,8 @@ graph TD
 ```
 internal/sandbox/control/fleet        -> internal/sandbox/control (SandboxControl, types)
                                       -> internal/sandbox/control/native (NativeSandboxControl)
-                                      -> internal/rpc/api (SandboxService, HealthCheckResponse)
-                                      -> internal/rpc/client (SandboxClient constructor)
+                                      -> internal/rpc/api (SandboxService, HealthCheckResponse -- used in FleetNodeClient interface)
+                                      -> internal/rpc/client (SandboxClient constructor -- wrapped in FleetNodeClient)
 
 internal/sandbox/control/fleet/ec2    -> internal/sandbox/control/fleet (InstanceProvisioner)
                                       -> aws-sdk-go-v2/service/ec2
@@ -146,7 +146,13 @@ type InstanceProvisioner interface {
     // Used for cost savings on warm-pool instances that have been idle too long.
     StopInstance(ctx context.Context, instanceID string) error
 
-    // StartInstance restarts a previously stopped instance.
+    // StartInstance restarts a previously stopped instance. Returns updated
+    // InstanceInfo with potentially new IP addresses -- callers MUST use the
+    // returned IPs rather than cached values. Cloud providers may reassign
+    // IPs on stop/start (GCP releases external IP on stop; Azure deallocate
+    // may change private IP; EC2 reassigns public IP if not Elastic). The
+    // fleet control loop must update ManagedInstance.PrivateIP and recreate
+    // the FleetNodeClient via SandboxClientFactory using the new address.
     StartInstance(ctx context.Context, instanceID string) (*InstanceInfo, error)
 
     // DescribeInstance returns current status of an instance from the cloud
@@ -328,11 +334,22 @@ type FleetSandboxControl struct {
     pendingLaunches atomic.Int32 // current number of in-flight provisions
 }
 
-// SandboxClientFactory creates a SandboxControl client for a given
-// sandbox-host address. This is injected for testability -- unit tests
-// provide a mock factory, production code provides the real RPC client
-// constructor wrapping the connection in a NativeSandboxControl.
-type SandboxClientFactory func(addr string) (control.SandboxControl, error)
+// FleetNodeClient combines SandboxControl with health checking. The fleet
+// control loop needs both sandbox delegation and health polling from each
+// instance. SandboxControl alone has no HealthCheck method, so this
+// composite interface bridges the gap.
+type FleetNodeClient interface {
+    control.SandboxControl
+    HealthCheck(ctx context.Context) (*api.HealthCheckResponse, error)
+}
+
+// SandboxClientFactory creates a FleetNodeClient for a given sandbox-host
+// address. This is injected for testability -- unit tests provide a mock
+// factory, production code provides the real RPC client constructor
+// wrapping the connection in a NativeSandboxControl + health client.
+// The factory must return a FleetNodeClient (not just SandboxControl)
+// because the fleet control loop calls HealthCheck on every instance.
+type SandboxClientFactory func(addr string) (FleetNodeClient, error)
 
 // FleetConfig controls fleet behavior.
 type FleetConfig struct {
@@ -360,6 +377,7 @@ type FleetConfig struct {
 
     // Drain
     DrainTimeout           time.Duration // Max time to wait for active sandboxes during drain (default: 30m)
+    MaxTerminateRetries    int           // Max consecutive TerminateInstance failures before alerting (default: 5)
 
     // Sandbox-host port
     SandboxHostPort        int // Port sandbox-host listens on (default: 9100)
@@ -492,16 +510,20 @@ sequenceDiagram
     NSC->>SH: CreateSession(req)
 
     alt RPC success
-        SH-->>NSC: sessionID="sess-abc", address="..."
-        NSC-->>FSC: CreateSandboxResponse
+        SH-->>NSC: sessionID="sess-abc", address="/pool/sessions/sess-abc" (mountpoint)
+        NSC-->>FSC: CreateSandboxResponse (address is mountpoint, NOT routable)
         FSC->>FSC: Encode SandboxID = "fleet:instance-2:sess-abc"
-        FSC-->>Caller: CreateSandboxResponse{SandboxID: "fleet:instance-2:sess-abc", ...}
+        FSC->>FSC: Override Address = "{PrivateIP}:{SandboxHostPort}" (routable endpoint)
+        Note over FSC: Address rewriting is required because NativeSandboxControl<br/>maps Address to the ZFS session mountpoint, not a network endpoint.<br/>The fleet layer replaces it with the instance's routable address.
+        FSC-->>Caller: CreateSandboxResponse{SandboxID: "fleet:instance-2:sess-abc", Address: "10.0.1.5:9100"}
     else RPC failure
         NSC-->>FSC: error
         FSC->>ISM: RollbackSlot: decrement SessionCount [under inst mu.Lock]
         FSC-->>Caller: error
     end
 ```
+
+**Address rewriting contract:** `NativeSandboxControl.CreateSandbox` returns `CreateSandboxResponse.Address` set to the ZFS session mountpoint (e.g., `/pool/sessions/sess-abc`), which is a filesystem path, not a network endpoint. `FleetSandboxControl` MUST override this with the instance's routable address (`{PrivateIP}:{SandboxHostPort}`) before returning the response to the caller. This ensures the orchestrator receives a valid `host:port` address for reaching the sandbox over the network. Unit tests assert that `Address` returned from fleet `CreateSandbox` is in `"host:port"` format, not a filesystem path.
 
 ### 4.3 DestroySandbox / LaunchProcess / KillProcess / GetProcessStatus / PauseSandbox / ResumeSandbox
 
@@ -534,10 +556,38 @@ func (f *FleetSandboxControl) DestroySandbox(ctx context.Context, sandboxID stri
 }
 ```
 
-The same pattern applies to all other `SandboxControl` methods. The fleet layer is a thin router that:
+The same pattern applies to all other `SandboxControl` methods. For methods that take a request struct containing `SandboxID`, the fleet layer MUST rewrite the request to use the session-local ID before delegating. Example for `LaunchProcess`:
+
+```go
+func (f *FleetSandboxControl) LaunchProcess(ctx context.Context, req control.LaunchProcessRequest) (*control.LaunchProcessResponse, error) {
+    instanceID, sessionID, err := parseSandboxID(req.SandboxID)
+    if err != nil {
+        return nil, err
+    }
+    client, err := f.getInstanceClient(instanceID)
+    if err != nil {
+        return nil, err
+    }
+    // Rewrite the request with the session-local ID. The per-instance
+    // NativeSandboxControl passes req.SandboxID directly to the RPC as
+    // SessionID, so it MUST be the local session ID, not the fleet-encoded ID.
+    delegateReq := control.LaunchProcessRequest{
+        SandboxID:  sessionID,  // parsed local part, NOT the fleet SandboxID
+        Binary:     req.Binary,
+        Args:       req.Args,
+        Env:        req.Env,
+        ExposePort: req.ExposePort,
+    }
+    return client.LaunchProcess(ctx, delegateReq)
+}
+```
+
+The same request-rewriting pattern applies to `KillProcess`, `GetProcessStatus`, `PauseSandbox`, and `ResumeSandbox` -- each constructs a new request struct with `SandboxID` set to `sessionID`.
+
+The fleet layer is a thin router that:
 1. Parses the SandboxID to extract instance identity and session identity.
-2. Looks up the `NativeSandboxControl` client for that instance.
-3. Delegates the call with the session-local ID.
+2. Looks up the `FleetNodeClient` for that instance.
+3. Rewrites the request struct with the session-local ID before delegating.
 4. Updates bookkeeping (session counts) on create/destroy.
 
 Note: session count accuracy is ultimately guaranteed by the reconciliation algorithm (section 4.1.3), which periodically aligns fleet-tracked counts with the sandbox-host's authoritative HealthCheck response. The local count serves as a fast-path routing hint between reconciliation cycles.
@@ -568,22 +618,27 @@ Note: session count accuracy is ultimately guaranteed by the reconciliation algo
 func (f *FleetSandboxControl) Close() error
 ```
 
+`FleetSandboxControl` also implements `io.Closer`, so generic cleanup code can use type assertion (`if closer, ok := sc.(io.Closer); ok { closer.Close() }`). Note that `Close()` is intentionally NOT part of the `SandboxControl` interface: `NativeSandboxControl` has no background goroutines and does not need `Close()`. The orchestrator is responsible for knowing the concrete type and calling `Close()` on fleet providers. The `Close()` method has no context parameter; shutdown duration is bounded by `DrainTimeout` in `FleetConfig`.
+
 In-flight `CreateSandbox` calls that have already claimed a slot (section 4.1.1) are allowed to complete their RPC. The `Close` method waits for all in-flight operations to finish before beginning the drain sequence.
 
 ### 4.5 Capabilities
 
-`FleetSandboxControl` reports the same capabilities as the native sandbox, since it delegates all sandbox operations to `NativeSandboxControl`:
+`FleetSandboxControl` reports the same feature capabilities as the native sandbox (since it delegates all sandbox operations to `NativeSandboxControl`), but populates `ConcurrentSandboxes` with the fleet's theoretical maximum capacity:
 
 ```go
 func (f *FleetSandboxControl) Capabilities() control.SandboxCapabilities {
     return control.SandboxCapabilities{
-        Snapshots:     true,
-        Rollback:      true,
-        Pause:         true,
-        LaunchProcess: true,
+        Snapshots:          true,
+        Rollback:           true,
+        Pause:              true,
+        LaunchProcess:      true,
+        ConcurrentSandboxes: f.config.MaxInstances * f.config.MaxSessionsPerInstance,
     }
 }
 ```
+
+Note: `ConcurrentSandboxes` is the theoretical ceiling (`MaxInstances * MaxSessionsPerInstance`). Actual available capacity depends on fleet state (how many instances are provisioned, healthy, and have headroom). The orchestrator should use `ErrNoCapacity` as the primary backpressure signal for admission control, not `ConcurrentSandboxes`. The capability value is useful for capacity planning and display purposes.
 
 ---
 
@@ -627,7 +682,16 @@ sequenceDiagram
         Note over CL: Phase 5: Drain Completion
         CL->>ISM: Find Draining instances with 0 sessions
         CL->>IP: TerminateInstance(instanceID)
-        CL->>ISM: Transition -> Terminated, remove from registry
+        alt TerminateInstance succeeds
+            CL->>ISM: Transition -> Terminating, then remove from registry
+        else TerminateInstance fails
+            Note over CL: Instance stays in Draining (0 sessions).<br/>Phase 5 retries on next iteration.<br/>After N consecutive failures, log alert.
+        end
+
+        Note over CL: Phase 5b: Stuck Terminating Cleanup (crash recovery)
+        CL->>ISM: Find instances in Terminating state
+        CL->>IP: TerminateInstance(instanceID) -- retry
+        CL->>ISM: On success, remove from registry
 
         Note over CL: Phase 6: Provisioning Completion
         CL->>ISM: Find Provisioning instances
@@ -641,9 +705,11 @@ sequenceDiagram
     end
 ```
 
+**Phase 5 termination protocol:** The state transition to `Terminating` happens AFTER `TerminateInstance` succeeds, not before. If `TerminateInstance` fails, the instance remains in `Draining` with 0 sessions and phase 5 retries on the next control loop iteration. This prevents instances from getting stuck in `Terminating` state where no phase would retry them. After `MaxTerminateRetries` (default 5) consecutive `TerminateInstance` failures for the same instance, the control loop logs an alert-level message for manual intervention. Phase 5b handles crash recovery: if the fleet manager restarts and discovers instances in `Terminating` state (from a crash between the API call and registry removal), it retries `TerminateInstance` and removes them on success.
+
 ### 5.2 Health Polling
 
-Each iteration calls `HealthCheck` on every instance in state Ready or Active. The response from sandbox-host includes:
+Each iteration calls `HealthCheck` on every instance in state Ready or Active via `ManagedInstance.Client.HealthCheck(ctx)` (the `FleetNodeClient` interface). The response from sandbox-host includes:
 
 | Field | Type | Used For |
 |-------|------|----------|
@@ -793,7 +859,7 @@ Capacity data comes from two sources:
 
 1. **Fleet-tracked session count** -- incremented on `CreateSandbox` (via claim-slot), decremented on `DestroySandbox`. This is the primary routing signal because it is immediately consistent (no polling delay). It serves as a fast-path hint and may temporarily diverge from reality.
 
-2. **HealthCheck response** -- provides authoritative session count, CPU, memory, and ZFS pool space from the sandbox-host's perspective. The reconciliation algorithm (section 4.1.3) runs every control loop iteration and corrects any drift between the fleet-tracked count and the HealthCheck-reported count. The sandbox-host count is always trusted as the source of truth when a discrepancy is detected.
+2. **HealthCheck response** -- provides authoritative session count, ZFS pool health status (`PoolState`), and uptime from the sandbox-host's perspective. The reconciliation algorithm (section 4.1.3) runs every control loop iteration and corrects any drift between the fleet-tracked count and the HealthCheck-reported count. The sandbox-host count is always trusted as the source of truth when a discrepancy is detected. Note: the current `api.HealthCheckResponse` does not include CPU/memory utilization or ZFS pool space data (`PoolCapacity`/`PoolFree`). The sandbox-host's internal `HealthStatus` struct includes `PoolSpace zfs.PoolSpace`, but the RPC server adapter drops this field during conversion. If pool space data is needed for future resource-aware routing (OQ6), `PoolCapacity float64` and `PoolFree int64` fields should be added to `api.HealthCheckResponse` and the RPC server adapter updated. CPU/memory metrics would require a new data source not currently in sandbox-host.
 
 ---
 
@@ -823,8 +889,14 @@ fleet:i-0abc123def456:sess-7890xyz
 
 const sandboxIDPrefix = "fleet:"
 
-func encodeSandboxID(instanceID, sessionID string) string {
-    return sandboxIDPrefix + instanceID + ":" + sessionID
+func encodeSandboxID(instanceID, sessionID string) (string, error) {
+    if strings.Contains(instanceID, ":") {
+        return "", fmt.Errorf("invalid instance ID: contains colon: %q", instanceID)
+    }
+    if instanceID == "" || sessionID == "" {
+        return "", fmt.Errorf("invalid sandbox ID components: instanceID=%q sessionID=%q", instanceID, sessionID)
+    }
+    return sandboxIDPrefix + instanceID + ":" + sessionID, nil
 }
 
 func parseSandboxID(sandboxID string) (instanceID, sessionID string, err error) {
@@ -836,7 +908,11 @@ func parseSandboxID(sandboxID string) (instanceID, sessionID string, err error) 
     if idx < 0 {
         return "", "", fmt.Errorf("invalid fleet sandbox ID: missing session separator: %q", sandboxID)
     }
-    return rest[:idx], rest[idx+1:], nil
+    instanceID, sessionID = rest[:idx], rest[idx+1:]
+    if instanceID == "" || sessionID == "" {
+        return "", "", fmt.Errorf("invalid fleet sandbox ID: empty component: %q", sandboxID)
+    }
+    return instanceID, sessionID, nil
 }
 ```
 
@@ -858,7 +934,7 @@ The parser enforces:
 - Non-empty `instanceID` and `sessionID` components (empty components are rejected)
 - The `fleet:` prefix is required
 - The instance ID is validated against the known instance registry on routing calls
-- Characters are not restricted beyond the colon delimiter, since both EC2 instance IDs (`i-0abc123`) and session IDs (`sess-xyz`) use alphanumeric + hyphen characters that do not conflict with the colon separator
+- Instance IDs MUST NOT contain colons -- `encodeSandboxID` rejects them at runtime. This is a hard constraint on provider instance ID formats. Current providers (EC2 `i-{hex}`, GCP numeric IDs, Azure resource names) satisfy this. Session IDs may contain colons since everything after `{instanceID}:` is treated as the sessionID
 
 ---
 
@@ -888,7 +964,7 @@ type ManagedInstance struct {
     State               InstanceState
     SessionCount        int
     MaxSessions         int
-    Client              control.SandboxControl // SandboxControl client for this instance
+    Client              FleetNodeClient // Combined SandboxControl + HealthCheck client for this instance
     LastHealthCheck      time.Time
     LastHealthStatus     string // "healthy", "degraded", "unhealthy"
     ConsecutiveFailures  int
@@ -1051,7 +1127,10 @@ All unit tests use a mock `InstanceProvisioner` and mock `SandboxClientFactory`.
 - DestroySandbox with invalid SandboxID format returns error
 - LaunchProcess / KillProcess / GetProcessStatus route correctly via SandboxID
 - PauseSandbox / ResumeSandbox route correctly via SandboxID
-- Capabilities returns native sandbox capabilities
+- CreateSandbox overrides Address with routable host:port (not mountpoint passthrough)
+- LaunchProcess rewrites request SandboxID to session-local ID before delegation
+- KillProcess / GetProcessStatus rewrite request SandboxID to session-local ID
+- Capabilities returns ConcurrentSandboxes = MaxInstances * MaxSessionsPerInstance
 - Concurrent CreateSandbox calls are serialized correctly (no double-assignment)
 - Close stops control loop, drains all instances, terminates instances
 - Close with LeaveInstancesOnClose leaves instances running
@@ -1070,7 +1149,11 @@ All unit tests use a mock `InstanceProvisioner` and mock `SandboxClientFactory`.
 - Scale-down triggered when instance idle > IdleCooldown
 - Scale-down respects MinInstances floor
 - Scale-down does not remove instances when idle count <= WarmPoolTarget
-- Drain completion terminates instance when session count reaches 0
+- Drain completion terminates instance when session count reaches 0 (state -> Terminating AFTER API success)
+- Drain completion TerminateInstance failure leaves instance in Draining for retry
+- Drain completion retries TerminateInstance on next loop iteration
+- Drain completion logs alert after MaxTerminateRetries consecutive failures
+- Phase 5b cleans up instances stuck in Terminating state after crash recovery
 - Drain timeout force-terminates instance
 - Draining instance with DrainReason "health" recovers to Ready after 3 consecutive healthy checks
 - Draining instance with DrainReason "scale-down" does NOT recover to Ready
@@ -1105,6 +1188,8 @@ All unit tests use a mock `InstanceProvisioner` and mock `SandboxClientFactory`.
 - parseSandboxID with missing prefix returns error
 - parseSandboxID with missing session separator returns error
 - parseSandboxID with empty components returns error
+- encodeSandboxID with colon in instanceID returns error
+- encodeSandboxID with empty instanceID or sessionID returns error
 
 **EC2InstanceProvisioner (ec2/ec2_provisioner_test.go):**
 - LaunchInstance calls RunInstances with correct parameters including EC2LaunchConfig fields (mock EC2 API)
@@ -1162,7 +1247,7 @@ type MockInstanceProvisioner struct {
 }
 ```
 
-The `SandboxClientFactory` in tests returns a mock `SandboxControl` that records all calls and returns configured responses. This allows testing the full fleet flow (routing -> claim-slot -> delegation -> bookkeeping) without any RPC or cloud infrastructure.
+The `SandboxClientFactory` in tests returns a mock `FleetNodeClient` that implements both `SandboxControl` and `HealthCheck`, recording all calls and returning configured responses. This allows testing the full fleet flow (routing -> claim-slot -> delegation -> bookkeeping) and health polling without any RPC or cloud infrastructure.
 
 ---
 
@@ -1394,4 +1479,27 @@ Findings from `docs/plans/20-fleet-management-review-coder-1-sea.md` and `docs/p
 | 19 | r1-b P3-4 | P3 | Test list omits concurrent CreateSandbox + control loop drain interaction | **Fixed.** Added test case: "CreateSandbox that selects an instance racing with control loop drain transition is handled correctly (claim-slot prevents routing to draining instance)". | 11.1 |
 | 20 | r1-b P3 (CloudInstanceState) | P3 | CloudInstanceState should be string or truly minimal provider-neutral set | **Addressed.** Kept the 6-value enum but documented it as provider-neutral with mapping responsibility on each provisioner. The set is minimal and covers all lifecycle phases needed by the fleet manager's state machine. | 3 |
 
-**All P0 and P1 findings resolved. All P2 findings resolved or explicitly deferred with justification. All P3 findings resolved.**
+### Seam Review Findings (docs/plans/20-fleet-management-seam-review.md)
+
+| # | Source | Priority | Finding | Disposition | Section(s) Updated |
+|---|--------|----------|---------|-------------|-------------------|
+| 21 | seam-review P1-1 | P1 | HealthCheck seam gap: `SandboxClientFactory` returns `SandboxControl` which has no `HealthCheck` method, so control loop cannot poll health | **Fixed.** Introduced `FleetNodeClient` interface combining `control.SandboxControl` + `HealthCheck`. Updated `SandboxClientFactory` to return `FleetNodeClient`. Updated `ManagedInstance.Client` type to `FleetNodeClient`. | 4.1, 5.2, 8, 11.3 |
+| 22 | seam-review P1-2 | P1 | CreateSandbox address contract drift: `NativeSandboxControl` maps `Address` to ZFS mountpoint, not routable `host:port` | **Fixed.** Fleet layer explicitly overrides `CreateSandboxResponse.Address` with `{PrivateIP}:{SandboxHostPort}`. Added address rewriting note after section 4.2 sequence diagram. Added unit test assertion. | 4.2 |
+| 23 | seam-review P1-3 | P1 | TerminateInstance failure handling in drain completion ambiguous -- state transition timing and retry path unclear | **Fixed.** Specified that transition to `Terminating` happens AFTER `TerminateInstance` succeeds. On failure, instance stays in `Draining` for retry. Added `MaxTerminateRetries` config. Added phase 5b for crash recovery cleanup of stuck `Terminating` instances. | 4.1 (FleetConfig), 5.1 |
+| 24 | seam-review P1-4 | P1 | `Capabilities()` returns `ConcurrentSandboxes = 0` (unlimited) but fleet has hard limit `MaxInstances * MaxSessionsPerInstance` | **Fixed.** `Capabilities()` now returns `ConcurrentSandboxes: MaxInstances * MaxSessionsPerInstance`. Documented as theoretical ceiling with `ErrNoCapacity` as primary backpressure signal. | 4.5 |
+| 25 | seam-review P2-1 | P2 | HealthCheck data contract overstated: plan claims CPU/memory/pool-space but actual RPC only has Status/PoolState/SessionCount/ActiveTools/Uptime/Errors | **Fixed.** Revised section 6.2 to accurately state available fields. Documented that pool space data requires `PoolCapacity`/`PoolFree` additions to `api.HealthCheckResponse`. CPU/memory would need new data source. | 6.2 |
+| 26 | seam-review P2-2 | P2 | Request struct rewriting for delegated `LaunchProcess`/`KillProcess`/`GetProcessStatus` not shown -- fleet SandboxID might be passed through to native | **Fixed.** Added explicit pseudocode for `LaunchProcess` request rewriting in section 4.3. Documented that all request-struct methods must rewrite `SandboxID` to session-local ID. | 4.3 |
+| 27 | seam-review P2-3 | P2 | `StopInstance`/`StartInstance` IP change semantics not documented -- cached IPs may become stale after restart | **Fixed.** Added doc comment to `StartInstance` noting IPs may change. Fleet control loop must update `ManagedInstance.PrivateIP` and recreate client via `SandboxClientFactory`. | 3 |
+| 28 | seam-review P2-4 | P2 | SandboxID `instanceID` colon validation missing -- future providers with colons in IDs would produce ambiguous encoding | **Fixed.** `encodeSandboxID` now rejects instance IDs containing colons at runtime. Section 7.4 documents this as a hard constraint on provider instance ID formats. | 7.2, 7.4 |
+| 29 | seam-review P2-5 | P2 | `SandboxControl` interface lacks `Close()` but `FleetSandboxControl` needs one -- lifecycle management asymmetry | **Fixed.** Documented that `Close()` is intentionally outside `SandboxControl`. `FleetSandboxControl` implements `io.Closer` for generic cleanup. Orchestrator responsible for calling `Close()` on concrete type. | 4.4 |
+| 30 | seam-review P3-1 | P3 | SandboxID parser snippet omits empty-component checks despite stated validation contract | **Fixed.** Updated `parseSandboxID` pseudocode with explicit empty-component checks. | 7.2 |
+| 31 | seam-review P3-2 | P3 | No startup-time validation of `InstanceConfig.InstanceType` for active provider | **Deferred.** `LaunchInstance` must return a clear error for invalid instance types. Startup validation via `ValidateConfig` method is a reasonable future addition but not required for initial implementation -- the first `LaunchInstance` call surfaces the error within seconds of fleet startup. | -- |
+
+### Round 2 Review B Findings (docs/plans/20-fleet-management-review-r2-b.md)
+
+| # | Source | Priority | Finding | Disposition | Section(s) Updated |
+|---|--------|----------|---------|-------------|-------------------|
+| 32 | r2-b P2 | P2 | `DestroySandbox` decrement-before-RPC briefly violates `>=` count invariant (fleet_count < actual_sessions during failed RPC window) | **Acknowledged, no change.** The window is narrow (duration of one failed RPC) and the re-increment on failure closes it. The reconciliation loop (4.1.3) provides ultimate correctness. The invariant statement in 4.1.1 applies strictly to the `CreateSandbox` path; `DestroySandbox` uses the inverse pattern where brief undercount is acceptable because drain decisions wait for count to reach 0 regardless. |
+| 33 | r2-b P3 | P3 | `Close()` has no context parameter for caller-controlled shutdown timeout | **Deferred.** `DrainTimeout` already bounds the wait. Adding `Close(ctx context.Context) error` can be done in a follow-up if independent timeout control is needed. | -- |
+
+**All P0 and P1 findings resolved. All P2 findings resolved, acknowledged, or explicitly deferred with justification. All P3 findings resolved or deferred.**
