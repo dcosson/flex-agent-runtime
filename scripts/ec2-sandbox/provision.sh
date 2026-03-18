@@ -238,8 +238,8 @@ imds_token="\$(curl -fsSL -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' h
 private_ip="\$(curl -fsSL -H "X-aws-ec2-metadata-token: \${imds_token}" http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
 
 cat >/etc/default/flexagent-orchestrator <<ENVVARS
-ORCHESTRATOR_LISTEN=:${RPC_PORT}
-ORCHESTRATOR_ADVERTISE_ADDR=\${private_ip}
+FLEXAGENT_LISTEN=:${RPC_PORT}
+FLEXAGENT_ADVERTISE_ADDR=\${private_ip}
 SANDBOX_HOST_ADDR=${SANDBOX_HOST_ADDR}
 ENVVARS
 
