@@ -164,7 +164,8 @@ zfs list "\$default_base" >/dev/null 2>&1 || zfs create -o mountpoint=/var/lib/f
 echo "flexagent sandbox base image" >/var/lib/flexagent/bases/default/README.txt
 zfs list -t snapshot "\${default_base}@initial" >/dev/null 2>&1 || zfs snapshot "\${default_base}@initial"
 
-private_ip="\$(curl -fsSL http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
+imds_token="\$(curl -fsSL -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' http://169.254.169.254/latest/api/token || true)"
+private_ip="\$(curl -fsSL -H "X-aws-ec2-metadata-token: \${imds_token}" http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
 
 cat >/etc/default/flexagent-sandbox-host <<ENVVARS
 SANDBOX_HOST_LISTEN=:${RPC_PORT}
@@ -220,7 +221,8 @@ mkdir -p /var/lib/flexagent
 # Disable systemctl pager to avoid "terminal is not fully functional" warning
 echo 'export SYSTEMD_PAGER=""' >> /etc/profile.d/no-pager.sh
 
-private_ip="\$(curl -fsSL http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
+imds_token="\$(curl -fsSL -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' http://169.254.169.254/latest/api/token || true)"
+private_ip="\$(curl -fsSL -H "X-aws-ec2-metadata-token: \${imds_token}" http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
 
 cat >/etc/default/flexagent-orchestrator <<ENVVARS
 ORCHESTRATOR_LISTEN=:${RPC_PORT}
@@ -237,7 +239,7 @@ ConditionPathExists=/usr/local/bin/flexagent
 [Service]
 Type=simple
 EnvironmentFile=/etc/default/flexagent-orchestrator
-ExecStart=/usr/local/bin/flexagent serve all
+ExecStart=/usr/local/bin/flexagent serve agent
 Restart=on-failure
 RestartSec=2
 LimitNOFILE=65536
