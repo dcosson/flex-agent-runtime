@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -57,10 +58,10 @@ const (
 // path may acquire FleetSandboxControl.mu while holding any ManagedInstance.mu.
 // This prevents deadlocks between the control loop and concurrent callers.
 // See plan 20, section 4.1.2.
-//
-// A sync.RWMutex field (mu) will be added in bead aiag-1xd.3 when methods
-// that require locking are implemented.
 type ManagedInstance struct {
+	// mu guards all mutable fields below. See lock ordering note above.
+	mu sync.RWMutex
+
 	// InstanceID is the cloud provider's unique identifier.
 	InstanceID string
 
