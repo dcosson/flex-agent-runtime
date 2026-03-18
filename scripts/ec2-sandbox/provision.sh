@@ -239,8 +239,7 @@ private_ip="\$(curl -fsSL -H "X-aws-ec2-metadata-token: \${imds_token}" http://1
 
 cat >/etc/default/flexagent-orchestrator <<ENVVARS
 FLEXAGENT_LISTEN=:${RPC_PORT}
-FLEXAGENT_ADVERTISE_ADDR=\${private_ip}
-SANDBOX_HOST_ADDR=${SANDBOX_HOST_ADDR}
+ORCHESTRATOR_SANDBOX_HOST_ADDR=${SANDBOX_HOST_ADDR}
 ENVVARS
 
 cat >/etc/systemd/system/flexagent-orchestrator.service <<UNIT
@@ -253,7 +252,7 @@ ConditionPathExists=/usr/local/bin/flexagent
 [Service]
 Type=simple
 EnvironmentFile=/etc/default/flexagent-orchestrator
-ExecStart=/usr/local/bin/flexagent serve agent
+ExecStart=/usr/local/bin/flexagent serve orchestrator
 Restart=on-failure
 RestartSec=2
 LimitNOFILE=65536

@@ -9,6 +9,9 @@ import (
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control"
 )
 
+// Compile-time interface check.
+var _ control.SandboxControl = (*CloudSandboxControl)(nil)
+
 // CloudSandboxControl is a placeholder for cloud-based sandbox providers.
 // All methods return ErrNotImplemented.
 type CloudSandboxControl struct {

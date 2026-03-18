@@ -10,6 +10,9 @@ import (
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control"
 )
 
+// Compile-time interface check.
+var _ control.SandboxControl = (*NodeSandboxControl)(nil)
+
 // Option configures a NodeSandboxControl.
 type Option func(*NodeSandboxControl)
 

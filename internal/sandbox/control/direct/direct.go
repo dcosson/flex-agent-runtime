@@ -14,6 +14,11 @@ import (
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control/instance"
 )
 
+// Compile-time interface checks.
+var (
+	_ control.SandboxControl = (*DirectSandboxControl)(nil)
+)
+
 // Default timeout values.
 const (
 	defaultInstanceReadyTimeout = 3 * time.Minute
