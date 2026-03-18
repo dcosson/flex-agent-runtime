@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/driver"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/driver"
 )
 
 func TestAgentMessageToConversationEntries_AssistantToolUseThinking(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	"connectrpc.com/connect"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc"
 )
 
 func toConnectError(err error) error {

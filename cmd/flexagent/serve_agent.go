@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/transport"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/transport"
 )
 
 type agentConfig struct {

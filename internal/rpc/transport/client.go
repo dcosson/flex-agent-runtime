@@ -5,10 +5,10 @@ import (
 	"net/http"
 
 	"connectrpc.com/connect"
-	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux"
+	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux"
 )
 
 type ClientConfig struct {

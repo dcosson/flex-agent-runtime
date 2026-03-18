@@ -3,8 +3,8 @@ package local
 import (
 	"context"
 
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox/environment"
-	"github.com/anthropics/flex-agent-runtime/internal/tools"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment"
+	"github.com/dcosson/flex-agent-runtime/internal/tools"
 )
 
 // executeLocalTool is an implementation seam so LocalEnvironment does not

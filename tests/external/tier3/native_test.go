@@ -12,7 +12,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/tests/external/common"
+	"github.com/dcosson/flex-agent-runtime/tests/external/common"
 )
 
 // TestNativeZFSPool verifies end-to-end ZFS pool operations using a real

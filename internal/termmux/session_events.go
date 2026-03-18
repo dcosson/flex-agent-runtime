@@ -6,9 +6,9 @@ import (
 	"os"
 	"runtime/debug"
 
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/eventsrc/otelserver"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/eventsrc/sessionlog"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/eventsrc/otelserver"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/eventsrc/sessionlog"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/monitor"
 )
 
 // EventSourceConfig configures the event sources for a session.

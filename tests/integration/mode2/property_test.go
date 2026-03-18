@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
-	"github.com/anthropics/flex-agent-runtime/tests/integration/mode2/harness"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/monitor"
+	"github.com/dcosson/flex-agent-runtime/tests/integration/mode2/harness"
 
 	"pgregory.net/rapid"
 )

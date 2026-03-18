@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/monitor"
 )
 
 // TermmuxEnv wraps a termmux session with E2E test helpers for

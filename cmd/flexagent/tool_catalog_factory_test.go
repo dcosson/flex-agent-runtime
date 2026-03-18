@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/transport"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/transport"
 )
 
 func TestRuntimeToolCatalogFactoryLocal(t *testing.T) {

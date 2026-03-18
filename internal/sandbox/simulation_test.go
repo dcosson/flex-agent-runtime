@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox/gvisor"
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/gvisor"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/zfs"
 )
 
 // DS1. Full Session Lifecycle Simulation

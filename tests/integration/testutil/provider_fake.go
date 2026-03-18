@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
 )
 
 // ScriptEntry defines one provider response in a scripted conversation.

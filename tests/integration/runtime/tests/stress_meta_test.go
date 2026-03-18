@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	rh "github.com/anthropics/flex-agent-runtime/tests/integration/runtime/harness"
-	"github.com/anthropics/flex-agent-runtime/tests/integration/runtime/workloads"
+	rh "github.com/dcosson/flex-agent-runtime/tests/integration/runtime/harness"
+	"github.com/dcosson/flex-agent-runtime/tests/integration/runtime/workloads"
 )
 
 // =============================================================================

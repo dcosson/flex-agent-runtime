@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
 )
 
 // ST1. Continuous mixed traffic soak (short version for CI).

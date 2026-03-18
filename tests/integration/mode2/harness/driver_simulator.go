@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/monitor"
 )
 
 // ReplayMode controls how inter-event delays are handled.

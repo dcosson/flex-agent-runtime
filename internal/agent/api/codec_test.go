@@ -8,7 +8,7 @@ import (
 
 	"pgregory.net/rapid"
 
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
 )
 
 func TestAgentMessageCodecRoundTrip_Table(t *testing.T) {

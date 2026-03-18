@@ -7,12 +7,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
-	rpcclient "github.com/anthropics/flex-agent-runtime/internal/rpc/client"
-	rpcserver "github.com/anthropics/flex-agent-runtime/internal/rpc/server"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/transport"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
+	rpcclient "github.com/dcosson/flex-agent-runtime/internal/rpc/client"
+	rpcserver "github.com/dcosson/flex-agent-runtime/internal/rpc/server"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/transport"
 )
 
 // AgentTestStack wires AgentLoopService + AgentRPCServer + AgentServiceClient.

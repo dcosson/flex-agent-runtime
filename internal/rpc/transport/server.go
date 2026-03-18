@@ -10,11 +10,11 @@ import (
 	"sync/atomic"
 
 	"connectrpc.com/connect"
-	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	rpcserver "github.com/anthropics/flex-agent-runtime/internal/rpc/server"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux"
+	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	rpcserver "github.com/dcosson/flex-agent-runtime/internal/rpc/server"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux"
 )
 
 type ServerConfig struct {

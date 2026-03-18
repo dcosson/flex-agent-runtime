@@ -6,8 +6,8 @@ import (
 	"io"
 
 	"connectrpc.com/connect"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/transport"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/transport"
 )
 
 // SandboxServiceClient implements api.SandboxService over ConnectRPC.

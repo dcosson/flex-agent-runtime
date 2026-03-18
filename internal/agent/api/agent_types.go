@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
 )
 
 // CurrentConversationSchemaVersion is the supported schema version for

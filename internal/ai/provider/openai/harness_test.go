@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
-	"github.com/anthropics/flex-agent-runtime/internal/ai/testutil/stubserver"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/ai/testutil/stubserver"
 	"pgregory.net/rapid"
 )
 

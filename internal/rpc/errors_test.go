@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/zfs"
 )
 
 func TestWrapRPCErrorAddsContext(t *testing.T) {

@@ -13,10 +13,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anthropics/flex-agent-runtime/ai"
-	provideranthropic "github.com/anthropics/flex-agent-runtime/ai/provider/anthropic"
-	providergoogle "github.com/anthropics/flex-agent-runtime/ai/provider/google"
-	provideropenai "github.com/anthropics/flex-agent-runtime/ai/provider/openai"
+	"github.com/dcosson/flex-agent-runtime/ai"
+	provideranthropic "github.com/dcosson/flex-agent-runtime/ai/provider/anthropic"
+	providergoogle "github.com/dcosson/flex-agent-runtime/ai/provider/google"
+	provideropenai "github.com/dcosson/flex-agent-runtime/ai/provider/openai"
 )
 
 const (

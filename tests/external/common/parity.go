@@ -3,7 +3,7 @@ package common
 import (
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
 )
 
 // EventTypeSequence extracts the event type sequence from a list of agent events.

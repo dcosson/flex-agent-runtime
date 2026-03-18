@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	mh "github.com/anthropics/flex-agent-runtime/tests/integration/mode3/harness"
-	"github.com/anthropics/flex-agent-runtime/tests/integration/testutil"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	mh "github.com/dcosson/flex-agent-runtime/tests/integration/mode3/harness"
+	"github.com/dcosson/flex-agent-runtime/tests/integration/testutil"
 )
 
 // S6: Event stream remote visibility (ordered milestones).

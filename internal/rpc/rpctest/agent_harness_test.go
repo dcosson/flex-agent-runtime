@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	"github.com/anthropics/flex-agent-runtime/internal/agent/agenttest"
-	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	"github.com/dcosson/flex-agent-runtime/internal/agent/agenttest"
+	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
 )
 
 func TestEF1_AgentRPCNoDroppedEvents(t *testing.T) {

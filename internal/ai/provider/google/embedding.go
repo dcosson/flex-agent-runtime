@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
 )
 
 const embeddingAPIName = "google-embeddings"

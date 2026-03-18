@@ -6,8 +6,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox/control"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control"
 )
 
 // Option configures a NativeSandboxControl.

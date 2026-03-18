@@ -1,6 +1,6 @@
 package native
 
-import "github.com/anthropics/flex-agent-runtime/internal/sandbox"
+import "github.com/dcosson/flex-agent-runtime/internal/sandbox"
 
 type StorageBackend = sandbox.StorageBackend
 type ContainerRuntime = sandbox.ContainerRuntime

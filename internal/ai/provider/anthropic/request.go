@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
 )
 
 func buildRequest(model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, thinking *wireThinking) (wireRequest, error) {

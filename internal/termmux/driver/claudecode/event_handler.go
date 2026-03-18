@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/monitor"
 )
 
 // EventHandler processes three event sources (OTEL, hooks, session log)

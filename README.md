@@ -47,8 +47,8 @@ export OPENAI_API_KEY=your-key-here
 
 ```go
 import (
-    "github.com/anthropics/flex-agent-runtime/ai"
-    "github.com/anthropics/flex-agent-runtime/ai/provider/anthropic"
+    "github.com/dcosson/flex-agent-runtime/ai"
+    "github.com/dcosson/flex-agent-runtime/ai/provider/anthropic"
 )
 
 // Register a provider
@@ -71,8 +71,8 @@ msg, err := es.Result()
 
 ```go
 import (
-    "github.com/anthropics/flex-agent-runtime/ai"
-    "github.com/anthropics/flex-agent-runtime/ai/provider/openai"
+    "github.com/dcosson/flex-agent-runtime/ai"
+    "github.com/dcosson/flex-agent-runtime/ai/provider/openai"
 )
 
 // Embeddings

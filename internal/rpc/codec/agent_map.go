@@ -1,10 +1,10 @@
 package codec
 
 import (
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
 )
 
 // CopySessionMetrics preserves the wire-shape while keeping mapping explicit.

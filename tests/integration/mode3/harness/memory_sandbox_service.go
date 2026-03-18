@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/rpc"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
-	"github.com/anthropics/flex-agent-runtime/internal/tools"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox"
+	"github.com/dcosson/flex-agent-runtime/internal/tools"
 )
 
 const (

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/internal/rpc"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/codec"
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/codec"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox"
 )
 
 // Coverage gap: server.CreateSnapshot

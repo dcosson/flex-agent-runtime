@@ -1010,7 +1010,7 @@ The RuntimeController layer wraps around the harness:
 ## Module Structure
 
 ```
-github.com/anthropics/flex-agent-runtime/
+github.com/dcosson/flex-agent-runtime/
 ├── go.mod
 ├── go.sum
 │

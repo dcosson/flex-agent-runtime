@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
-	"github.com/anthropics/flex-agent-runtime/internal/tools"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/dcosson/flex-agent-runtime/internal/tools"
 
 	"pgregory.net/rapid"
 )

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/server"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/server"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux"
 
 	"github.com/coder/websocket"
 )

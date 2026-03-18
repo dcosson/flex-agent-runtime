@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/rpc"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/transport"
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/transport"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox"
 )
 
 func TestSandboxServiceClientRoundTripCreateGet(t *testing.T) {

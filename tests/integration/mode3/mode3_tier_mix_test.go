@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	"github.com/anthropics/flex-agent-runtime/internal/tools"
-	mh "github.com/anthropics/flex-agent-runtime/tests/integration/mode3/harness"
-	"github.com/anthropics/flex-agent-runtime/tests/integration/testutil"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/tools"
+	mh "github.com/dcosson/flex-agent-runtime/tests/integration/mode3/harness"
+	"github.com/dcosson/flex-agent-runtime/tests/integration/testutil"
 )
 
 // S2: Tier routing with snapshot metadata (Tier 1+2 mix).

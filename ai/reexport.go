@@ -1,6 +1,6 @@
 package ai
 
-import internal "github.com/anthropics/flex-agent-runtime/internal/ai"
+import internal "github.com/dcosson/flex-agent-runtime/internal/ai"
 
 type (
 	Role                  = internal.Role

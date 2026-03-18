@@ -3,7 +3,7 @@ package mode2
 import (
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/tests/integration/mode2/harness"
+	"github.com/dcosson/flex-agent-runtime/tests/integration/mode2/harness"
 )
 
 // S5: Config directory persistence (path stability).

@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
-	"github.com/anthropics/flex-agent-runtime/internal/tools"
-	"github.com/anthropics/flex-agent-runtime/internal/tools/codeinterp"
-	"github.com/anthropics/flex-agent-runtime/tests/integration/testutil"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/tools"
+	"github.com/dcosson/flex-agent-runtime/internal/tools/codeinterp"
+	"github.com/dcosson/flex-agent-runtime/tests/integration/testutil"
 )
 
 // Scenario defines a complete E2E test scenario.

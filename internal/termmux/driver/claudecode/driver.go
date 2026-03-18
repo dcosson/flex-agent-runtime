@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/driver"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/driver"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/monitor"
 )
 
 const (

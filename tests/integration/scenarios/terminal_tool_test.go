@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
-	"github.com/anthropics/flex-agent-runtime/tests/integration/harness"
-	"github.com/anthropics/flex-agent-runtime/tests/integration/testutil"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/tests/integration/harness"
+	"github.com/dcosson/flex-agent-runtime/tests/integration/testutil"
 )
 
 // TestScenario_TerminalToolCompletion validates §4.6:

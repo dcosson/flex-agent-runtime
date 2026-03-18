@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/server"
-	"github.com/anthropics/flex-agent-runtime/internal/tools"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/server"
+	"github.com/dcosson/flex-agent-runtime/internal/tools"
 )
 
 // B1. End-to-end tool dispatch latency (Mode3 overhead p95 target <=10ms over local baseline).

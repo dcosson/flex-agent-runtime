@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
 )
 
 func TestResolveConflicts_Empty(t *testing.T) {

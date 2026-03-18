@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox/gvisor"
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox/zfs"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/gvisor"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/zfs"
 )
 
 func TestNewSandboxHostService_BackendCombinations(t *testing.T) {

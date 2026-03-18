@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
-	"github.com/anthropics/flex-agent-runtime/internal/ai/provider/cohere"
-	"github.com/anthropics/flex-agent-runtime/internal/ai/provider/google"
-	"github.com/anthropics/flex-agent-runtime/internal/ai/provider/openai"
-	"github.com/anthropics/flex-agent-runtime/internal/ai/testutil/stubserver"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/ai/provider/cohere"
+	"github.com/dcosson/flex-agent-runtime/internal/ai/provider/google"
+	"github.com/dcosson/flex-agent-runtime/internal/ai/provider/openai"
+	"github.com/dcosson/flex-agent-runtime/internal/ai/testutil/stubserver"
 )
 
 // loadJSONFixture reads a JSON fixture file from testdata/fixtures/.

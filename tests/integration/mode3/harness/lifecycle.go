@@ -3,7 +3,7 @@ package harness
 import (
 	"context"
 
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
 )
 
 type SessionLifecycle struct {

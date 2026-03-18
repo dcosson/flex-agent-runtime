@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
+	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
 )
 
 const (

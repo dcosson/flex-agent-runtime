@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox"
 )
 
 type Config struct {

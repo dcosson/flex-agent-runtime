@@ -9,9 +9,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox/environment"
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox/environment/local"
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox/environment/native"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/local"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/native"
 )
 
 func TestST1_ConcurrentEnvironmentLifecycle(t *testing.T) {

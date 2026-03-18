@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/eventsrc/otelserver"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/monitor"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/eventsrc/otelserver"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/monitor"
 )
 
 // =============================================================================

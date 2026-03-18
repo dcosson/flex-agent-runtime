@@ -1,6 +1,6 @@
 package google
 
-import "github.com/anthropics/flex-agent-runtime/internal/ai"
+import "github.com/dcosson/flex-agent-runtime/internal/ai"
 
 func mapUsage(u *usageMetadata) ai.Usage {
 	if u == nil {

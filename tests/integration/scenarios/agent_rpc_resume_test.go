@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent/agenttest"
-	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/driver"
-	"github.com/anthropics/flex-agent-runtime/internal/termmux/driver/claudecode"
+	"github.com/dcosson/flex-agent-runtime/internal/agent/agenttest"
+	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/driver"
+	"github.com/dcosson/flex-agent-runtime/internal/termmux/driver/claudecode"
 )
 
 func TestCR1_AgentRPCResumeRoundTrip(t *testing.T) {

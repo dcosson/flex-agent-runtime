@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent/agenttest"
-	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
+	"github.com/dcosson/flex-agent-runtime/internal/agent/agenttest"
+	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
 	"pgregory.net/rapid"
 )
 

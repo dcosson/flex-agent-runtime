@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	"github.com/anthropics/flex-agent-runtime/internal/ai"
-	"github.com/anthropics/flex-agent-runtime/internal/ai/provider/anthropic"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/codec"
-	"github.com/anthropics/flex-agent-runtime/internal/tools"
-	"github.com/anthropics/flex-agent-runtime/tests/external/common"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	"github.com/dcosson/flex-agent-runtime/internal/ai"
+	"github.com/dcosson/flex-agent-runtime/internal/ai/provider/anthropic"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/codec"
+	"github.com/dcosson/flex-agent-runtime/internal/tools"
+	"github.com/dcosson/flex-agent-runtime/tests/external/common"
 )
 
 func stubserverURL() string {

@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthropics/flex-agent-runtime/internal/agent"
-	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
-	rpcclient "github.com/anthropics/flex-agent-runtime/internal/rpc/client"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/transport"
-	"github.com/anthropics/flex-agent-runtime/internal/sandbox/control"
-	localenv "github.com/anthropics/flex-agent-runtime/internal/sandbox/environment/local"
-	nativeenv "github.com/anthropics/flex-agent-runtime/internal/sandbox/environment/native"
-	"github.com/anthropics/flex-agent-runtime/internal/tools"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
+	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
+	rpcclient "github.com/dcosson/flex-agent-runtime/internal/rpc/client"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/transport"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control"
+	localenv "github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/local"
+	nativeenv "github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/native"
+	"github.com/dcosson/flex-agent-runtime/internal/tools"
 )
 
 func newRuntimeToolCatalogFactory(logger *slog.Logger) agent.ToolCatalogFactory {

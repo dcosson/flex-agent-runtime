@@ -3,10 +3,10 @@ package provider_test
 import (
 	"testing"
 
-	provideranthropic "github.com/anthropics/flex-agent-runtime/ai/provider/anthropic"
-	providercohere "github.com/anthropics/flex-agent-runtime/ai/provider/cohere"
-	providergoogle "github.com/anthropics/flex-agent-runtime/ai/provider/google"
-	provideropenai "github.com/anthropics/flex-agent-runtime/ai/provider/openai"
+	provideranthropic "github.com/dcosson/flex-agent-runtime/ai/provider/anthropic"
+	providercohere "github.com/dcosson/flex-agent-runtime/ai/provider/cohere"
+	providergoogle "github.com/dcosson/flex-agent-runtime/ai/provider/google"
+	provideropenai "github.com/dcosson/flex-agent-runtime/ai/provider/openai"
 )
 
 func TestCapabilities(t *testing.T) {

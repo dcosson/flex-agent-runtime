@@ -7,11 +7,11 @@ import (
 	"io"
 
 	"connectrpc.com/connect"
-	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc"
-	rpcapi "github.com/anthropics/flex-agent-runtime/internal/rpc/api"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/codec"
-	"github.com/anthropics/flex-agent-runtime/internal/rpc/transport"
+	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc"
+	rpcapi "github.com/dcosson/flex-agent-runtime/internal/rpc/api"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/codec"
+	"github.com/dcosson/flex-agent-runtime/internal/rpc/transport"
 )
 
 // AgentServiceClient implements agentapi.AgentService over ConnectRPC.
