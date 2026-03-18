@@ -94,20 +94,26 @@ graph TB
 
 Reason: tools-sandbox must persist host identity per session for correct routing and health accounting, and Fleet already provides this abstraction.
 
-### 2.4 Sandbox ID Contract
+### 2.4 Sandbox ID and Address Contract
 
 SandboxControl implementations use prefixed IDs to distinguish adapters:
 - **Direct**: `direct:{ec2InstanceID}` — the EC2 instance ID with prefix
 - **Fleet**: `fleet:{instanceID}:{hostLocalSessionID}` — encodes both the fleet instance and the host-local sandbox session ID
 - **Node**: raw session IDs (no prefix) — the sandbox-host's local ID
 
-For tools-sandbox mode, `ToolEnvironment.SandboxSessionID` requires the **host-local** session ID (not the fleet-prefixed one), because tool execution dispatches directly to the sandbox-host via `SandboxClient` RPC. The orchestrator must extract the host-local portion from the fleet-prefixed ID using `fleet.ParseSandboxID()` (to be exported).
+`CreateSandboxResponse.Address` has different semantics per adapter:
+- **Node**: returns the sandbox **mountpoint** (filesystem path, e.g. `/zfs/sessions/abc123`), NOT a host:port RPC address
+- **Fleet**: returns the selected instance's **host:port** RPC address (e.g. `10.0.1.5:8082`)
+- **Direct**: returns the EC2 instance's host:port
+
+**tools-sandbox host-address seam**: `ToolEnvironment.SandboxHostAddr` needs a `host:port` RPC address for `SandboxClient` dispatch. Since Node's `Address` is a mountpoint, the orchestrator must use the **configured** `--sandbox-host-addr` in Node mode, and `CreateSandboxResponse.Address` in Fleet mode.
+
+**tools-sandbox session ID seam**: `ToolEnvironment.SandboxSessionID` requires the **host-local** session ID (not the fleet-prefixed one), because tool execution dispatches directly to the sandbox-host via `SandboxClient` RPC. The orchestrator must extract the host-local portion from the fleet-prefixed ID using `fleet.ParseSandboxID()` (to be exported). For Node, `SandboxID` is already host-local.
 
 The sessionEntry stores both:
 - `sandboxID` — the full prefixed ID returned by `CreateSandbox()`, used for control-plane operations (PauseSandbox, DestroySandbox)
 - `toolSessionID` — the host-local session ID, used for `ToolEnvironment.SandboxSessionID` (only relevant for tools-sandbox mode)
-
-For Node (single host), these are the same value. For Fleet, they differ.
+- `sandboxHostAddr` — the sandbox-host RPC address: configured addr for Node, `CreateSandboxResponse.Address` for Fleet
 
 ### 2.5 Three Placement Modes
 
@@ -435,9 +441,10 @@ On failure at any step, previously created resources are cleaned up (destroy san
 ```
 1. sc := o.nodeControl   // Node or Fleet, determined at startup
 2. sandbox := sc.CreateSandbox(ctx, sandboxReq)  // for tool execution filesystem
-   // Derive host address from CreateSandbox response (Fleet picks the host
-   // internally; Address is the selected host's address).
-   hostAddr := sandbox.Address
+   // Host address seam (see section 2.4):
+   //   Node: Address is mountpoint (useless for RPC), use configured --sandbox-host-addr
+   //   Fleet: Address is host:port RPC address of selected instance
+   hostAddr := o.resolveToolsSandboxHostAddr(sandbox)
    // Extract host-local session ID for direct sandbox-host RPC.
    // For Node (no prefix): toolSessionID = sandbox.SandboxID
    // For Fleet ("fleet:{instanceID}:{sessionID}"): toolSessionID = sessionID portion
@@ -445,7 +452,7 @@ On failure at any step, previously created resources are cleaned up (destroy san
 3. sessionCfg := req.SessionConfig
    sessionCfg.ToolEnvironment = agentapi.ToolEnvironmentConfig{
        Type:             agentapi.ToolEnvSandbox,
-       SandboxHostAddr:  hostAddr,
+       SandboxHostAddr:  hostAddr,       // host:port RPC address (NOT mountpoint)
        SandboxSessionID: toolSessionID,  // host-local ID, NOT fleet-prefixed
    }
 4. resp, err := o.agentLoopService.CreateSession(ctx, &agentapi.CreateAgentSessionRequest{SessionConfig: sessionCfg})
@@ -459,7 +466,7 @@ On failure at any step, previously created resources are cleaned up (destroy san
    entry.remoteSessionID = resp.SessionID
    entry.agentService = o.agentLoopService
    entry.sandboxControl = sc
-   entry.sandboxHostAddr = hostAddr
+   entry.sandboxHostAddr = hostAddr             // resolved RPC address
    entry.state = sessionActive
 6. o.registerSession(entry)
 7. // Enforce client session ID ownership
@@ -468,6 +475,10 @@ On failure at any step, previously created resources are cleaned up (destroy san
 ```
 
 `extractHostLocalSessionID(id)` checks for the `fleet:` prefix and calls `fleet.ParseSandboxID()` (to be exported) to extract the host-local session ID. For unprefixed IDs (Node), returns the ID unchanged.
+
+`resolveToolsSandboxHostAddr(sandbox)` resolves the sandbox-host RPC address based on backend type:
+- **Node mode** (single host): returns the configured `--sandbox-host-addr` (since `CreateSandboxResponse.Address` is a mountpoint, not an RPC address)
+- **Fleet mode** (multi-host): returns `sandbox.Address` (which Fleet sets to the selected instance's `host:port`)
 
 ### 3.6 Proxy Behavior
 
@@ -816,6 +827,8 @@ Test cases:
 - Pause/resume propagates to sandbox and agent layers
 - ResumeSession forwards caller-provided conversation log with ID translation
 - tools-sandbox with Fleet: ToolEnvironment.SandboxSessionID is host-local, not fleet-prefixed
+- tools-sandbox with Node: ToolEnvironment.SandboxHostAddr uses configured addr, not mountpoint
+- tools-sandbox with Fleet: ToolEnvironment.SandboxHostAddr uses CreateSandboxResponse.Address
 - tools-sandbox compensation: sandbox destroyed when AgentLoopService.CreateSession fails
 - CreateSession provisioning cancels on orchestrator Close() (lifecycle context)
 
@@ -884,3 +897,11 @@ Sources: `21-serve-orchestrator-r2-review-1.md` (coder-2-sea), `21-serve-orchest
 | 3 | r2-2 | P2 | CreateSession context not tied to shutdown | Incorporated: lifecycleCtx on Orchestrator, createCtx derives from it |
 | 4 | r2-1 | P2 | selectToolsSandboxHost ordering with Fleet | Incorporated: hostAddr derived from CreateSandboxResponse.Address after CreateSandbox |
 | 5 | r2-1 | P2 | tools-sandbox compensation cleanup | Incorporated: explicit DestroySandbox on AgentLoopService.CreateSession failure |
+
+### Seam Review (incorporated in this commit)
+
+Source: `21-serve-orchestrator-seam-review.md`
+
+| # | Severity | Finding | Disposition |
+|---|----------|---------|-------------|
+| 1 | P1 | Node returns mountpoint in Address, not host:port — tools-sandbox needs RPC address | Incorporated: section 2.4 documents Address seam, `resolveToolsSandboxHostAddr()` uses configured addr for Node and response addr for Fleet, tests added for both paths |
