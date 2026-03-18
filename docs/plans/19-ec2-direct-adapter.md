@@ -1,9 +1,9 @@
-# 19: EC2 Direct Adapter
+# 19: Direct Adapter
 
 **Status:** Draft (revised per R1 review feedback)
 **Depends on:** 18-agent-loop-rpc (SandboxControl interface), 11-sandbox-host-service.add01 (ExecutionEnvironment interface)
 **Depended on by:** Orchestrator application (future), multi-agent collaboration features
-**Scope:** Implement an EC2 Direct adapter (`EC2DirectSandboxControl`) that manages raw EC2 instances as agent execution environments. This is the "D2: EC2 Lightweight Sandbox" shape from the cloud-sandbox-providers shaping doc, now renamed to EC2 Direct. It provides no per-agent isolation -- multiple agents share one EC2 instance on a shared filesystem.
+**Scope:** Implement a Direct adapter (`DirectSandboxControl`) that manages raw EC2 instances as agent execution environments. This is the "D2: EC2 Lightweight Sandbox" shape from the cloud-sandbox-providers shaping doc, now renamed to Direct. It provides no per-agent isolation -- multiple agents share one EC2 instance on a shared filesystem.
 **Shaping source:** docs/shaping/cloud-sandbox-providers.md (Shape D2)
 **Incorporated reviews:** docs/plans/19-ec2-direct-adapter-review-r1-a.md, docs/plans/19-ec2-direct-adapter-review-r1-b.md, docs/plans/19-ec2-direct-adapter-review-r2-a.md, docs/plans/19-ec2-direct-adapter-review-r2-b.md
 
@@ -11,7 +11,7 @@
 
 ## 1. Overview
 
-EC2 Direct is a SandboxControl adapter that provisions and manages raw EC2 instances as agent environments. Unlike the native sandbox (which uses ZFS + gVisor for per-agent isolation), EC2 Direct treats the entire EC2 instance as a single shared workspace. Think of it as "what you'd do on your laptop but in the cloud" -- multiple agents run on the same OS, share the same filesystem, and execute tools locally.
+Direct is a SandboxControl adapter that provisions and manages raw EC2 instances as agent environments. Unlike the native sandbox (which uses ZFS + gVisor for per-agent isolation), Direct treats the entire EC2 instance as a single shared workspace. Think of it as "what you'd do on your laptop but in the cloud" -- multiple agents run on the same OS, share the same filesystem, and execute tools locally.
 
 ### Purpose
 
@@ -22,20 +22,21 @@ EC2 Direct is a SandboxControl adapter that provisions and manages raw EC2 insta
 ### Relationship to Other Adapters
 
 ```
-NodeSandboxControl     -- Full isolation (ZFS + gVisor), richest capabilities
-EC2DirectSandboxControl  -- No isolation, shared OS, simplest cloud option  <-- THIS PLAN
-E2BSandboxControl        -- 3rd party, per-sandbox isolation, 24h limit (future)
-DaytonaSandboxControl    -- 3rd party, per-sandbox isolation, lossy pause (future)
-FlySandboxControl        -- 3rd party, per-VM isolation, no lifetime limit (future)
+NodeSandboxControl    -- Full isolation (ZFS + gVisor), richest capabilities
+DirectSandboxControl  -- No isolation, shared OS, simplest cloud option  <-- THIS PLAN
+FleetSandboxControl   -- Auto-scaled pool of NodeSandboxControl hosts
+E2BSandboxControl     -- 3rd party, per-sandbox isolation, 24h limit (future)
+DaytonaSandboxControl -- 3rd party, per-sandbox isolation, lossy pause (future)
+FlySandboxControl     -- 3rd party, per-VM isolation, no lifetime limit (future)
 ```
 
-EC2 Direct sits at the opposite end of the capability spectrum from NodeSandboxControl. It trades isolation and snapshots for simplicity and shared-filesystem collaboration. It is intentionally minimal.
+Direct sits at the opposite end of the capability spectrum from NodeSandboxControl. It trades isolation and snapshots for simplicity and shared-filesystem collaboration. It is intentionally minimal.
 
 ### Key Design Decision: No Custom ExecutionEnvironment
 
 Since agents run ON the EC2 instance (launched via `flexagent serve agent`), they use `LocalEnvironment` for tool execution. Tools execute in the same process/filesystem as the agent. The agent does not know or care that it is running on an EC2 instance -- from its perspective, it is running locally.
 
-This means EC2 Direct does NOT need a custom `ExecutionEnvironment` implementation. `EC2DirectSandboxControl` handles instance lifecycle and process management. `LocalEnvironment` handles tool execution inside the agent process.
+This means Direct does NOT need a custom `ExecutionEnvironment` implementation. `DirectSandboxControl` handles instance lifecycle and process management. `LocalEnvironment` handles tool execution inside the agent process.
 
 ---
 
@@ -102,16 +103,16 @@ graph TD
 ```mermaid
 sequenceDiagram
     participant O as Orchestrator
-    participant SC as EC2DirectSandboxControl
+    participant SC as DirectSandboxControl
     participant EC2 as AWS EC2 API
     participant SSM as AWS SSM API
     participant I as EC2 Instance
     participant A as flexagent serve agent
 
     O->>SC: CreateSandbox(config)
-    SC->>EC2: RunInstances(AMI, type, SG, UserData)
+    SC->>EC2: provisioner.LaunchInstance(InstanceConfig{...})
     EC2-->>SC: instanceID
-    SC->>SC: Poll DescribeInstances until running
+    SC->>SC: Poll provisioner.DescribeInstance until running
     SC->>SSM: Wait for SSM agent registration
     SC-->>O: sandboxID=instanceID, address=ip:0
 
@@ -130,23 +131,23 @@ sequenceDiagram
     SSM->>I: Kill process
 
     O->>SC: DestroySandbox(sandboxID)
-    SC->>EC2: TerminateInstances(instanceID)
+    SC->>EC2: provisioner.TerminateInstance(instanceID)
 ```
 
 ---
 
-## 3. EC2DirectSandboxControl
+## 3. DirectSandboxControl
 
 ### 3.1 Struct and Constructor
 
 ```go
-// internal/sandbox/control/ec2direct/ec2direct.go
+// internal/sandbox/control/direct/direct.go
 
-// EC2DirectSandboxControl manages raw EC2 instances as agent environments.
+// DirectSandboxControl manages raw EC2 instances as agent environments.
 // Multiple agents share one instance without isolation.
-type EC2DirectSandboxControl struct {
-    provisioner  InstanceLifecycle  // EC2 Direct-specific SDK wrapper (see 5.1)
-    ssmClient    SSMAPI             // Interface wrapping AWS SSM SDK calls
+type DirectSandboxControl struct {
+    provisioner  fleet.InstanceProvisioner  // Shared with Plan 20 for provider neutrality (see 5.1)
+    ssmClient    SSMAPI                     // Interface wrapping AWS SSM SDK calls
     logger       *slog.Logger
     config       Config
 
@@ -184,7 +185,7 @@ type Config struct {
     UserDataTemplate string
 
     // Tags applied to all resources created by this adapter.
-    // Always includes {"ManagedBy": "flex-agent-runtime", "adapter": "ec2-direct"} in addition
+    // Always includes {"ManagedBy": "flex-agent-runtime", "adapter": "direct"} in addition
     // to any user-provided tags (see crash recovery, section 3.10).
     Tags             map[string]string
 
@@ -228,32 +229,28 @@ type processState struct {
 }
 ```
 
-The constructor `NewEC2DirectSandboxControl` accepts functional options and performs crash recovery on initialization (see section 3.10).
+The constructor `NewDirectSandboxControl` accepts functional options and performs crash recovery on initialization (see section 3.10).
 
 ### 3.2 CreateSandbox
 
 Provisions a new EC2 instance. The instance IS the sandbox.
 
 ```go
-func (c *EC2DirectSandboxControl) CreateSandbox(ctx context.Context, req control.CreateSandboxRequest) (*control.CreateSandboxResponse, error)
+func (c *DirectSandboxControl) CreateSandbox(ctx context.Context, req control.CreateSandboxRequest) (*control.CreateSandboxResponse, error)
 ```
 
 **Steps:**
 
 1. Determine instance type from `req.Resources` (map CPU/memory to EC2 instance type) or fall back to `Config.DefaultInstanceType`.
-2. Build `RunInstancesInput`:
-   - AMI: `Config.AMIID` (or `req.Template` if provided as an AMI ID override)
-   - Instance type: determined in step 1
-   - Subnet: `Config.SubnetID`
-   - Security groups: `Config.SecurityGroupIDs`
-   - IAM instance profile: `Config.InstanceProfileARN`
-   - Key pair: `Config.KeyPairName` (if set)
-   - EBS root volume: size from config, type from config
+2. Build `InstanceConfig`:
+   - Image: `Config.AMIID` (or `req.Template` if provided as an AMI ID override)
+   - InstanceType: determined in step 1
+   - DiskSizeGB: from config
    - UserData: rendered from `Config.UserDataTemplate` with sandbox metadata
-   - Tags: merge `Config.Tags` + `req.Labels` + `{"flex-sandbox-id": sandboxID, "ManagedBy": "flex-agent-runtime", "adapter": "ec2-direct"}`
-3. Call `provisioner.RunInstances(ctx, input)`.
-4. Extract instance ID. Generate sandbox ID (use instance ID directly).
-5. Poll `provisioner.DescribeInstances` until instance state is "running" and has an IP address. Polling uses exponential backoff with jitter, starting at 2s, capped at 10s, with total timeout from `Config.InstanceReadyTimeout` (default 3min). Returns `ErrInstanceReadyTimeout` on timeout.
+   - Tags: merge `Config.Tags` + `req.Labels` + `{"flex-sandbox-id": sandboxID, "ManagedBy": "flex-agent-runtime", "adapter": "direct"}`
+3. Call `provisioner.LaunchInstance(ctx, InstanceConfig{...})`.
+4. Extract instance ID from the returned `*InstanceInfo`. Generate sandbox ID (use instance ID directly).
+5. Poll `provisioner.DescribeInstance(ctx, instanceID)` until instance state is "running" and has an IP address. Polling uses exponential backoff with jitter, starting at 2s, capped at 10s, with total timeout from `Config.InstanceReadyTimeout` (default 3min). Returns `ErrInstanceReadyTimeout` on timeout.
 6. Poll SSM for instance registration via `ssmClient.DescribeInstanceInformation` with instance ID filter. Uses exponential backoff with jitter, starting at 2s, capped at 10s, within the remaining `Config.InstanceReadyTimeout`. Returns `ErrSSMUnavailable` if SSM registration never occurs.
 7. Optionally run a readiness check via SSM (e.g., `flexagent version`) to confirm the binary is available on the instance.
 8. Store instance state in `c.instances` (acquire `c.mu` only for map read/write, not during AWS API calls).
@@ -284,13 +281,13 @@ touch /var/run/flex-sandbox-ready
 Terminates the EC2 instance and releases all resources.
 
 ```go
-func (c *EC2DirectSandboxControl) DestroySandbox(ctx context.Context, sandboxID string) error
+func (c *DirectSandboxControl) DestroySandbox(ctx context.Context, sandboxID string) error
 ```
 
 **Steps:**
 
 1. Look up instance state from `c.instances`. Return `ErrInstanceNotFound` if not found.
-2. Call `provisioner.TerminateInstances(ctx, instanceID)`.
+2. Call `provisioner.TerminateInstance(ctx, instanceID)`.
 3. Remove instance from `c.instances`.
 4. Return nil (termination is fire-and-forget; AWS handles cleanup).
 
@@ -301,7 +298,7 @@ No need to explicitly kill processes -- instance termination kills everything.
 Starts a long-running process on the EC2 instance via SSM. This is how agents are launched.
 
 ```go
-func (c *EC2DirectSandboxControl) LaunchProcess(ctx context.Context, req control.LaunchProcessRequest) (*control.LaunchProcessResponse, error)
+func (c *DirectSandboxControl) LaunchProcess(ctx context.Context, req control.LaunchProcessRequest) (*control.LaunchProcessResponse, error)
 ```
 
 **Steps:**
@@ -344,7 +341,7 @@ func (c *EC2DirectSandboxControl) LaunchProcess(ctx context.Context, req control
 Terminates a previously launched process via SSM.
 
 ```go
-func (c *EC2DirectSandboxControl) KillProcess(ctx context.Context, req control.KillProcessRequest) error
+func (c *DirectSandboxControl) KillProcess(ctx context.Context, req control.KillProcessRequest) error
 ```
 
 **Steps:**
@@ -362,7 +359,7 @@ func (c *EC2DirectSandboxControl) KillProcess(ctx context.Context, req control.K
 Checks whether a launched process is still running via SSM.
 
 ```go
-func (c *EC2DirectSandboxControl) GetProcessStatus(ctx context.Context, req control.GetProcessStatusRequest) (*control.GetProcessStatusResponse, error)
+func (c *DirectSandboxControl) GetProcessStatus(ctx context.Context, req control.GetProcessStatusRequest) (*control.GetProcessStatusResponse, error)
 ```
 
 **Steps:**
@@ -389,31 +386,31 @@ func (c *EC2DirectSandboxControl) GetProcessStatus(ctx context.Context, req cont
 Stops the EC2 instance. This is a lossy pause -- all processes are killed, but EBS volumes (filesystem) are preserved.
 
 ```go
-func (c *EC2DirectSandboxControl) PauseSandbox(ctx context.Context, sandboxID string) error
+func (c *DirectSandboxControl) PauseSandbox(ctx context.Context, sandboxID string) error
 ```
 
 **Steps:**
 
 1. Look up instance state. Return `ErrInstanceNotFound` if not found.
-2. Call `provisioner.StopInstances(ctx, instanceID)`.
+2. Call `provisioner.StopInstance(ctx, instanceID)`.
 3. Update all process states to `ProcessExited` (processes do not survive stop).
 4. Update instance state to `instanceStatusStopped`.
 
-**Important: Lossy pause semantics.** EC2 Direct pause kills all running processes. Only the EBS-backed filesystem is preserved. The orchestrator MUST re-launch all agent processes after `ResumeSandbox`. This behavior differs from NodeSandboxControl, which preserves full process state via gVisor container pause. The `SandboxCapabilities` struct currently has no field to distinguish lossy vs. lossless pause (see Capabilities section 3.9 and Open Question OQ5). The orchestrator must use adapter-specific knowledge for now.
+**Important: Lossy pause semantics.** Direct pause kills all running processes. Only the EBS-backed filesystem is preserved. The orchestrator MUST re-launch all agent processes after `ResumeSandbox`. This behavior differs from NodeSandboxControl, which preserves full process state via gVisor container pause. The `SandboxCapabilities` struct currently has no field to distinguish lossy vs. lossless pause (see Capabilities section 3.9 and Open Question OQ5). The orchestrator must use adapter-specific knowledge for now.
 
 ### 3.8 ResumeSandbox
 
 Starts a previously stopped instance. The filesystem is intact but all processes must be re-launched.
 
 ```go
-func (c *EC2DirectSandboxControl) ResumeSandbox(ctx context.Context, sandboxID string) error
+func (c *DirectSandboxControl) ResumeSandbox(ctx context.Context, sandboxID string) error
 ```
 
 **Steps:**
 
 1. Look up instance state. Return `ErrInstanceNotFound` if not found.
-2. Call `provisioner.StartInstances(ctx, instanceID)`.
-3. Poll `provisioner.DescribeInstances` until instance state is "running". Uses exponential backoff with jitter, starting at 2s, capped at 10s, within `Config.InstanceReadyTimeout`. Returns `ErrInstanceReadyTimeout` on timeout.
+2. Call `provisioner.StartInstance(ctx, instanceID)`.
+3. Poll `provisioner.DescribeInstance(ctx, instanceID)` until instance state is "running". Uses exponential backoff with jitter, starting at 2s, capped at 10s, within `Config.InstanceReadyTimeout`. Returns `ErrInstanceReadyTimeout` on timeout.
 4. Update instance IP addresses (the instance may get a new public IP after stop/start).
 5. Wait for SSM agent registration (the SSM agent restarts on instance start).
 6. Update instance state to `instanceStatusRunning`.
@@ -424,18 +421,18 @@ func (c *EC2DirectSandboxControl) ResumeSandbox(ctx context.Context, sandboxID s
 ### 3.9 Capabilities
 
 ```go
-func (c *EC2DirectSandboxControl) Capabilities() control.SandboxCapabilities {
+func (c *DirectSandboxControl) Capabilities() control.SandboxCapabilities {
     return control.SandboxCapabilities{
         Snapshots:     false, // No ZFS, no instant snapshots
         Rollback:      false, // No rollback capability
         Pause:         true,  // EC2 stop/start (lossy -- processes die, EBS preserved)
         LaunchProcess: true,  // SSM-based process launch
-        DeepPause:     false, // ZFS-to-S3 cold storage; not applicable to EC2 Direct
+        DeepPause:     false, // ZFS-to-S3 cold storage; not applicable to Direct
     }
 }
 ```
 
-**Note on pause semantics:** `DeepPause` refers to ZFS-to-S3 cold storage archival (as documented in `control.go` line 112), NOT whether processes survive pause. There is currently no field in `SandboxCapabilities` to distinguish lossy pause (EC2 Direct: processes die, filesystem preserved) from lossless pause (Native: full process state preserved via gVisor). This is a gap in the interface. See OQ5 for the proposed resolution. Until the interface is extended, the orchestrator must have adapter-specific logic for post-resume recovery.
+**Note on pause semantics:** `DeepPause` refers to ZFS-to-S3 cold storage archival (as documented in `control.go` line 112), NOT whether processes survive pause. There is currently no field in `SandboxCapabilities` to distinguish lossy pause (Direct: processes die, filesystem preserved) from lossless pause (Native: full process state preserved via gVisor). This is a gap in the interface. See OQ5 for the proposed resolution. Until the interface is extended, the orchestrator must have adapter-specific logic for post-resume recovery.
 
 ### 3.10 Crash Recovery
 
@@ -444,44 +441,35 @@ The adapter stores instance and process state in memory. If the orchestrator pro
 **Recovery at construction time:**
 
 ```go
-func NewEC2DirectSandboxControl(provisioner InstanceLifecycle, ssmClient SSMAPI, cfg Config, opts ...Option) *EC2DirectSandboxControl
+func NewDirectSandboxControl(provisioner fleet.InstanceProvisioner, ssmClient SSMAPI, cfg Config, opts ...Option) *DirectSandboxControl
 ```
 
 The constructor calls `Recover()` which:
 
-1. Calls `provisioner.DescribeInstances` (the raw EC2 SDK method, NOT Plan 20's `ListInstances`) with an `ec2.DescribeInstancesInput` containing tag filters `{"ManagedBy": "flex-agent-runtime", "adapter": "ec2-direct"}` and instance state filter for "running" and "stopped" instances. The filter construction:
-   ```go
-   input := &ec2.DescribeInstancesInput{
-       Filters: []ec2types.Filter{
-           {Name: aws.String("tag:ManagedBy"), Values: []string{"flex-agent-runtime"}},
-           {Name: aws.String("tag:adapter"), Values: []string{"ec2-direct"}},
-           {Name: aws.String("instance-state-name"), Values: []string{"running", "stopped"}},
-       },
-   }
-   ```
-2. **If `DescribeInstances` fails** (AWS API error, network error, etc.), the constructor returns an error. This is fail-fast behavior: if we cannot query EC2, we cannot distinguish "no managed instances exist" from "AWS is unreachable and there may be orphaned instances billing us." The caller should retry construction or alert on this failure.
-3. **If `DescribeInstances` succeeds but returns zero instances**, this is a normal clean start. No error.
+1. Calls `provisioner.ListInstances(ctx, InstanceFilter{Tags: map[string]string{"ManagedBy": "flex-agent-runtime", "adapter": "direct"}, States: []CloudInstanceState{CloudInstanceRunning, CloudInstanceStopped}})` to discover all managed instances.
+2. **If `ListInstances` fails** (cloud API error, network error, etc.), the constructor returns an error. This is fail-fast behavior: if we cannot query the provider, we cannot distinguish "no managed instances exist" from "the provider is unreachable and there may be orphaned instances billing us." The caller should retry construction or alert on this failure.
+3. **If `ListInstances` succeeds but returns zero instances**, this is a normal clean start. No error.
 4. For each discovered instance:
    a. Extracts `flex-sandbox-id` from tags to reconstruct the sandbox ID.
-   b. Reads instance IP addresses.
+   b. Reads instance IP addresses from the returned `InstanceInfo`.
    c. For running instances, probes for active agent processes by checking PID files via SSM: `ls /var/run/flex-agent-*.pid 2>/dev/null` and reading each to reconstruct process state.
    d. For each discovered PID file, verifies the process is still running via `/proc/PID/stat` and adds it to the process map.
 5. Populates `c.instances` with recovered state.
 6. Logs a summary of recovered instances and processes.
 
-Individual instance SSM probing is best-effort. If SSM is unavailable for a running instance, the instance is tracked but its processes are assumed unknown (empty process map -- the orchestrator will need to re-launch agents). This is distinct from the initial `DescribeInstances` call which is NOT best-effort -- it must succeed for the constructor to return.
+Individual instance SSM probing is best-effort. If SSM is unavailable for a running instance, the instance is tracked but its processes are assumed unknown (empty process map -- the orchestrator will need to re-launch agents). This is distinct from the initial `ListInstances` call which is NOT best-effort -- it must succeed for the constructor to return.
 
 ### 3.11 Close
 
 The adapter implements `io.Closer` for graceful shutdown.
 
 ```go
-func (c *EC2DirectSandboxControl) Close() error
+func (c *DirectSandboxControl) Close() error
 ```
 
 **Steps:**
 
-1. If `Config.TerminateOnClose` is true, terminate all managed instances via `provisioner.TerminateInstances` for each instance in `c.instances`.
+1. If `Config.TerminateOnClose` is true, terminate all managed instances via `provisioner.TerminateInstance` for each instance in `c.instances`.
 2. If `Config.TerminateOnClose` is false (default), leave instances running. They will be rediscovered via crash recovery (section 3.10) after restart.
 3. Clear internal state (`c.instances = nil`).
 4. Return any accumulated errors.
@@ -492,12 +480,12 @@ The default behavior (leave instances running) is intentional: it enables seamle
 
 ## 4. ExecutionEnvironment: Use LocalEnvironment
 
-Agents launched on an EC2 Direct instance use `LocalEnvironment` for tool execution. No custom `ExecutionEnvironment` is needed.
+Agents launched on a Direct instance use `LocalEnvironment` for tool execution. No custom `ExecutionEnvironment` is needed.
 
 The flow:
 
-1. Orchestrator calls `EC2DirectSandboxControl.CreateSandbox()` to provision an instance.
-2. Orchestrator calls `EC2DirectSandboxControl.LaunchProcess()` to start `flexagent serve agent --listen=:PORT` on the instance.
+1. Orchestrator calls `DirectSandboxControl.CreateSandbox()` to provision an instance.
+2. Orchestrator calls `DirectSandboxControl.LaunchProcess()` to start `flexagent serve agent --listen=:PORT` on the instance.
 3. The orchestrator calls `CreateAgentSession` via RPC on the agent process, passing `ToolEnvironmentConfig{Type: ToolEnvLocal, LocalRootDir: "/workspace"}` in the session config. This is how the workspace directory is configured -- per-session via RPC, not via a CLI flag on the agent process.
 4. The `AgentLoopService` creates a `LocalEnvironment` rooted at `/workspace` for the session.
 5. Tools (bash, read, write, edit, grep, glob) execute locally on the instance's filesystem.
@@ -505,7 +493,7 @@ The flow:
 ```mermaid
 graph LR
     subgraph "Orchestrator"
-        O[Orchestrator] --> SC[EC2DirectSandboxControl]
+        O[Orchestrator] --> SC[DirectSandboxControl]
         O --> AC[AgentServiceClient]
     end
 
@@ -533,47 +521,23 @@ This is the same architecture as running `flexagent serve agent` on a developer'
 
 ### 5.1 AWS SDK Interfaces
 
-The adapter uses two AWS SDK interface abstractions:
+The adapter uses two interface abstractions for cloud operations:
 
-- **`InstanceLifecycle`** -- A thin wrapper around the raw EC2 SDK for instance lifecycle operations. This is EC2 Direct-specific.
-- **`SSMAPI`** -- A thin wrapper around the raw SSM SDK for remote process management. Also EC2 Direct-specific.
+- **`InstanceProvisioner`** -- The shared provider-agnostic instance lifecycle interface defined in Plan 20 (`internal/sandbox/control/fleet/provisioner.go`). Direct reuses this same interface for provider neutrality, receiving an `EC2InstanceProvisioner` (or future GCP/Azure provisioner) at construction time. This means Direct and Fleet share a single abstraction for instance lifecycle -- `LaunchInstance`, `TerminateInstance`, `StopInstance`, `StartInstance`, `DescribeInstance`, and `ListInstances`. AWS-specific launch parameters (security groups, subnets, IAM roles, etc.) are configured on the `EC2InstanceProvisioner` constructor via `EC2LaunchConfig`, not threaded through `InstanceConfig`.
+- **`SSMAPI`** -- A thin wrapper around the raw SSM SDK for remote process management. This is Direct-specific; Fleet does not need SSM because it delegates process management to per-instance `NodeSandboxControl` via RPC.
 
-Both interfaces mirror the AWS SDK directly, using raw SDK input/output types. This gives EC2 Direct full control over EC2 API parameters (UserData, security groups, tag filters, etc.) which it needs because it constructs detailed `RunInstancesInput` structs itself.
+**Note on EC2-specific pieces:** Process management via SSM is the remaining EC2-specific component in this adapter. Instance lifecycle is fully provider-neutral via `InstanceProvisioner`. In the future, SSM could be abstracted behind a `RemoteExec` interface to support non-AWS process management (e.g., GCP OS Login + SSH, Azure Run Command), but this is out of scope for now.
 
-**Relationship to Plan 20's `InstanceProvisioner`:** Plan 20 defines a provider-agnostic `InstanceProvisioner` interface with abstracted types (`LaunchInstance(ctx, InstanceConfig) (*InstanceInfo, error)`, `ListInstances(ctx, InstanceFilter) ([]InstanceInfo, error)`, etc.). That interface serves a fundamentally different purpose -- it abstracts away the cloud provider entirely so the fleet manager can work with EC2, GCP, or Azure without knowing which one. `InstanceLifecycle` and `InstanceProvisioner` are **not interchangeable**:
-
-| | Plan 19 `InstanceLifecycle` | Plan 20 `InstanceProvisioner` |
-|---|---|---|
-| **Abstraction level** | Raw AWS EC2 SDK types | Provider-agnostic abstractions |
-| **Method names** | `RunInstances`, `DescribeInstances` | `LaunchInstance`, `ListInstances` |
-| **Parameter types** | `*ec2.RunInstancesInput` | `InstanceConfig` |
-| **Return types** | `*ec2.RunInstancesOutput` | `*InstanceInfo` |
-| **Purpose** | EC2-only adapter needs full SDK control | Fleet manager needs provider neutrality |
-
-The shared piece between Plans 19 and 20 is the underlying `*ec2.Client` instance (both can share the same AWS SDK client), not a Go interface. Plan 20's `EC2InstanceProvisioner` wraps the EC2 SDK internally at a higher abstraction level; Plan 19's `InstanceLifecycle` exposes the SDK surface directly. These are the right designs for their respective contexts.
-
-**`DescribeInstances` dual use:** `InstanceLifecycle.DescribeInstances` serves two distinct purposes in this adapter: (1) single-instance lookup by instance ID (e.g., polling for "running" state in CreateSandbox step 5), and (2) multi-instance discovery via tag filters (crash recovery, section 3.10). Both use cases work through the same raw SDK method with different `ec2.DescribeInstancesInput` filter parameters. This is idiomatic for the EC2 SDK and avoids adding a separate `ListInstances` method -- the distinction is in the filter construction, not the method.
+See Plan 20 section 3 for the full `InstanceProvisioner` interface definition and its associated types (`InstanceConfig`, `InstanceInfo`, `InstanceStatus`, `InstanceFilter`, `CloudInstanceState`).
 
 ```go
-// internal/sandbox/control/ec2direct/aws.go
+// internal/sandbox/control/direct/aws.go
 
-// InstanceLifecycle wraps EC2 instance lifecycle operations using raw SDK types.
-// This is EC2 Direct-specific and is NOT the same as Plan 20's InstanceProvisioner,
-// which operates at a provider-agnostic abstraction level. The shared piece between
-// Plans 19 and 20 is the underlying *ec2.Client, not this interface.
-//
-// DescribeInstances serves double duty: single-instance lookup (by instance ID filter)
-// and multi-instance discovery (by tag filters, used in crash recovery).
-type InstanceLifecycle interface {
-    RunInstances(ctx context.Context, input *ec2.RunInstancesInput, opts ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
-    TerminateInstances(ctx context.Context, input *ec2.TerminateInstancesInput, opts ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error)
-    StopInstances(ctx context.Context, input *ec2.StopInstancesInput, opts ...func(*ec2.Options)) (*ec2.StopInstancesOutput, error)
-    StartInstances(ctx context.Context, input *ec2.StartInstancesInput, opts ...func(*ec2.Options)) (*ec2.StartInstancesOutput, error)
-    DescribeInstances(ctx context.Context, input *ec2.DescribeInstancesInput, opts ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
-}
-
-// SSMAPI wraps the subset of SSM SDK methods used by this adapter.
-// This is EC2 Direct-specific -- Plan 20 does not need SSM.
+// SSMAPI wraps the subset of SSM SDK methods used by this adapter for remote
+// process management. This is the remaining EC2-specific piece -- instance
+// lifecycle is provider-neutral via InstanceProvisioner (Plan 20). In the
+// future, this could be abstracted behind a RemoteExec interface to support
+// non-AWS providers.
 type SSMAPI interface {
     SendCommand(ctx context.Context, input *ssm.SendCommandInput, opts ...func(*ssm.Options)) (*ssm.SendCommandOutput, error)
     GetCommandInvocation(ctx context.Context, input *ssm.GetCommandInvocationInput, opts ...func(*ssm.Options)) (*ssm.GetCommandInvocationOutput, error)
@@ -597,7 +561,7 @@ SSM disadvantages:
 - **Output size limits.** SSM command output is capped at 24KB inline (larger outputs must go via S3).
 - **API key exposure.** SSM command content is logged in CloudTrail and SSM command history (see section 3.4 security note).
 
-For EC2 Direct, the latency trade-off is acceptable because:
+For Direct, the latency trade-off is acceptable because:
 - `LaunchProcess` is infrequent (once per agent, not per tool call).
 - `KillProcess` and `GetProcessStatus` are infrequent.
 - Tool execution does NOT go through SSM -- it goes through the agent's `LocalEnvironment` via ConnectRPC.
@@ -659,11 +623,11 @@ Template variables:
 - `{{.Labels}}` -- labels map (iterate with `{{range $k, $v := .Labels}}`)
 - `{{.WorkspaceDir}}` -- workspace directory path (default `/workspace`)
 
-**Template validation:** The UserData template is validated at constructor time (`NewEC2DirectSandboxControl`) by calling `template.New().Parse()`. If the template is invalid, the constructor returns an error (fail-fast). All template variable values are shell-escaped using the same `shellQuote()` helper used for SSM commands, preventing injection via label values or other user-provided data.
+**Template validation:** The UserData template is validated at constructor time (`NewDirectSandboxControl`) by calling `template.New().Parse()`. If the template is invalid, the constructor returns an error (fail-fast). All template variable values are shell-escaped using the same `shellQuote()` helper used for SSM commands, preventing injection via label values or other user-provided data.
 
 ### 5.6 AMI Requirements
 
-The AMI used by EC2 Direct must have:
+The AMI used by Direct must have:
 
 - **Ubuntu LTS** (22.04 or 24.04) as the base OS.
 - **SSM agent** installed and configured to start on boot (included by default in AWS-published Ubuntu AMIs).
@@ -772,44 +736,44 @@ This is identical to how multiple developers share a filesystem -- conventions a
 The adapter defines typed sentinel errors for programmatic error handling. Callers can use `errors.Is()` to distinguish failure modes and make retry decisions.
 
 ```go
-// internal/sandbox/control/ec2direct/errors.go
+// internal/sandbox/control/direct/errors.go
 
 var (
     // ErrInstanceNotFound indicates the sandbox ID does not correspond to a
     // known managed instance.
-    ErrInstanceNotFound = errors.New("ec2direct: instance not found")
+    ErrInstanceNotFound = errors.New("direct: instance not found")
 
     // ErrProcessNotFound indicates the process ID does not correspond to a
     // known launched process on the given instance.
-    ErrProcessNotFound = errors.New("ec2direct: process not found")
+    ErrProcessNotFound = errors.New("direct: process not found")
 
     // ErrInstanceNotReady indicates the instance exists but is not in a state
     // where operations can be performed (e.g., stopped, pending).
-    ErrInstanceNotReady = errors.New("ec2direct: instance not ready")
+    ErrInstanceNotReady = errors.New("direct: instance not ready")
 
     // ErrInstanceReadyTimeout indicates the instance did not reach "running"
     // state within Config.InstanceReadyTimeout.
-    ErrInstanceReadyTimeout = errors.New("ec2direct: instance ready timeout")
+    ErrInstanceReadyTimeout = errors.New("direct: instance ready timeout")
 
     // ErrProcessReadyTimeout indicates a launched process did not pass its
     // health check within Config.ProcessReadyTimeout.
-    ErrProcessReadyTimeout = errors.New("ec2direct: process ready timeout")
+    ErrProcessReadyTimeout = errors.New("direct: process ready timeout")
 
     // ErrSSMUnavailable indicates the SSM agent on the instance is not
     // responding or not registered.
-    ErrSSMUnavailable = errors.New("ec2direct: ssm agent unavailable")
+    ErrSSMUnavailable = errors.New("direct: ssm agent unavailable")
 
     // ErrSSMTimeout indicates an SSM command did not complete within the
     // allowed time.
-    ErrSSMTimeout = errors.New("ec2direct: ssm command timeout")
+    ErrSSMTimeout = errors.New("direct: ssm command timeout")
 
     // ErrProcessLaunchFailed indicates the process launch command failed
     // (e.g., binary not found, port in use, permission denied).
-    ErrProcessLaunchFailed = errors.New("ec2direct: process launch failed")
+    ErrProcessLaunchFailed = errors.New("direct: process launch failed")
 
     // ErrResourcesExceedMaximum indicates the requested resources exceed the
     // largest supported instance type mapping.
-    ErrResourcesExceedMaximum = errors.New("ec2direct: resources exceed maximum supported")
+    ErrResourcesExceedMaximum = errors.New("direct: resources exceed maximum supported")
 )
 ```
 
@@ -842,8 +806,8 @@ if !ok {
     return ErrInstanceNotFound
 }
 
-// AWS API call (no lock held)
-result, err := c.provisioner.DescribeInstances(ctx, ...)
+// Cloud API call (no lock held)
+result, err := c.provisioner.DescribeInstance(ctx, instanceID)
 
 // Write back to map (short lock)
 c.mu.Lock()
@@ -854,7 +818,7 @@ if _, ok := c.instances[sandboxID]; ok {
 c.mu.Unlock()
 ```
 
-After each AWS API call, the code checks that the instance still exists in the map before updating. This handles the race where `DestroySandbox` removes an instance while another operation (e.g., `CreateSandbox` polling, `ResumeSandbox` polling) is in flight.
+After each cloud API call, the code checks that the instance still exists in the map before updating. This handles the race where `DestroySandbox` removes an instance while another operation (e.g., `CreateSandbox` polling, `ResumeSandbox` polling) is in flight.
 
 ---
 
@@ -864,19 +828,19 @@ After each AWS API call, the code checks that the instance still exists in the m
 internal/
   sandbox/
     control/
-      ec2direct/
-        ec2direct.go         # EC2DirectSandboxControl struct, constructor, options, Close()
+      direct/
+        direct.go            # DirectSandboxControl struct, constructor, options, Close()
         create.go            # CreateSandbox implementation
         destroy.go           # DestroySandbox implementation
         process.go           # LaunchProcess, KillProcess, GetProcessStatus
         pause.go             # PauseSandbox, ResumeSandbox
         capabilities.go      # Capabilities() method
         recover.go           # Crash recovery (Recover method)
-        aws.go               # InstanceLifecycle, SSMAPI interfaces
+        aws.go               # SSMAPI interface (InstanceProvisioner imported from fleet package)
         ssm_command.go       # buildSSMCommand, shellQuote helpers
         errors.go            # Sentinel error definitions
         instance_type.go     # Resource-to-instance-type mapping
-        ec2direct_test.go    # Unit tests with mocked AWS APIs
+        direct_test.go       # Unit tests with mocked APIs
         ssm_command_test.go  # Shell escaping edge case tests
 ```
 
@@ -884,11 +848,10 @@ internal/
 
 **New Go module dependencies:**
 
-- `github.com/aws/aws-sdk-go-v2/service/ec2` -- EC2 API client
-- `github.com/aws/aws-sdk-go-v2/service/ssm` -- SSM API client
+- `github.com/aws/aws-sdk-go-v2/service/ssm` -- SSM API client (for SSMAPI interface)
 - `github.com/aws/aws-sdk-go-v2/config` -- AWS SDK configuration loading
 
-These are the only new external dependencies. The adapter uses the same `log/slog`, `sync`, `context`, and `time` standard library packages as the rest of the codebase.
+Note: The EC2 SDK dependency (`github.com/aws/aws-sdk-go-v2/service/ec2`) is pulled in transitively via the fleet package's `EC2InstanceProvisioner`, but is NOT directly imported by the direct package. The adapter uses the same `log/slog`, `sync`, `context`, and `time` standard library packages as the rest of the codebase.
 
 ---
 
@@ -896,17 +859,17 @@ These are the only new external dependencies. The adapter uses the same `log/slo
 
 ### 11.1 Unit Tests (with Mocked AWS API)
 
-All AWS API calls go through the `InstanceLifecycle` and `SSMAPI` interfaces, which are mockable.
+All cloud API calls go through the `InstanceProvisioner` and `SSMAPI` interfaces, which are mockable.
 
 **Test cases:**
 
-- `CreateSandbox` happy path: mock `RunInstances` returns instance ID, mock `DescribeInstances` returns running + IP, mock SSM `DescribeInstanceInformation` returns registered. Verify response fields.
+- `CreateSandbox` happy path: mock `LaunchInstance` returns instance ID, mock `DescribeInstance` returns running + IP, mock SSM `DescribeInstanceInformation` returns registered. Verify response fields.
 - `CreateSandbox` with instance type mapping: verify different `Resources` values produce correct instance types.
 - `CreateSandbox` with template override: `req.Template` overrides `Config.AMIID`.
-- `CreateSandbox` timeout: mock `DescribeInstances` never returns "running". Verify `ErrInstanceReadyTimeout` after `InstanceReadyTimeout`.
+- `CreateSandbox` timeout: mock `DescribeInstance` never returns "running". Verify `ErrInstanceReadyTimeout` after `InstanceReadyTimeout`.
 - `CreateSandbox` SSM not ready: instance is running but SSM agent never registers. Verify `ErrSSMUnavailable`.
 - `CreateSandbox` resources exceed maximum: verify `ErrResourcesExceedMaximum`.
-- `DestroySandbox` happy path: verify `TerminateInstances` called with correct instance ID.
+- `DestroySandbox` happy path: verify `TerminateInstance` called with correct instance ID.
 - `DestroySandbox` unknown sandbox: verify `ErrInstanceNotFound`.
 - `LaunchProcess` happy path: mock `SendCommand` succeeds. Verify process state stored. Verify address format.
 - `LaunchProcess` with environment variables: verify env vars are included in SSM command with proper shell escaping.
@@ -918,11 +881,11 @@ All AWS API calls go through the `InstanceLifecycle` and `SSMAPI` interfaces, wh
 - `GetProcessStatus` running: mock SSM confirms PID exists with matching start time. Verify `ProcessRunning`.
 - `GetProcessStatus` exited: mock SSM confirms PID gone. Verify `ProcessExited` with exit code.
 - `GetProcessStatus` PID recycled: SSM reports different start time. Verify `ProcessExited`.
-- `PauseSandbox` happy path: verify `StopInstances` called. Verify all processes marked exited.
-- `ResumeSandbox` happy path: mock `StartInstances` + `DescribeInstances`. Verify instance state updated, IP refreshed.
+- `PauseSandbox` happy path: verify `StopInstance` called. Verify all processes marked exited.
+- `ResumeSandbox` happy path: mock `StartInstance` + `DescribeInstance`. Verify instance state updated, IP refreshed.
 - `ResumeSandbox` timeout: instance never reaches "running". Verify `ErrInstanceReadyTimeout`.
 - `Capabilities` returns expected values (no snapshots, no rollback, pause=true, launchProcess=true, deepPause=false).
-- `Recover` happy path: mock `DescribeInstances` returns tagged instances. Verify `c.instances` populated.
+- `Recover` happy path: mock `ListInstances` returns tagged instances. Verify `c.instances` populated.
 - `Close` with `TerminateOnClose=true`: verify all instances terminated.
 - `Close` with `TerminateOnClose=false`: verify instances NOT terminated.
 - Concurrent operations: multiple `LaunchProcess` calls on same sandbox, verify no races (use `go test -race`).
@@ -956,29 +919,29 @@ A test helper should be written to:
 
 ## 12. Implementation Order
 
-1. **Sentinel errors** (`internal/sandbox/control/ec2direct/errors.go`) -- Define all error types.
+1. **Sentinel errors** (`internal/sandbox/control/direct/errors.go`) -- Define all error types.
 
-2. **AWS interfaces** (`internal/sandbox/control/ec2direct/aws.go`) -- Define `InstanceLifecycle` and `SSMAPI` interfaces.
+2. **AWS interfaces** (`internal/sandbox/control/direct/aws.go`) -- Define `SSMAPI` interface. `InstanceProvisioner` is imported from the fleet package (Plan 20).
 
-3. **SSM command helpers** (`internal/sandbox/control/ec2direct/ssm_command.go`) -- `shellQuote()`, `buildSSMCommand()` with unit tests (`ssm_command_test.go`). Test edge cases for shell injection prevention.
+3. **SSM command helpers** (`internal/sandbox/control/direct/ssm_command.go`) -- `shellQuote()`, `buildSSMCommand()` with unit tests (`ssm_command_test.go`). Test edge cases for shell injection prevention.
 
-4. **Config and constructor** (`internal/sandbox/control/ec2direct/ec2direct.go`) -- `Config` struct, `NewEC2DirectSandboxControl()` with functional options, internal state types (`instanceState`, `processState`), UserData template validation.
+4. **Config and constructor** (`internal/sandbox/control/direct/direct.go`) -- `Config` struct, `NewDirectSandboxControl()` with functional options, internal state types (`instanceState`, `processState`), UserData template validation.
 
-5. **Capabilities** (`internal/sandbox/control/ec2direct/capabilities.go`) -- Simple method returning the fixed capability set.
+5. **Capabilities** (`internal/sandbox/control/direct/capabilities.go`) -- Simple method returning the fixed capability set.
 
-6. **Instance type mapping** (`internal/sandbox/control/ec2direct/instance_type.go`) -- `Resources` to instance type mapping function with overflow error.
+6. **Instance type mapping** (`internal/sandbox/control/direct/instance_type.go`) -- `Resources` to instance type mapping function with overflow error.
 
-7. **CreateSandbox** (`internal/sandbox/control/ec2direct/create.go`) -- RunInstances, polling with exponential backoff, SSM readiness check. Unit tests with mocked AWS.
+7. **CreateSandbox** (`internal/sandbox/control/direct/create.go`) -- LaunchInstance, polling with exponential backoff, SSM readiness check. Unit tests with mocked APIs.
 
-8. **DestroySandbox** (`internal/sandbox/control/ec2direct/destroy.go`) -- TerminateInstances. Unit tests.
+8. **DestroySandbox** (`internal/sandbox/control/direct/destroy.go`) -- TerminateInstance. Unit tests.
 
-9. **LaunchProcess / KillProcess / GetProcessStatus** (`internal/sandbox/control/ec2direct/process.go`) -- SSM-based process management with PID file tracking, start time verification, health check via SSM. Unit tests. This is the most complex piece.
+9. **LaunchProcess / KillProcess / GetProcessStatus** (`internal/sandbox/control/direct/process.go`) -- SSM-based process management with PID file tracking, start time verification, health check via SSM. Unit tests. This is the most complex piece.
 
-10. **PauseSandbox / ResumeSandbox** (`internal/sandbox/control/ec2direct/pause.go`) -- StopInstances, StartInstances, process state cleanup, IP refresh. Unit tests.
+10. **PauseSandbox / ResumeSandbox** (`internal/sandbox/control/direct/pause.go`) -- StopInstance, StartInstance, process state cleanup, IP refresh. Unit tests.
 
-11. **Crash recovery** (`internal/sandbox/control/ec2direct/recover.go`) -- Tag-based instance discovery, process reconstruction. Unit tests.
+11. **Crash recovery** (`internal/sandbox/control/direct/recover.go`) -- Tag-based instance discovery via ListInstances, process reconstruction. Unit tests.
 
-12. **Close** -- `io.Closer` implementation in `ec2direct.go`. Unit tests.
+12. **Close** -- `io.Closer` implementation in `direct.go`. Unit tests.
 
 13. **End-to-end unit test** -- Full lifecycle test using mocks: CreateSandbox -> LaunchProcess -> GetProcessStatus -> KillProcess -> DestroySandbox.
 
@@ -992,8 +955,9 @@ A test helper should be written to:
 
 | Seam | How Used |
 |------|----------|
-| `internal/sandbox/control/control.go` | `EC2DirectSandboxControl` implements `SandboxControl` interface. Uses `CreateSandboxRequest`, `CreateSandboxResponse`, `LaunchProcessRequest`, `LaunchProcessResponse`, `KillProcessRequest`, `GetProcessStatusRequest`, `GetProcessStatusResponse`, `SandboxCapabilities`, `ProcessStatus` types. |
-| `internal/sandbox/environment/local/local.go` | Agents launched on EC2 Direct use `LocalEnvironment` for tool execution. No direct import by this adapter -- consumed by `flexagent serve agent` running on the instance. |
+| `internal/sandbox/control/control.go` | `DirectSandboxControl` implements `SandboxControl` interface. Uses `CreateSandboxRequest`, `CreateSandboxResponse`, `LaunchProcessRequest`, `LaunchProcessResponse`, `KillProcessRequest`, `GetProcessStatusRequest`, `GetProcessStatusResponse`, `SandboxCapabilities`, `ProcessStatus` types. |
+| `internal/sandbox/control/fleet/provisioner.go` | `DirectSandboxControl` receives an `InstanceProvisioner` for provider-neutral instance lifecycle operations. Uses `InstanceConfig`, `InstanceInfo`, `InstanceStatus`, `InstanceFilter`, `CloudInstanceState` types. |
+| `internal/sandbox/environment/local/local.go` | Agents launched on a Direct instance use `LocalEnvironment` for tool execution. No direct import by this adapter -- consumed by `flexagent serve agent` running on the instance. |
 | `internal/agent/api/agent.go` | `AgentService` interface consumed by the orchestrator to communicate with agents running on the instance. No direct import by this adapter -- consumed by `AgentServiceClient` in the orchestrator. |
 | `internal/agent/api/agent_types.go` | `ToolEnvironmentConfig` with `LocalRootDir` field -- the orchestrator sets `LocalRootDir: "/workspace"` in the `CreateAgentSessionRequest` to configure the workspace directory per-session. |
 
@@ -1001,7 +965,7 @@ A test helper should be written to:
 
 | Seam | Description |
 |------|-------------|
-| `internal/sandbox/control/ec2direct` (new package) | `EC2DirectSandboxControl` implementing `SandboxControl` + `io.Closer`. `InstanceLifecycle` and `SSMAPI` interfaces for AWS SDK abstraction. Sentinel errors for programmatic error handling. |
+| `internal/sandbox/control/direct` (new package) | `DirectSandboxControl` implementing `SandboxControl` + `io.Closer`. `SSMAPI` interface for SSM SDK abstraction (`InstanceProvisioner` is imported from fleet package). Sentinel errors for programmatic error handling. |
 
 ### 13.3 Modified Seams
 
@@ -1012,12 +976,12 @@ None. This adapter is purely additive. It does not modify any existing code.
 ### 13.4 Import Flow
 
 ```
-internal/sandbox/control/ec2direct  -> internal/sandbox/control (SandboxControl interface, types)
-                                    -> github.com/aws/aws-sdk-go-v2/service/ec2 (EC2 SDK types for interface signatures)
-                                    -> github.com/aws/aws-sdk-go-v2/service/ssm (SSM SDK types for interface signatures)
+internal/sandbox/control/direct  -> internal/sandbox/control (SandboxControl interface, types)
+                                 -> internal/sandbox/control/fleet (InstanceProvisioner, InstanceConfig, InstanceInfo, etc.)
+                                 -> github.com/aws/aws-sdk-go-v2/service/ssm (SSM SDK types for SSMAPI interface)
 ```
 
-The adapter does NOT import any other internal packages. It is a leaf package that only depends on the `control` interface package and the AWS SDK.
+The adapter depends on the `control` interface package, the `fleet` package for `InstanceProvisioner`, and the SSM SDK. It does NOT import the EC2 SDK directly -- instance lifecycle is fully delegated to the provisioner.
 
 ---
 
@@ -1025,7 +989,7 @@ The adapter does NOT import any other internal packages. It is a leaf package th
 
 ### OQ1: Instance Pooling
 
-Should EC2 Direct maintain a warm pool of pre-provisioned instances to reduce CreateSandbox latency (currently 10-90s for EC2 boot)? Pooling would improve cold start at the cost of paying for idle instances.
+Should Direct maintain a warm pool of pre-provisioned instances to reduce CreateSandbox latency (currently 10-90s for EC2 boot)? Pooling would improve cold start at the cost of paying for idle instances.
 
 **Recommendation:** Defer pooling to a follow-up. The initial implementation provisions on-demand. Pooling can be added as an optimization if cold start latency is a problem in practice. The pooling logic (pre-warm N instances, assign from pool on CreateSandbox, return to pool on DestroySandbox) is well-understood and can be layered on top without changing the interface.
 
@@ -1049,14 +1013,14 @@ When multiple agents share an instance, there is no per-agent resource limiting.
 
 ### OQ5: PausePreservesProcesses Capability Flag (NEW)
 
-The `SandboxCapabilities` struct has no field to distinguish lossy pause (processes die, filesystem preserved) from lossless pause (full process state preserved). This affects EC2 Direct, Daytona, and potentially other future adapters.
+The `SandboxCapabilities` struct has no field to distinguish lossy pause (processes die, filesystem preserved) from lossless pause (full process state preserved). This affects Direct, Daytona, and potentially other future adapters.
 
 **Options:**
 1. Add `PausePreservesProcesses bool` to `SandboxCapabilities` in `control.go`. This requires coordinating with all adapter plans and updating the interface.
 2. Add `PauseFidelity string` with values like `"full"`, `"filesystem-only"`, `"none"`. More expressive but stringly-typed.
 3. Accept that the orchestrator must have adapter-specific logic for post-resume recovery until a dedicated field is added.
 
-**Recommendation:** Option 1 (`PausePreservesProcesses bool`) is the cleanest. This should be proposed as a small addendum to Plan 18. For the initial implementation of EC2 Direct, proceed with option 3 (orchestrator uses adapter-specific knowledge) and note that the capability flag will be added in a follow-up.
+**Recommendation:** Option 1 (`PausePreservesProcesses bool`) is the cleanest. This should be proposed as a small addendum to Plan 18. For the initial implementation of Direct, proceed with option 3 (orchestrator uses adapter-specific knowledge) and note that the capability flag will be added in a follow-up.
 
 ---
 
@@ -1087,7 +1051,7 @@ This table tracks every finding from both R1 reviews and their disposition.
 |----|---------|----------|-------------|-------|
 | A-F1 | `DeepPause` semantics misused to signal lossy pause | P1 | **Accepted** | Removed incorrect interpretation. Corrected section 3.9 to note `DeepPause` means ZFS-to-S3 cold storage. Added OQ5 for `PausePreservesProcesses` flag. Updated section 3.7 to document lossy pause as an interface gap. |
 | A-F2 | `flexagent serve agent` has no `--root-dir` flag | P1 | **Accepted** | Removed all `--root-dir` references. Updated sections 2.2, 3.4, 4, 7.1 to document that workspace directory is configured per-session via `LocalRootDir` in `CreateAgentSessionRequest` RPC. |
-| A-F3 | EC2 SDK code duplication with Plan 20 | P1 | **Accepted (revised in R2)** | Defined `InstanceLifecycle` as an EC2 Direct-specific thin SDK wrapper in section 5.1. This is NOT shared with Plan 20's `InstanceProvisioner` (which operates at a higher, provider-agnostic abstraction level). The shared piece is the underlying `*ec2.Client`, not the interface. See R2-A F1 / R2-B F1 dispositions. |
+| A-F3 | EC2 SDK code duplication with Plan 20 | P1 | **Accepted (revised in R2, further revised)** | Direct now uses Plan 20's shared `InstanceProvisioner` interface directly, eliminating the separate `InstanceLifecycle` interface entirely. This resolves the duplication concern -- both Direct and Fleet share the same provider-neutral instance lifecycle abstraction. |
 | A-F4 | No crash recovery after orchestrator restart | P1 | **Accepted** | Added section 3.10 (Crash Recovery) with tag-based instance discovery, SSM process probing, and constructor-time recovery. Added mandatory tags `ManagedBy` and `adapter` to Config. |
 | A-F5 | SSM command injection vulnerability | P2 | **Accepted** | Added `shellQuote()` helper and `buildSSMCommand()` function in section 3.4. Added `ssm_command.go` and `ssm_command_test.go` to package structure. Specified shell escaping as mandatory for all interpolated values. |
 | A-F6 | Health check readiness polling underspecified | P2 | **Accepted** | Specified exponential backoff with jitter (500ms start, 5s cap) in section 3.4. Changed health check to use SSM-based `curl localhost:PORT/health` to avoid network topology issues. Referenced the specific health endpoint contract (`200 OK`, body `"ok\n"`). |
@@ -1110,7 +1074,7 @@ This table tracks every finding from both R1 reviews and their disposition.
 | B-F1 | `flexagent serve agent` has no `--root-dir` flag | P0 | **Accepted** | Same as A-F2. See disposition above. |
 | B-F2 | In-memory instance/process state is not durable | P1 | **Accepted** | Same as A-F4. See disposition above (crash recovery section 3.10). |
 | B-F3 | SSM command construction vulnerable to injection | P1 | **Accepted** | Same as A-F5. See disposition above. |
-| B-F4 | Missing overlap analysis with Plan 20 InstanceProvisioner | P1 | **Accepted (revised in R2)** | Same as A-F3. See disposition above. `InstanceLifecycle` is EC2 Direct-specific; `InstanceProvisioner` is Plan 20's provider-agnostic abstraction. They are distinct interfaces by design. |
+| B-F4 | Missing overlap analysis with Plan 20 InstanceProvisioner | P1 | **Accepted (revised in R2, further revised)** | Same as A-F3. See disposition above. Direct now adopts Plan 20's shared `InstanceProvisioner` interface, unifying instance lifecycle across both adapters. |
 | B-F5 | `DeepPause` semantics confusing/inconsistent | P2 | **Accepted** | Same as A-F1. See disposition above. |
 | B-F6 | SSM readiness polling underspecified | P2 | **Accepted** | Same as A-F6. See disposition above. Also specified polling strategy for CreateSandbox instance readiness (section 3.2, step 5-6). |
 | B-F7 | SSM command output capture for PID extraction underspecified | P2 | **Accepted** | Same as A-F7. See disposition above (PID file approach). |
@@ -1127,15 +1091,15 @@ This table tracks every finding from both R1 reviews and their disposition.
 
 | ID | Finding | Severity | Disposition | Notes |
 |----|---------|----------|-------------|-------|
-| R2A-F1 | `InstanceLifecycle` and `InstanceProvisioner` are incompatible interfaces but plan claims they are shared/identical | P1 | **Accepted** | Rewrote section 5.1 to clearly state these are distinct interfaces at different abstraction levels. `InstanceLifecycle` is a thin EC2 SDK wrapper; `InstanceProvisioner` is provider-agnostic. Added comparison table. Removed "the interface is identical either way" claim. The shared piece is the underlying `*ec2.Client`, not the Go interface. Updated R1 dispositions for A-F3 and B-F4 accordingly. |
-| R2A-F2 | `ListInstances` missing from `InstanceLifecycle` but crash recovery uses `DescribeInstances` as a list operation; contradicts claimed interface compatibility with Plan 20 | P2 | **Accepted** | Added clarifying note in section 5.1 that `DescribeInstances` serves dual purposes (single-instance lookup and multi-instance discovery via tag filters). Updated section 3.10 to show explicit filter construction. Since we no longer claim interface compatibility, the absence of a separate `ListInstances` method is a non-issue. |
-| R2A-F3 | Constructor calls `Recover()` but error handling for `DescribeInstances` failure is unspecified | P2 | **Accepted** | Updated section 3.10 to specify: (1) if the initial `DescribeInstances` tag query fails, the constructor returns an error (fail-fast -- cannot distinguish "no instances" from "AWS is down"); (2) zero results from a successful query is a normal clean start; (3) individual SSM probe failures remain best-effort (already specified). |
-| R2A-F4 | `DescribeInstances` used for two distinct purposes without clarifying comment | P3 | **Accepted** | Added clarifying comment on `InstanceLifecycle` interface documentation and in section 5.1 text noting the dual use of `DescribeInstances`. |
+| R2A-F1 | `InstanceLifecycle` and `InstanceProvisioner` are incompatible interfaces but plan claims they are shared/identical | P1 | **Accepted (further revised)** | Resolved by adopting `InstanceProvisioner` directly. The separate `InstanceLifecycle` interface has been removed entirely. Direct now uses the same shared `InstanceProvisioner` from Plan 20 for all instance lifecycle operations, achieving true provider neutrality. |
+| R2A-F2 | `ListInstances` missing from `InstanceLifecycle` but crash recovery uses `DescribeInstances` as a list operation | P2 | **Accepted (further revised)** | Resolved by adopting `InstanceProvisioner` which includes `ListInstances`. Crash recovery now calls `provisioner.ListInstances(ctx, InstanceFilter{...})` directly. |
+| R2A-F3 | Constructor calls `Recover()` but error handling for recovery query failure is unspecified | P2 | **Accepted** | Updated section 3.10 to specify: (1) if the initial `ListInstances` call fails, the constructor returns an error (fail-fast -- cannot distinguish "no instances" from "provider is down"); (2) zero results from a successful query is a normal clean start; (3) individual SSM probe failures remain best-effort (already specified). |
+| R2A-F4 | `DescribeInstances` used for two distinct purposes without clarifying comment | P3 | **Accepted (superseded)** | No longer applicable. `InstanceProvisioner` provides separate `DescribeInstance` (single-instance lookup) and `ListInstances` (multi-instance discovery) methods, eliminating the dual-purpose concern. |
 
 ### R2-B Findings (docs/plans/19-ec2-direct-adapter-review-r2-b.md)
 
 | ID | Finding | Severity | Disposition | Notes |
 |----|---------|----------|-------------|-------|
-| R2B-F1 | `InstanceLifecycle` and `InstanceProvisioner` are NOT the same interface | P1 | **Accepted** | Same as R2A-F1. See disposition above. |
-| R2B-F2 | Crash recovery calls `DescribeInstances` with tag filters vs Plan 20's `ListInstances` | P2 | **Accepted** | Same as R2A-F2. Section 3.10 now shows explicit `ec2.DescribeInstancesInput` filter construction. Since `InstanceLifecycle` is EC2 Direct-specific (not shared with Plan 20), using raw `DescribeInstances` with filters is the correct approach. |
+| R2B-F1 | `InstanceLifecycle` and `InstanceProvisioner` are NOT the same interface | P1 | **Accepted (further revised)** | Same as R2A-F1. Resolved by adopting `InstanceProvisioner` directly. See disposition above. |
+| R2B-F2 | Crash recovery calls `DescribeInstances` with tag filters vs Plan 20's `ListInstances` | P2 | **Accepted (further revised)** | Same as R2A-F2. Resolved by adopting `InstanceProvisioner`. Crash recovery now uses `provisioner.ListInstances` directly. |
 | R2B-F3 | `CreateSandboxResponse.Address` deviates from `host:port` contract | P2 | **Accepted** | Changed `Address` to return `ip:0` to satisfy the `host:port` format contract. Port 0 signals "no active endpoint." Updated section 3.2 step 9, the Address note, and the sequence diagram. This avoids breaking downstream consumers that parse `Address` as `host:port`. |
