@@ -192,6 +192,7 @@ func runServeOrchestrator(args []string) {
 		AgentLoopService: agentLoopSvc,
 		SandboxHostAddrs: sandboxHostAddrs,
 		MaxSessions:      cfg.MaxSessions,
+		HealthInterval:   cfg.HealthCheckInterval,
 		CreateTimeout:    cfg.CreateSessionTimeout,
 		ShutdownTimeout:  cfg.ShutdownTimeout,
 		Logger:           logger,

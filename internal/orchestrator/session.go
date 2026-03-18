@@ -25,8 +25,7 @@ const (
 )
 
 // sessionEntry tracks an active proxied session.
-// mu protects mutable fields (state, processID, agentService, lastHealth)
-// that may be accessed concurrently by the health monitor goroutine (bead 3).
+// mu protects mutable fields that may be touched by API calls and health checks.
 type sessionEntry struct {
 	mu sync.Mutex
 
@@ -36,14 +35,17 @@ type sessionEntry struct {
 
 	sandboxID       string
 	toolSessionID   string // host-local session ID for ToolEnvironment (tools-sandbox only)
+	agentAddress    string // remote agent address for health checks (agent-direct/agent-sandbox)
 	processID       string
 	sandboxControl  control.SandboxControl
 	sandboxHostAddr string
 	agentService    agentapi.AgentService
 
-	state      sessionState
-	createdAt  time.Time
-	lastHealth time.Time
+	state          sessionState
+	createdAt      time.Time
+	lastHealth     time.Time
+	healthFailures int
+	healthErr      error
 }
 
 func generateSessionID() string {

@@ -320,17 +320,23 @@ func mustNewOrchestrator(t *testing.T, sc control.SandboxControl, agentSvc *mock
 type mockSandboxControl struct {
 	createResp *control.CreateSandboxResponse
 	createErr  error
+	createFn   func(context.Context, control.CreateSandboxRequest) (*control.CreateSandboxResponse, error)
 	launchResp *control.LaunchProcessResponse
 	launchErr  error
+	launchFn   func(context.Context, control.LaunchProcessRequest) (*control.LaunchProcessResponse, error)
 	killErr    error
 	destroyErr error
 	pauseErr   error
 	resumeErr  error
 	caps       *control.SandboxCapabilities
+	statusResp *control.GetProcessStatusResponse
+	statusErr  error
+	statusFn   func(context.Context, control.GetProcessStatusRequest) (*control.GetProcessStatusResponse, error)
 
 	lastCreateReq          control.CreateSandboxRequest
 	lastLaunchReq          control.LaunchProcessRequest
 	lastKillReq            control.KillProcessRequest
+	lastStatusReq          control.GetProcessStatusRequest
 	lastDestroyedSandboxID string
 	lastPausedSandboxID    string
 	lastResumedSandboxID   string
@@ -338,11 +344,15 @@ type mockSandboxControl struct {
 	destroyCount int
 	pauseCount   int
 	resumeCount  int
+	statusCount  int
 	calls        *[]string
 	mu           sync.Mutex
 }
 
-func (m *mockSandboxControl) CreateSandbox(_ context.Context, req control.CreateSandboxRequest) (*control.CreateSandboxResponse, error) {
+func (m *mockSandboxControl) CreateSandbox(ctx context.Context, req control.CreateSandboxRequest) (*control.CreateSandboxResponse, error) {
+	if m.createFn != nil {
+		return m.createFn(ctx, req)
+	}
 	m.mu.Lock()
 	m.lastCreateReq = req
 	if m.calls != nil {
@@ -370,7 +380,10 @@ func (m *mockSandboxControl) DestroySandbox(_ context.Context, sandboxID string)
 	return m.destroyErr
 }
 
-func (m *mockSandboxControl) LaunchProcess(_ context.Context, req control.LaunchProcessRequest) (*control.LaunchProcessResponse, error) {
+func (m *mockSandboxControl) LaunchProcess(ctx context.Context, req control.LaunchProcessRequest) (*control.LaunchProcessResponse, error) {
+	if m.launchFn != nil {
+		return m.launchFn(ctx, req)
+	}
 	m.mu.Lock()
 	m.lastLaunchReq = req
 	if m.calls != nil {
@@ -397,7 +410,23 @@ func (m *mockSandboxControl) KillProcess(_ context.Context, req control.KillProc
 	return m.killErr
 }
 
-func (m *mockSandboxControl) GetProcessStatus(_ context.Context, _ control.GetProcessStatusRequest) (*control.GetProcessStatusResponse, error) {
+func (m *mockSandboxControl) GetProcessStatus(ctx context.Context, req control.GetProcessStatusRequest) (*control.GetProcessStatusResponse, error) {
+	if m.statusFn != nil {
+		return m.statusFn(ctx, req)
+	}
+	m.mu.Lock()
+	m.lastStatusReq = req
+	m.statusCount++
+	resp := m.statusResp
+	err := m.statusErr
+	m.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if resp != nil {
+		out := *resp
+		return &out, nil
+	}
 	return &control.GetProcessStatusResponse{Status: control.ProcessRunning}, nil
 }
 
@@ -429,8 +458,11 @@ func (m *mockSandboxControl) Capabilities() control.SandboxCapabilities {
 }
 
 type mockAgentService struct {
+	mu sync.Mutex
+
 	createResp    *agentapi.CreateAgentSessionResponse
 	createErr     error
+	createFn      func(context.Context, *agentapi.CreateAgentSessionRequest) (*agentapi.CreateAgentSessionResponse, error)
 	getResp       *agentapi.GetAgentSessionResponse
 	getErr        error
 	listResp      *agentapi.ListAgentSessionsResponse
@@ -466,154 +498,205 @@ type mockAgentService struct {
 	calls *[]string
 }
 
-func (m *mockAgentService) CreateSession(_ context.Context, req *agentapi.CreateAgentSessionRequest) (*agentapi.CreateAgentSessionResponse, error) {
+func (m *mockAgentService) CreateSession(ctx context.Context, req *agentapi.CreateAgentSessionRequest) (*agentapi.CreateAgentSessionResponse, error) {
+	m.mu.Lock()
 	cp := *req
 	m.lastCreateReq = &cp
+	createFn := m.createFn
+	createErr := m.createErr
+	createResp := m.createResp
 	if m.calls != nil {
 		*m.calls = append(*m.calls, "create-session")
 	}
-	if m.createErr != nil {
-		return nil, m.createErr
+	m.mu.Unlock()
+	if createFn != nil {
+		return createFn(ctx, req)
 	}
-	if m.createResp == nil {
+	if createErr != nil {
+		return nil, createErr
+	}
+	if createResp == nil {
 		return &agentapi.CreateAgentSessionResponse{SessionID: req.SessionConfig.SessionID, State: "idle"}, nil
 	}
-	out := *m.createResp
+	out := *createResp
 	return &out, nil
 }
 
 func (m *mockAgentService) GetSession(_ context.Context, req *agentapi.GetAgentSessionRequest) (*agentapi.GetAgentSessionResponse, error) {
-	if m.getErr != nil {
-		return nil, m.getErr
+	m.mu.Lock()
+	getErr := m.getErr
+	getResp := m.getResp
+	m.mu.Unlock()
+	if getErr != nil {
+		return nil, getErr
 	}
-	if m.getResp == nil {
+	if getResp == nil {
 		return &agentapi.GetAgentSessionResponse{SessionID: req.SessionID, State: "idle"}, nil
 	}
-	out := *m.getResp
+	out := *getResp
 	return &out, nil
 }
 
 func (m *mockAgentService) ListSessions(_ context.Context, _ *agentapi.ListAgentSessionsRequest) (*agentapi.ListAgentSessionsResponse, error) {
-	if m.listErr != nil {
-		return nil, m.listErr
+	m.mu.Lock()
+	listErr := m.listErr
+	listResp := m.listResp
+	m.mu.Unlock()
+	if listErr != nil {
+		return nil, listErr
 	}
-	if m.listResp == nil {
+	if listResp == nil {
 		return &agentapi.ListAgentSessionsResponse{}, nil
 	}
-	out := *m.listResp
-	out.Sessions = append([]agentapi.AgentSessionSummary(nil), m.listResp.Sessions...)
+	out := *listResp
+	out.Sessions = append([]agentapi.AgentSessionSummary(nil), listResp.Sessions...)
 	return &out, nil
 }
 
 func (m *mockAgentService) SendMessage(_ context.Context, req *agentapi.SendMessageRequest) (agentapi.EventReceiver, error) {
+	m.mu.Lock()
 	cp := *req
 	m.lastSendReq = &cp
-	if m.sendErr != nil {
-		return nil, m.sendErr
+	sendErr := m.sendErr
+	sendReceiver := m.sendReceiver
+	m.mu.Unlock()
+	if sendErr != nil {
+		return nil, sendErr
 	}
-	if m.sendReceiver == nil {
+	if sendReceiver == nil {
 		return &sliceEventReceiver{}, nil
 	}
-	return m.sendReceiver, nil
+	return sendReceiver, nil
 }
 
 func (m *mockAgentService) Continue(_ context.Context, req *agentapi.ContinueRequest) (agentapi.EventReceiver, error) {
+	m.mu.Lock()
 	cp := *req
 	m.lastContinueReq = &cp
-	if m.continueErr != nil {
-		return nil, m.continueErr
+	continueErr := m.continueErr
+	continueRecv := m.continueRecv
+	m.mu.Unlock()
+	if continueErr != nil {
+		return nil, continueErr
 	}
-	if m.continueRecv == nil {
+	if continueRecv == nil {
 		return &sliceEventReceiver{}, nil
 	}
-	return m.continueRecv, nil
+	return continueRecv, nil
 }
 
 func (m *mockAgentService) Steer(_ context.Context, req *agentapi.SteerRequest) (*agentapi.SteerResponse, error) {
+	m.mu.Lock()
 	cp := *req
 	m.lastSteerReq = &cp
-	if m.steerErr != nil {
-		return nil, m.steerErr
+	steerErr := m.steerErr
+	steerResp := m.steerResp
+	m.mu.Unlock()
+	if steerErr != nil {
+		return nil, steerErr
 	}
-	if m.steerResp == nil {
+	if steerResp == nil {
 		return &agentapi.SteerResponse{}, nil
 	}
-	out := *m.steerResp
+	out := *steerResp
 	return &out, nil
 }
 
 func (m *mockAgentService) FollowUp(_ context.Context, req *agentapi.FollowUpRequest) (*agentapi.FollowUpResponse, error) {
+	m.mu.Lock()
 	cp := *req
 	m.lastFollowReq = &cp
-	if m.followErr != nil {
-		return nil, m.followErr
+	followErr := m.followErr
+	followResp := m.followResp
+	m.mu.Unlock()
+	if followErr != nil {
+		return nil, followErr
 	}
-	if m.followResp == nil {
+	if followResp == nil {
 		return &agentapi.FollowUpResponse{}, nil
 	}
-	out := *m.followResp
+	out := *followResp
 	return &out, nil
 }
 
 func (m *mockAgentService) Abort(_ context.Context, req *agentapi.AbortRequest) (*agentapi.AbortResponse, error) {
+	m.mu.Lock()
 	cp := *req
 	m.lastAbortReq = &cp
-	if m.abortErr != nil {
-		return nil, m.abortErr
+	abortErr := m.abortErr
+	abortResp := m.abortResp
+	m.mu.Unlock()
+	if abortErr != nil {
+		return nil, abortErr
 	}
-	if m.abortResp == nil {
+	if abortResp == nil {
 		return &agentapi.AbortResponse{}, nil
 	}
-	out := *m.abortResp
+	out := *abortResp
 	return &out, nil
 }
 
 func (m *mockAgentService) SubscribeEvents(_ context.Context, req *agentapi.SubscribeEventsRequest) (agentapi.EventReceiver, error) {
+	m.mu.Lock()
 	cp := *req
 	m.lastSubReq = &cp
-	if m.subscribeErr != nil {
-		return nil, m.subscribeErr
+	subscribeErr := m.subscribeErr
+	subscribeRecv := m.subscribeRecv
+	m.mu.Unlock()
+	if subscribeErr != nil {
+		return nil, subscribeErr
 	}
-	if m.subscribeRecv == nil {
+	if subscribeRecv == nil {
 		return &sliceEventReceiver{}, nil
 	}
-	return m.subscribeRecv, nil
+	return subscribeRecv, nil
 }
 
 func (m *mockAgentService) ResumeSession(_ context.Context, req *agentapi.ResumeSessionRequest) (*agentapi.ResumeSessionResponse, error) {
+	m.mu.Lock()
 	cp := cloneResumeSessionRequest(req)
 	m.lastResumeReq = &cp
-	if m.resumeErr != nil {
-		return nil, m.resumeErr
+	resumeErr := m.resumeErr
+	resumeResp := m.resumeResp
+	m.mu.Unlock()
+	if resumeErr != nil {
+		return nil, resumeErr
 	}
-	if m.resumeResp == nil {
+	if resumeResp == nil {
 		return &agentapi.ResumeSessionResponse{SessionID: req.SessionConfig.SessionID, State: "active"}, nil
 	}
-	out := *m.resumeResp
+	out := *resumeResp
 	return &out, nil
 }
 
 func (m *mockAgentService) DestroySession(_ context.Context, req *agentapi.DestroyAgentSessionRequest) (*agentapi.DestroyAgentSessionResponse, error) {
+	m.mu.Lock()
 	cp := *req
 	m.lastDestroyReq = &cp
+	destroyErr := m.destroyErr
+	destroyResp := m.destroyResp
 	if m.calls != nil {
 		*m.calls = append(*m.calls, "agent-destroy")
 	}
-	if m.destroyErr != nil {
-		return nil, m.destroyErr
+	m.mu.Unlock()
+	if destroyErr != nil {
+		return nil, destroyErr
 	}
-	if m.destroyResp == nil {
+	if destroyResp == nil {
 		return &agentapi.DestroyAgentSessionResponse{}, nil
 	}
-	out := *m.destroyResp
+	out := *destroyResp
 	return &out, nil
 }
 
 func (m *mockAgentService) Close() error {
+	m.mu.Lock()
+	closeErr := m.closeErr
 	if m.calls != nil {
 		*m.calls = append(*m.calls, "agent-close")
 	}
-	return m.closeErr
+	m.mu.Unlock()
+	return closeErr
 }
 
 type sliceEventReceiver struct {

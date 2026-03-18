@@ -885,6 +885,12 @@ func (r *serviceEventReceiver) push(evt AgentEvent) bool {
 	if closed {
 		return false
 	}
+	// Fast-path cancellation check to avoid sending after close.
+	select {
+	case <-done:
+		return false
+	default:
+	}
 	select {
 	case ch <- &apiEvt:
 		return true
@@ -894,27 +900,42 @@ func (r *serviceEventReceiver) push(evt AgentEvent) bool {
 }
 
 func (r *serviceEventReceiver) Recv() (*agentapi.AgentEvent, error) {
-	r.mu.Lock()
-	if r.closed && len(r.ch) == 0 {
-		err := r.terminalErr
+	for {
+		r.mu.Lock()
+		closed := r.closed
+		ch := r.ch
+		done := r.done
+		terminalErr := r.terminalErr
+		buffered := len(ch)
 		r.mu.Unlock()
-		return nil, err
-	}
-	ch := r.ch
-	r.mu.Unlock()
 
-	evt, ok := <-ch
-	if ok {
-		return evt, nil
-	}
+		if closed && buffered == 0 {
+			if terminalErr == nil {
+				terminalErr = io.EOF
+			}
+			return nil, terminalErr
+		}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.terminalErr == nil {
-		r.terminalErr = io.EOF
+		// Drain queued events first.
+		select {
+		case evt := <-ch:
+			return evt, nil
+		default:
+		}
+		if closed {
+			if terminalErr == nil {
+				terminalErr = io.EOF
+			}
+			return nil, terminalErr
+		}
+
+		select {
+		case evt := <-ch:
+			return evt, nil
+		case <-done:
+			// Closed while waiting: loop to consume any buffered events.
+		}
 	}
-	r.closed = true
-	return nil, r.terminalErr
 }
 
 func toAPISessionMetrics(m SessionMetrics) agentapi.SessionMetrics {
@@ -966,7 +987,6 @@ func (r *serviceEventReceiver) closeWithError(err error) {
 		hooks := append([]func(){}, r.closeHooks...)
 		r.closeHooks = nil
 		close(r.done)
-		close(r.ch)
 		r.mu.Unlock()
 
 		for _, hook := range hooks {

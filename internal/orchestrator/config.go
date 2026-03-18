@@ -18,6 +18,7 @@ import (
 const (
 	defaultCreateTimeout   = 3 * time.Minute
 	defaultShutdownTimeout = 30 * time.Second
+	defaultHealthInterval  = 15 * time.Second
 	defaultAgentBinary     = "flexagent"
 	defaultAgentPort       = 8081
 )
@@ -46,6 +47,7 @@ type OrchestratorConfig struct {
 	SandboxHostAddrs []string
 
 	MaxSessions     int
+	HealthInterval  time.Duration
 	CreateTimeout   time.Duration
 	ShutdownTimeout time.Duration
 	Logger          *slog.Logger
@@ -64,6 +66,12 @@ func (cfg OrchestratorConfig) normalize() (OrchestratorConfig, error) {
 	}
 	if cfg.MaxSessions < 0 {
 		return cfg, fmt.Errorf("max sessions must be >= 0")
+	}
+	if cfg.HealthInterval < 0 {
+		return cfg, fmt.Errorf("health interval must be >= 0")
+	}
+	if cfg.HealthInterval == 0 {
+		cfg.HealthInterval = defaultHealthInterval
 	}
 	if cfg.CreateTimeout <= 0 {
 		cfg.CreateTimeout = defaultCreateTimeout

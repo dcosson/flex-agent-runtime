@@ -116,12 +116,15 @@ func (o *Orchestrator) createRemoteAgentSession(ctx context.Context, entry *sess
 
 	entry.remoteSessionID = remoteSessionID
 	entry.sandboxID = sandboxResp.SandboxID
+	entry.agentAddress = launchResp.Address
 	entry.processID = launchResp.ProcessID
 	entry.sandboxControl = sc
 	entry.sandboxHostAddr = sandboxResp.Address
 	entry.agentService = agentService
 	entry.state = sessionActive
 	entry.lastHealth = time.Now()
+	entry.healthFailures = 0
+	entry.healthErr = nil
 
 	if err := o.addSession(entry); err != nil {
 		_, destroyErr := agentService.DestroySession(ctx, &agentapi.DestroyAgentSessionRequest{SessionID: remoteSessionID})
@@ -178,6 +181,8 @@ func (o *Orchestrator) createToolsSandboxSession(ctx context.Context, entry *ses
 	entry.agentService = o.config.AgentLoopService
 	entry.state = sessionActive
 	entry.lastHealth = time.Now()
+	entry.healthFailures = 0
+	entry.healthErr = nil
 
 	if err := o.addSession(entry); err != nil {
 		_, destroySessionErr := o.config.AgentLoopService.DestroySession(ctx, &agentapi.DestroyAgentSessionRequest{SessionID: remoteSessionID})
@@ -227,6 +232,24 @@ func isFleetSandboxID(sandboxID string) bool {
 	return strings.HasPrefix(sandboxID, fleet.SandboxIDPrefix)
 }
 
+func (entry *sessionEntry) snapshotProxyTarget() (remoteSessionID string, service agentapi.AgentService, err error) {
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
+	if entry.state == sessionUnhealthy {
+		return "", nil, sessionUnavailableError(entry.sessionID, entry.healthErr)
+	}
+	if entry.agentService == nil {
+		return "", nil, rpc.NewRPCError(rpc.CodeInternal, "session has no agent service", nil)
+	}
+
+	remoteSessionID = entry.remoteSessionID
+	if strings.TrimSpace(remoteSessionID) == "" {
+		remoteSessionID = entry.sessionID
+	}
+	return remoteSessionID, entry.agentService, nil
+}
+
 // PauseSession pauses a session's sandbox. For agent-direct (lossy pause),
 // the agent process is aborted first since EC2 stop kills all processes.
 func (o *Orchestrator) PauseSession(ctx context.Context, sessionID string) error {
@@ -248,6 +271,9 @@ func (o *Orchestrator) PauseSession(ctx context.Context, sessionID string) error
 	// For lossy-pause providers (agent-direct), abort the active turn first.
 	caps := entry.sandboxControl.Capabilities()
 	if caps.Pause && entry.placement == PlacementAgentDirect {
+		if entry.agentService == nil {
+			return rpc.NewRPCError(rpc.CodeInternal, "session has no agent service", nil)
+		}
 		_, _ = entry.agentService.Abort(ctx, &agentapi.AbortRequest{
 			SessionID: entry.remoteSessionID,
 			Reason:    "pause: lossy sandbox pause requires agent stop",
@@ -308,12 +334,15 @@ func (o *Orchestrator) ResumeSessionSandbox(ctx context.Context, sessionID strin
 		if entry.agentService != nil {
 			_ = entry.agentService.Close()
 		}
+		entry.agentAddress = launchResp.Address
 		entry.processID = launchResp.ProcessID
 		entry.agentService = agentService
 	}
 
 	entry.state = sessionActive
 	entry.lastHealth = time.Now()
+	entry.healthFailures = 0
+	entry.healthErr = nil
 	return nil
 }
 
@@ -325,9 +354,13 @@ func (o *Orchestrator) GetSession(ctx context.Context, req *agentapi.GetAgentSes
 	if err != nil {
 		return nil, err
 	}
+	remoteSessionID, agentService, err := entry.snapshotProxyTarget()
+	if err != nil {
+		return nil, err
+	}
 	backendReq := *req
-	backendReq.SessionID = entry.remoteSessionID
-	resp, err := entry.agentService.GetSession(ctx, &backendReq)
+	backendReq.SessionID = remoteSessionID
+	resp, err := agentService.GetSession(ctx, &backendReq)
 	if err != nil {
 		return nil, err
 	}
@@ -343,10 +376,14 @@ func (o *Orchestrator) ListSessions(_ context.Context, _ *agentapi.ListAgentSess
 	entries := o.listSessionEntries()
 	resp := &agentapi.ListAgentSessionsResponse{Sessions: make([]agentapi.AgentSessionSummary, 0, len(entries))}
 	for _, entry := range entries {
+		entry.mu.Lock()
+		state := entry.state
+		createdAt := entry.createdAt
+		entry.mu.Unlock()
 		resp.Sessions = append(resp.Sessions, agentapi.AgentSessionSummary{
 			SessionID: entry.sessionID,
-			State:     string(entry.state),
-			CreatedAt: entry.createdAt,
+			State:     string(state),
+			CreatedAt: createdAt,
 		})
 	}
 	return resp, nil
@@ -360,9 +397,13 @@ func (o *Orchestrator) SendMessage(ctx context.Context, req *agentapi.SendMessag
 	if err != nil {
 		return nil, err
 	}
+	remoteSessionID, agentService, err := entry.snapshotProxyTarget()
+	if err != nil {
+		return nil, err
+	}
 	backendReq := *req
-	backendReq.SessionID = entry.remoteSessionID
-	recv, err := entry.agentService.SendMessage(ctx, &backendReq)
+	backendReq.SessionID = remoteSessionID
+	recv, err := agentService.SendMessage(ctx, &backendReq)
 	if err != nil {
 		return nil, err
 	}
@@ -377,9 +418,13 @@ func (o *Orchestrator) Continue(ctx context.Context, req *agentapi.ContinueReque
 	if err != nil {
 		return nil, err
 	}
+	remoteSessionID, agentService, err := entry.snapshotProxyTarget()
+	if err != nil {
+		return nil, err
+	}
 	backendReq := *req
-	backendReq.SessionID = entry.remoteSessionID
-	recv, err := entry.agentService.Continue(ctx, &backendReq)
+	backendReq.SessionID = remoteSessionID
+	recv, err := agentService.Continue(ctx, &backendReq)
 	if err != nil {
 		return nil, err
 	}
@@ -394,9 +439,13 @@ func (o *Orchestrator) Steer(ctx context.Context, req *agentapi.SteerRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	remoteSessionID, agentService, err := entry.snapshotProxyTarget()
+	if err != nil {
+		return nil, err
+	}
 	backendReq := *req
-	backendReq.SessionID = entry.remoteSessionID
-	return entry.agentService.Steer(ctx, &backendReq)
+	backendReq.SessionID = remoteSessionID
+	return agentService.Steer(ctx, &backendReq)
 }
 
 func (o *Orchestrator) FollowUp(ctx context.Context, req *agentapi.FollowUpRequest) (*agentapi.FollowUpResponse, error) {
@@ -407,9 +456,13 @@ func (o *Orchestrator) FollowUp(ctx context.Context, req *agentapi.FollowUpReque
 	if err != nil {
 		return nil, err
 	}
+	remoteSessionID, agentService, err := entry.snapshotProxyTarget()
+	if err != nil {
+		return nil, err
+	}
 	backendReq := *req
-	backendReq.SessionID = entry.remoteSessionID
-	return entry.agentService.FollowUp(ctx, &backendReq)
+	backendReq.SessionID = remoteSessionID
+	return agentService.FollowUp(ctx, &backendReq)
 }
 
 func (o *Orchestrator) Abort(ctx context.Context, req *agentapi.AbortRequest) (*agentapi.AbortResponse, error) {
@@ -420,9 +473,13 @@ func (o *Orchestrator) Abort(ctx context.Context, req *agentapi.AbortRequest) (*
 	if err != nil {
 		return nil, err
 	}
+	remoteSessionID, agentService, err := entry.snapshotProxyTarget()
+	if err != nil {
+		return nil, err
+	}
 	backendReq := *req
-	backendReq.SessionID = entry.remoteSessionID
-	return entry.agentService.Abort(ctx, &backendReq)
+	backendReq.SessionID = remoteSessionID
+	return agentService.Abort(ctx, &backendReq)
 }
 
 func (o *Orchestrator) SubscribeEvents(ctx context.Context, req *agentapi.SubscribeEventsRequest) (agentapi.EventReceiver, error) {
@@ -433,9 +490,13 @@ func (o *Orchestrator) SubscribeEvents(ctx context.Context, req *agentapi.Subscr
 	if err != nil {
 		return nil, err
 	}
+	remoteSessionID, agentService, err := entry.snapshotProxyTarget()
+	if err != nil {
+		return nil, err
+	}
 	backendReq := *req
-	backendReq.SessionID = entry.remoteSessionID
-	recv, err := entry.agentService.SubscribeEvents(ctx, &backendReq)
+	backendReq.SessionID = remoteSessionID
+	recv, err := agentService.SubscribeEvents(ctx, &backendReq)
 	if err != nil {
 		return nil, err
 	}
@@ -457,9 +518,13 @@ func (o *Orchestrator) ResumeSession(ctx context.Context, req *agentapi.ResumeSe
 	if err != nil {
 		return nil, err
 	}
+	remoteSessionID, agentService, err := entry.snapshotProxyTarget()
+	if err != nil {
+		return nil, err
+	}
 	backendReq := cloneResumeSessionRequest(req)
-	backendReq.SessionConfig.SessionID = entry.remoteSessionID
-	resp, err := entry.agentService.ResumeSession(ctx, &backendReq)
+	backendReq.SessionConfig.SessionID = remoteSessionID
+	resp, err := agentService.ResumeSession(ctx, &backendReq)
 	if err != nil {
 		return nil, err
 	}

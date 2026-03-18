@@ -50,6 +50,9 @@ func TestConfigNormalizeDefaults(t *testing.T) {
 	if normalized.CreateTimeout != defaultCreateTimeout {
 		t.Fatalf("CreateTimeout = %s, want %s", normalized.CreateTimeout, defaultCreateTimeout)
 	}
+	if normalized.HealthInterval != defaultHealthInterval {
+		t.Fatalf("HealthInterval = %s, want %s", normalized.HealthInterval, defaultHealthInterval)
+	}
 	if normalized.ShutdownTimeout != defaultShutdownTimeout {
 		t.Fatalf("ShutdownTimeout = %s, want %s", normalized.ShutdownTimeout, defaultShutdownTimeout)
 	}
@@ -68,6 +71,10 @@ func TestConfigNormalizeValidation(t *testing.T) {
 	_, err := (OrchestratorConfig{MaxSessions: -1, DirectControl: &mockSandboxControl{}}).normalize()
 	if err == nil {
 		t.Fatal("normalize() expected error for negative max sessions")
+	}
+	_, err = (OrchestratorConfig{HealthInterval: -1 * time.Second, DirectControl: &mockSandboxControl{}}).normalize()
+	if err == nil {
+		t.Fatal("normalize() expected error for negative health interval")
 	}
 
 	_, err = (OrchestratorConfig{}).normalize()

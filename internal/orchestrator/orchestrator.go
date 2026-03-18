@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
+	"time"
 
 	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
 	"github.com/dcosson/flex-agent-runtime/internal/rpc"
@@ -25,6 +27,10 @@ type Orchestrator struct {
 	lifecycleCancel context.CancelFunc
 
 	wg sync.WaitGroup
+
+	healthCancel context.CancelFunc
+	healthWg     sync.WaitGroup
+	healthClient *http.Client
 }
 
 var _ agentapi.AgentService = (*Orchestrator)(nil)
@@ -35,13 +41,27 @@ func New(cfg OrchestratorConfig) (*Orchestrator, error) {
 		return nil, err
 	}
 	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
-	return &Orchestrator{
+	orch := &Orchestrator{
 		sessions:        make(map[string]*sessionEntry),
 		config:          normalized,
 		logger:          normalized.Logger,
 		lifecycleCtx:    lifecycleCtx,
 		lifecycleCancel: lifecycleCancel,
-	}, nil
+		healthCancel:    func() {},
+		healthClient: &http.Client{
+			Timeout: 5 * time.Second,
+		},
+	}
+	if normalized.HealthInterval > 0 {
+		healthCtx, healthCancel := context.WithCancel(lifecycleCtx)
+		orch.healthCancel = healthCancel
+		orch.healthWg.Add(1)
+		go func() {
+			defer orch.healthWg.Done()
+			orch.runHealthLoop(healthCtx)
+		}()
+	}
+	return orch, nil
 }
 
 func (o *Orchestrator) beginOperation() error {
@@ -95,6 +115,8 @@ func (o *Orchestrator) Close() error {
 	o.mu.Unlock()
 
 	o.lifecycleCancel()
+	o.healthCancel()
+	o.healthWg.Wait()
 	o.wg.Wait()
 
 	entries := o.listSessionEntries()
