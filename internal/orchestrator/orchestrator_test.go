@@ -469,6 +469,7 @@ type mockAgentService struct {
 	listErr       error
 	sendReceiver  agentapi.EventReceiver
 	sendErr       error
+	sendFn        func(context.Context, *agentapi.SendMessageRequest) (agentapi.EventReceiver, error)
 	continueRecv  agentapi.EventReceiver
 	continueErr   error
 	steerResp     *agentapi.SteerResponse
@@ -553,13 +554,17 @@ func (m *mockAgentService) ListSessions(_ context.Context, _ *agentapi.ListAgent
 	return &out, nil
 }
 
-func (m *mockAgentService) SendMessage(_ context.Context, req *agentapi.SendMessageRequest) (agentapi.EventReceiver, error) {
+func (m *mockAgentService) SendMessage(ctx context.Context, req *agentapi.SendMessageRequest) (agentapi.EventReceiver, error) {
 	m.mu.Lock()
 	cp := *req
 	m.lastSendReq = &cp
 	sendErr := m.sendErr
 	sendReceiver := m.sendReceiver
+	sendFn := m.sendFn
 	m.mu.Unlock()
+	if sendFn != nil {
+		return sendFn(ctx, req)
+	}
 	if sendErr != nil {
 		return nil, sendErr
 	}

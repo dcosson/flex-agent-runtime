@@ -3,10 +3,12 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -278,6 +280,142 @@ func TestConcurrentCreateSessionAcrossModes(t *testing.T) {
 	}
 }
 
+func TestConcurrentSendMessageToDifferentSessions(t *testing.T) {
+	sc := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "direct:i-123", Address: "10.0.0.1:0"},
+		launchResp: &control.LaunchProcessResponse{ProcessID: "proc-1", Address: "10.0.0.1:8081", Status: control.ProcessRunning},
+	}
+	agentSvc := &mockAgentService{
+		sendFn: func(_ context.Context, req *agentapi.SendMessageRequest) (agentapi.EventReceiver, error) {
+			return &sliceEventReceiver{
+				events: []*agentapi.AgentEvent{{
+					Type:      agentapi.EventAgentMessageDelta,
+					SessionID: req.SessionID,
+					Delta:     req.Message,
+				}},
+			}, nil
+		},
+	}
+	orch := mustNewOrchestrator(t, sc, agentSvc, 0)
+	t.Cleanup(func() { _ = orch.Close() })
+
+	const total = 20
+	sessionIDs := make([]string, 0, total)
+	for i := 0; i < total; i++ {
+		resp, err := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+			SessionConfig: agentapi.SessionConfig{Metadata: map[string]any{"placement_mode": string(PlacementAgentDirect)}},
+		})
+		if err != nil {
+			t.Fatalf("CreateSession(%d) error = %v", i, err)
+		}
+		sessionIDs = append(sessionIDs, resp.SessionID)
+	}
+
+	errCh := make(chan error, total)
+	var wg sync.WaitGroup
+	for i, sessionID := range sessionIDs {
+		i := i
+		sessionID := sessionID
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			payload := fmt.Sprintf("msg-%d", i)
+			recv, err := orch.SendMessage(context.Background(), &agentapi.SendMessageRequest{
+				SessionID: sessionID,
+				Message:   payload,
+			})
+			if err != nil {
+				errCh <- fmt.Errorf("SendMessage(%s): %w", sessionID, err)
+				return
+			}
+			evt, err := recv.Recv()
+			if err != nil {
+				errCh <- fmt.Errorf("Recv(%s): %w", sessionID, err)
+				return
+			}
+			if evt.SessionID != sessionID {
+				errCh <- fmt.Errorf("event sessionID = %q, want %q", evt.SessionID, sessionID)
+				return
+			}
+			if evt.Delta != payload {
+				errCh <- fmt.Errorf("event delta = %q, want %q", evt.Delta, payload)
+				return
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestClientCanceledStreamWhileBackendActiveDoesNotLeakGoroutines(t *testing.T) {
+	sc := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "direct:i-123", Address: "10.0.0.1:0"},
+		launchResp: &control.LaunchProcessResponse{ProcessID: "proc-1", Address: "10.0.0.1:8081", Status: control.ProcessRunning},
+	}
+	agentSvc := &mockAgentService{
+		sendFn: func(ctx context.Context, req *agentapi.SendMessageRequest) (agentapi.EventReceiver, error) {
+			return newCancelableEventReceiver(ctx, req.SessionID), nil
+		},
+	}
+	orch := mustNewOrchestrator(t, sc, agentSvc, 0)
+	t.Cleanup(func() { _ = orch.Close() })
+
+	resp, err := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{Metadata: map[string]any{"placement_mode": string(PlacementAgentDirect)}},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	baseG := runtime.NumGoroutine()
+	const rounds = 15
+	for i := 0; i < rounds; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		recv, err := orch.SendMessage(ctx, &agentapi.SendMessageRequest{
+			SessionID: resp.SessionID,
+			Message:   fmt.Sprintf("stream-%d", i),
+		})
+		if err != nil {
+			cancel()
+			t.Fatalf("SendMessage(%d) error = %v", i, err)
+		}
+
+		done := make(chan error, 1)
+		go func() {
+			for {
+				_, recvErr := recv.Recv()
+				if errors.Is(recvErr, io.EOF) {
+					done <- nil
+					return
+				}
+				if recvErr != nil {
+					done <- recvErr
+					return
+				}
+			}
+		}()
+
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+		select {
+		case recvErr := <-done:
+			if recvErr != nil {
+				t.Fatalf("stream recv (%d) error = %v", i, recvErr)
+			}
+		case <-time.After(750 * time.Millisecond):
+			t.Fatalf("stream recv (%d) did not exit after cancel", i)
+		}
+		_ = recv.Close()
+	}
+
+	waitForGoroutineDelta(t, baseG, 20, 2*time.Second)
+}
+
 func TestDestroySessionWhileStreamingDoesNotDeadlock(t *testing.T) {
 	blocking := &blockingEventReceiver{
 		first: &agentapi.AgentEvent{Type: agentapi.EventTurnStarted, SessionID: "remote-1"},
@@ -541,6 +679,67 @@ type blockingEventReceiver struct {
 	first *agentapi.AgentEvent
 	done  chan struct{}
 	sent  bool
+}
+
+type cancelableEventReceiver struct {
+	ch   chan *agentapi.AgentEvent
+	done chan struct{}
+}
+
+func newCancelableEventReceiver(ctx context.Context, sessionID string) *cancelableEventReceiver {
+	r := &cancelableEventReceiver{
+		ch:   make(chan *agentapi.AgentEvent, 1),
+		done: make(chan struct{}),
+	}
+	go func() {
+		defer close(r.done)
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				select {
+				case r.ch <- &agentapi.AgentEvent{
+					Type:      agentapi.EventAgentMessageDelta,
+					SessionID: sessionID,
+					Delta:     "tick",
+				}:
+				default:
+				}
+			}
+		}
+	}()
+	return r
+}
+
+func (r *cancelableEventReceiver) Recv() (*agentapi.AgentEvent, error) {
+	select {
+	case evt := <-r.ch:
+		return evt, nil
+	case <-r.done:
+		return nil, io.EOF
+	}
+}
+
+func (r *cancelableEventReceiver) Close() error {
+	return nil
+}
+
+func waitForGoroutineDelta(t *testing.T, base, maxDelta int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		runtime.GC()
+		after := runtime.NumGoroutine()
+		if after <= base+maxDelta {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	after := runtime.NumGoroutine()
+	t.Fatalf("goroutine delta too high: before=%d after=%d max_delta=%d", base, after, maxDelta)
 }
 
 func (r *blockingEventReceiver) Recv() (*agentapi.AgentEvent, error) {
