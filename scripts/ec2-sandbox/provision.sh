@@ -128,8 +128,12 @@ chmod +x /usr/local/bin/runsc
 mkdir -p /var/lib/runsc /var/lib/flexagent/bundles /var/lib/flexagent/bases /var/lib/flexagent/sessions
 
 # Set a standard TERM so SSH sessions from modern terminals (Ghostty, Kitty)
-# don't trigger "terminal is not fully functional" warnings due to missing terminfo
-echo 'export TERM=xterm-256color' >> /etc/profile.d/term-compat.sh
+# don't trigger "terminal is not fully functional" warnings due to missing terminfo.
+# Also disable the systemctl pager to avoid pagination in non-interactive sessions.
+cat > /etc/profile.d/term-compat.sh <<'PROFILE'
+export TERM=xterm-256color
+export SYSTEMD_PAGER=
+PROFILE
 
 if [[ ! -f /sys/fs/cgroup/cgroup.controllers ]]; then
   echo "warning: cgroup v2 controllers file not found; gVisor resource controls may be degraded" >&2
@@ -220,8 +224,12 @@ apt-get install -y ca-certificates curl jq unzip git
 mkdir -p /var/lib/flexagent
 
 # Set a standard TERM so SSH sessions from modern terminals (Ghostty, Kitty)
-# don't trigger "terminal is not fully functional" warnings due to missing terminfo
-echo 'export TERM=xterm-256color' >> /etc/profile.d/term-compat.sh
+# don't trigger "terminal is not fully functional" warnings due to missing terminfo.
+# Also disable the systemctl pager to avoid pagination in non-interactive sessions.
+cat > /etc/profile.d/term-compat.sh <<'PROFILE'
+export TERM=xterm-256color
+export SYSTEMD_PAGER=
+PROFILE
 
 imds_token="\$(curl -fsSL -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' http://169.254.169.254/latest/api/token || true)"
 private_ip="\$(curl -fsSL -H "X-aws-ec2-metadata-token: \${imds_token}" http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
