@@ -11,3 +11,8 @@ stubserver
 
 # Task tracking (contains personal info)
 .beads/
+
+# TLA+ model checker
+*.jar
+specs/states/
+specs/*_TTrace_*
