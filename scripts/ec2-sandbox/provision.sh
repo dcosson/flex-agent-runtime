@@ -3,38 +3,42 @@ set -euo pipefail
 
 usage() {
 	cat <<'EOF'
-Provision an EC2 instance for flexagent sandbox-host manual testing.
+Provision an EC2 instance for flexagent.
 
 Usage:
   scripts/ec2-sandbox/provision.sh \
+    --flex-role <sandbox-host|orchestrator> \
     --key-name <ec2-keypair-name> \
     --ssh-key-path <path-to-private-key.pem> \
     [options]
 
 Required:
-  --key-name            Existing EC2 key pair name for SSH.
-  --ssh-key-path        Local path to the private key for the key pair.
+  --flex-role             Role: "sandbox-host" or "orchestrator".
+  --key-name              Existing EC2 key pair name for SSH.
+  --ssh-key-path          Local path to the private key for the key pair.
 
-Options:
+Common options (all roles):
   --region <region>             AWS region (default: aws configure get region).
   --instance-type <type>        Instance type (default: t4g.large).
-  --volume-size-gb <gb>         Extra EBS size for ZFS pool (default: 80).
-  --rpc-port <port>             Sandbox-host RPC port (default: 8080).
   --ssh-cidr <cidr>             CIDR allowed for SSH ingress (default: caller_ip/32).
   --rpc-cidr <cidr>             CIDR allowed for RPC ingress (default: 0.0.0.0/0).
+  --rpc-port <port>             RPC port (default: 8080).
   --subnet-id <subnet>          Subnet to launch into (default: first default subnet).
   --ami-id <ami>                Explicit AMI ID (default: latest Ubuntu LTS via SSM).
-  --name-prefix <prefix>        Name prefix for resources (default: flexagent-sandbox).
-  --pool-name <name>            ZFS pool name (default: tank).
-  --default-quota-gb <gb>       Per-session default ZFS quota in GB (default: 20).
+  --name-prefix <prefix>        Name prefix for resources (default: flexagent-<role>).
   --skip-binary-deploy          Do not build/copy flexagent; print manual commands.
   --help                        Show this help.
 
+Sandbox-host options (only with --flex-role sandbox-host):
+  --volume-size-gb <gb>         Extra EBS size for ZFS pool (default: 80).
+  --pool-name <name>            ZFS pool name (default: tank).
+  --default-quota-gb <gb>       Per-session default ZFS quota in GB (default: 20).
+
 Notes:
   - Assumes AWS CLI credentials are already configured.
-  - Launches Ubuntu arm64 (Graviton), installs zfsutils-linux and runsc in user-data.
-  - Creates pool/datasets: <pool>/bases, <pool>/sessions, and base snapshot
-    <pool>/bases/default@initial.
+  - Launches Ubuntu arm64 (Graviton).
+  - sandbox-host: installs zfsutils-linux, runsc, creates ZFS pool/datasets.
+  - orchestrator: minimal setup, installs flexagent binary only.
 EOF
 }
 
@@ -96,166 +100,10 @@ wait_for_ssh() {
 	return 1
 }
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-STATE_FILE="$ROOT_DIR/scripts/ec2-sandbox/.last_provision.env"
+# --- Generate user-data scripts per role ---
 
-REGION="$(aws configure get region 2>/dev/null || true)"
-REGION="${REGION:-us-east-1}"
-INSTANCE_TYPE="t4g.large"
-VOLUME_SIZE_GB="80"
-RPC_PORT="8080"
-SSH_CIDR=""
-RPC_CIDR="0.0.0.0/0"
-SUBNET_ID=""
-AMI_ID=""
-NAME_PREFIX="flexagent-sandbox"
-POOL_NAME="tank"
-DEFAULT_QUOTA_GB="20"
-KEY_NAME=""
-SSH_KEY_PATH=""
-SKIP_BINARY_DEPLOY=0
-
-while [[ $# -gt 0 ]]; do
-	case "$1" in
-	--region)
-		REGION="$2"
-		shift 2
-		;;
-	--instance-type)
-		INSTANCE_TYPE="$2"
-		shift 2
-		;;
-	--volume-size-gb)
-		VOLUME_SIZE_GB="$2"
-		shift 2
-		;;
-	--rpc-port)
-		RPC_PORT="$2"
-		shift 2
-		;;
-	--ssh-cidr)
-		SSH_CIDR="$2"
-		shift 2
-		;;
-	--rpc-cidr)
-		RPC_CIDR="$2"
-		shift 2
-		;;
-	--subnet-id)
-		SUBNET_ID="$2"
-		shift 2
-		;;
-	--ami-id)
-		AMI_ID="$2"
-		shift 2
-		;;
-	--name-prefix)
-		NAME_PREFIX="$2"
-		shift 2
-		;;
-	--pool-name)
-		POOL_NAME="$2"
-		shift 2
-		;;
-	--default-quota-gb)
-		DEFAULT_QUOTA_GB="$2"
-		shift 2
-		;;
-	--key-name)
-		KEY_NAME="$2"
-		shift 2
-		;;
-	--ssh-key-path)
-		SSH_KEY_PATH="$2"
-		shift 2
-		;;
-	--skip-binary-deploy)
-		SKIP_BINARY_DEPLOY=1
-		shift
-		;;
-	--help|-h)
-		usage
-		exit 0
-		;;
-	*)
-		die "unknown argument: $1"
-		;;
-	esac
-done
-
-require_cmd aws
-require_cmd jq
-require_cmd ssh
-require_cmd scp
-require_cmd curl
-
-[[ -n "$KEY_NAME" ]] || die "--key-name is required"
-[[ -n "$SSH_KEY_PATH" ]] || die "--ssh-key-path is required"
-[[ -f "$SSH_KEY_PATH" ]] || die "ssh key not found: $SSH_KEY_PATH"
-
-if [[ -z "$SSH_CIDR" ]]; then
-	ip="$(caller_public_ip)"
-	if [[ -n "$ip" ]]; then
-		SSH_CIDR="${ip}/32"
-	else
-		die "unable to detect caller public IP; pass --ssh-cidr explicitly"
-	fi
-fi
-
-if [[ -z "$SUBNET_ID" ]]; then
-	SUBNET_ID="$(aws ec2 describe-subnets \
-		--region "$REGION" \
-		--filters Name=default-for-az,Values=true \
-		--query 'Subnets[0].SubnetId' \
-		--output text)"
-fi
-[[ -n "$SUBNET_ID" && "$SUBNET_ID" != "None" ]] || die "could not resolve subnet-id"
-
-VPC_ID="$(aws ec2 describe-subnets \
-	--region "$REGION" \
-	--subnet-ids "$SUBNET_ID" \
-	--query 'Subnets[0].VpcId' \
-	--output text)"
-[[ -n "$VPC_ID" && "$VPC_ID" != "None" ]] || die "could not resolve VPC for subnet $SUBNET_ID"
-
-if [[ -z "$AMI_ID" ]]; then
-	AMI_ID="$(resolve_ubuntu_ami "$REGION")" || die "failed to resolve Ubuntu AMI in region $REGION"
-fi
-
-timestamp="$(date +%Y%m%d-%H%M%S)"
-SG_NAME="${NAME_PREFIX}-sg-${timestamp}"
-INSTANCE_NAME="${NAME_PREFIX}-${timestamp}"
-DEFAULT_QUOTA_BYTES="$((DEFAULT_QUOTA_GB * 1024 * 1024 * 1024))"
-BASES_DATASET="${POOL_NAME}/bases"
-SESSIONS_DATASET="${POOL_NAME}/sessions"
-
-log "region=$REGION subnet=$SUBNET_ID ami=$AMI_ID instance_type=$INSTANCE_TYPE"
-log "creating security group: $SG_NAME"
-SG_ID="$(aws ec2 create-security-group \
-	--region "$REGION" \
-	--group-name "$SG_NAME" \
-	--description "flexagent sandbox-host test sg (${timestamp})" \
-	--vpc-id "$VPC_ID" \
-	--query GroupId \
-	--output text)"
-
-aws ec2 create-tags \
-	--region "$REGION" \
-	--resources "$SG_ID" \
-	--tags "Key=Name,Value=${SG_NAME}" "Key=Project,Value=flexagent-runtime" >/dev/null
-
-aws ec2 authorize-security-group-ingress \
-	--region "$REGION" \
-	--group-id "$SG_ID" \
-	--ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=${SSH_CIDR},Description=ssh}]" >/dev/null
-
-aws ec2 authorize-security-group-ingress \
-	--region "$REGION" \
-	--group-id "$SG_ID" \
-	--ip-permissions "IpProtocol=tcp,FromPort=${RPC_PORT},ToPort=${RPC_PORT},IpRanges=[{CidrIp=${RPC_CIDR},Description=sandbox-rpc}]" >/dev/null
-
-user_data_file="$(mktemp)"
-cat >"$user_data_file" <<EOF
+generate_sandbox_host_userdata() {
+	cat <<EOF
 #!/usr/bin/env bash
 set -euxo pipefail
 
@@ -353,15 +201,230 @@ UNIT
 systemctl daemon-reload
 touch /var/lib/flexagent/bootstrap-complete
 EOF
+}
 
-instance_id="$(aws ec2 run-instances \
+generate_orchestrator_userdata() {
+	cat <<EOF
+#!/usr/bin/env bash
+set -euxo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y ca-certificates curl jq unzip git
+
+mkdir -p /var/lib/flexagent
+
+private_ip="\$(curl -fsSL http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
+
+cat >/etc/default/flexagent-orchestrator <<ENVVARS
+ORCHESTRATOR_LISTEN=:${RPC_PORT}
+ORCHESTRATOR_ADVERTISE_ADDR=\${private_ip}
+ENVVARS
+
+cat >/etc/systemd/system/flexagent-orchestrator.service <<UNIT
+[Unit]
+Description=flexagent orchestrator
+After=network-online.target cloud-final.service
+Wants=network-online.target
+ConditionPathExists=/usr/local/bin/flexagent
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/default/flexagent-orchestrator
+ExecStart=/usr/local/bin/flexagent serve all
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+touch /var/lib/flexagent/bootstrap-complete
+EOF
+}
+
+# --- Main ---
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+STATE_FILE="$ROOT_DIR/scripts/ec2-sandbox/.last_provision.env"
+
+REGION="$(aws configure get region 2>/dev/null || true)"
+REGION="${REGION:-us-east-1}"
+FLEX_ROLE=""
+INSTANCE_TYPE="t4g.large"
+VOLUME_SIZE_GB="80"
+RPC_PORT="8080"
+SSH_CIDR=""
+RPC_CIDR="0.0.0.0/0"
+SUBNET_ID=""
+AMI_ID=""
+NAME_PREFIX=""
+POOL_NAME="tank"
+DEFAULT_QUOTA_GB="20"
+KEY_NAME=""
+SSH_KEY_PATH=""
+SKIP_BINARY_DEPLOY=0
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+	--flex-role)
+		FLEX_ROLE="$2"
+		shift 2
+		;;
+	--region)
+		REGION="$2"
+		shift 2
+		;;
+	--instance-type)
+		INSTANCE_TYPE="$2"
+		shift 2
+		;;
+	--volume-size-gb)
+		VOLUME_SIZE_GB="$2"
+		shift 2
+		;;
+	--rpc-port)
+		RPC_PORT="$2"
+		shift 2
+		;;
+	--ssh-cidr)
+		SSH_CIDR="$2"
+		shift 2
+		;;
+	--rpc-cidr)
+		RPC_CIDR="$2"
+		shift 2
+		;;
+	--subnet-id)
+		SUBNET_ID="$2"
+		shift 2
+		;;
+	--ami-id)
+		AMI_ID="$2"
+		shift 2
+		;;
+	--name-prefix)
+		NAME_PREFIX="$2"
+		shift 2
+		;;
+	--pool-name)
+		POOL_NAME="$2"
+		shift 2
+		;;
+	--default-quota-gb)
+		DEFAULT_QUOTA_GB="$2"
+		shift 2
+		;;
+	--key-name)
+		KEY_NAME="$2"
+		shift 2
+		;;
+	--ssh-key-path)
+		SSH_KEY_PATH="$2"
+		shift 2
+		;;
+	--skip-binary-deploy)
+		SKIP_BINARY_DEPLOY=1
+		shift
+		;;
+	--help|-h)
+		usage
+		exit 0
+		;;
+	*)
+		die "unknown argument: $1"
+		;;
+	esac
+done
+
+require_cmd aws
+require_cmd jq
+require_cmd ssh
+require_cmd scp
+require_cmd curl
+
+[[ -n "$FLEX_ROLE" ]] || die "--flex-role is required (sandbox-host or orchestrator)"
+[[ "$FLEX_ROLE" == "sandbox-host" || "$FLEX_ROLE" == "orchestrator" ]] || die "--flex-role must be 'sandbox-host' or 'orchestrator'"
+[[ -n "$KEY_NAME" ]] || die "--key-name is required"
+[[ -n "$SSH_KEY_PATH" ]] || die "--ssh-key-path is required"
+[[ -f "$SSH_KEY_PATH" ]] || die "ssh key not found: $SSH_KEY_PATH"
+
+# Default name prefix based on role
+if [[ -z "$NAME_PREFIX" ]]; then
+	NAME_PREFIX="flexagent-${FLEX_ROLE}"
+fi
+
+if [[ -z "$SSH_CIDR" ]]; then
+	ip="$(caller_public_ip)"
+	if [[ -n "$ip" ]]; then
+		SSH_CIDR="${ip}/32"
+	else
+		die "unable to detect caller public IP; pass --ssh-cidr explicitly"
+	fi
+fi
+
+if [[ -z "$SUBNET_ID" ]]; then
+	SUBNET_ID="$(aws ec2 describe-subnets \
+		--region "$REGION" \
+		--filters Name=default-for-az,Values=true \
+		--query 'Subnets[0].SubnetId' \
+		--output text)"
+fi
+[[ -n "$SUBNET_ID" && "$SUBNET_ID" != "None" ]] || die "could not resolve subnet-id"
+
+VPC_ID="$(aws ec2 describe-subnets \
 	--region "$REGION" \
-	--image-id "$AMI_ID" \
-	--instance-type "$INSTANCE_TYPE" \
-	--key-name "$KEY_NAME" \
-	--security-group-ids "$SG_ID" \
-	--subnet-id "$SUBNET_ID" \
-	--block-device-mappings "[
+	--subnet-ids "$SUBNET_ID" \
+	--query 'Subnets[0].VpcId' \
+	--output text)"
+[[ -n "$VPC_ID" && "$VPC_ID" != "None" ]] || die "could not resolve VPC for subnet $SUBNET_ID"
+
+if [[ -z "$AMI_ID" ]]; then
+	AMI_ID="$(resolve_ubuntu_ami "$REGION")" || die "failed to resolve Ubuntu AMI in region $REGION"
+fi
+
+timestamp="$(date +%Y%m%d-%H%M%S)"
+SG_NAME="${NAME_PREFIX}-sg-${timestamp}"
+INSTANCE_NAME="${NAME_PREFIX}-${timestamp}"
+
+log "role=$FLEX_ROLE region=$REGION subnet=$SUBNET_ID ami=$AMI_ID instance_type=$INSTANCE_TYPE"
+log "creating security group: $SG_NAME"
+SG_ID="$(aws ec2 create-security-group \
+	--region "$REGION" \
+	--group-name "$SG_NAME" \
+	--description "flexagent ${FLEX_ROLE} sg (${timestamp})" \
+	--vpc-id "$VPC_ID" \
+	--query GroupId \
+	--output text)"
+
+aws ec2 create-tags \
+	--region "$REGION" \
+	--resources "$SG_ID" \
+	--tags "Key=Name,Value=${SG_NAME}" "Key=Project,Value=flexagent-runtime" "Key=FlexRole,Value=${FLEX_ROLE}" >/dev/null
+
+aws ec2 authorize-security-group-ingress \
+	--region "$REGION" \
+	--group-id "$SG_ID" \
+	--ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=${SSH_CIDR},Description=ssh}]" >/dev/null
+
+aws ec2 authorize-security-group-ingress \
+	--region "$REGION" \
+	--group-id "$SG_ID" \
+	--ip-permissions "IpProtocol=tcp,FromPort=${RPC_PORT},ToPort=${RPC_PORT},IpRanges=[{CidrIp=${RPC_CIDR},Description=rpc}]" >/dev/null
+
+# --- Generate user-data and block device mappings per role ---
+
+user_data_file="$(mktemp)"
+BLOCK_DEVICE_MAPPINGS=""
+
+if [[ "$FLEX_ROLE" == "sandbox-host" ]]; then
+	DEFAULT_QUOTA_BYTES="$((DEFAULT_QUOTA_GB * 1024 * 1024 * 1024))"
+	BASES_DATASET="${POOL_NAME}/bases"
+	SESSIONS_DATASET="${POOL_NAME}/sessions"
+	generate_sandbox_host_userdata >"$user_data_file"
+	BLOCK_DEVICE_MAPPINGS="--block-device-mappings [
     {
       \"DeviceName\":\"/dev/sdf\",
       \"Ebs\":{
@@ -370,8 +433,21 @@ instance_id="$(aws ec2 run-instances \
         \"DeleteOnTermination\":true
       }
     }
-  ]" \
-	--tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${INSTANCE_NAME}},{Key=Project,Value=flexagent-runtime}]" \
+  ]"
+else
+	generate_orchestrator_userdata >"$user_data_file"
+fi
+
+# shellcheck disable=SC2086
+instance_id="$(aws ec2 run-instances \
+	--region "$REGION" \
+	--image-id "$AMI_ID" \
+	--instance-type "$INSTANCE_TYPE" \
+	--key-name "$KEY_NAME" \
+	--security-group-ids "$SG_ID" \
+	--subnet-id "$SUBNET_ID" \
+	$BLOCK_DEVICE_MAPPINGS \
+	--tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${INSTANCE_NAME}},{Key=Project,Value=flexagent-runtime},{Key=FlexRole,Value=${FLEX_ROLE}}]" \
 	--user-data "file://${user_data_file}" \
 	--query 'Instances[0].InstanceId' \
 	--output text)"
@@ -406,9 +482,18 @@ ssh -i "$SSH_KEY_PATH" \
 	"ubuntu@${public_ip}" \
 	'sudo cloud-init status --wait || true'
 
+# --- Deploy binary and start service ---
+
+SERVICE_NAME="flexagent-${FLEX_ROLE}"
+if [[ "$FLEX_ROLE" == "orchestrator" ]]; then
+	SERVICE_NAME="flexagent-orchestrator"
+else
+	SERVICE_NAME="flexagent-sandbox-host"
+fi
+
 if [[ "$SKIP_BINARY_DEPLOY" -eq 0 ]]; then
 	tmp_bin="$(mktemp)"
-	log "building flexagent binary for linux/amd64"
+	log "building flexagent binary for linux/arm64"
 	(
 		cd "$ROOT_DIR"
 		GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o "$tmp_bin" ./cmd/flexagent
@@ -421,36 +506,44 @@ if [[ "$SKIP_BINARY_DEPLOY" -eq 0 ]]; then
 		"$tmp_bin" "ubuntu@${public_ip}:/tmp/flexagent"
 	rm -f "$tmp_bin"
 
-	log "installing and starting sandbox-host service"
+	log "installing and starting ${SERVICE_NAME} service"
 	ssh -i "$SSH_KEY_PATH" \
 		-o StrictHostKeyChecking=no \
 		-o UserKnownHostsFile=/dev/null \
 		"ubuntu@${public_ip}" \
 		"sudo install -m 0755 /tmp/flexagent /usr/local/bin/flexagent && \
          sudo systemctl daemon-reload && \
-         sudo systemctl enable --now flexagent-sandbox-host && \
-         sudo systemctl --no-pager --full status flexagent-sandbox-host | tail -n 40"
+         sudo systemctl enable --now ${SERVICE_NAME} && \
+         sudo systemctl --no-pager --full status ${SERVICE_NAME} | tail -n 40"
 else
 	log "skipping binary deploy (--skip-binary-deploy set)"
 fi
 
+# --- Write state file and summary ---
+
 mkdir -p "$(dirname "$STATE_FILE")"
 cat >"$STATE_FILE" <<EOF
+FLEX_ROLE=${FLEX_ROLE}
 REGION=${REGION}
 INSTANCE_ID=${instance_id}
 SECURITY_GROUP_ID=${SG_ID}
 PUBLIC_IP=${public_ip}
 PRIVATE_IP=${private_ip}
 RPC_PORT=${RPC_PORT}
+EOF
+
+if [[ "$FLEX_ROLE" == "sandbox-host" ]]; then
+	cat >>"$STATE_FILE" <<EOF
 POOL_NAME=${POOL_NAME}
 BASES_DATASET=${BASES_DATASET}
 SESSIONS_DATASET=${SESSIONS_DATASET}
 BASE_SNAPSHOT=${BASES_DATASET}/default@initial
 EOF
+fi
 
 cat <<EOF
 
-Provisioning complete.
+Provisioning complete (${FLEX_ROLE}).
 
 State file:
   ${STATE_FILE}
@@ -458,21 +551,29 @@ State file:
 Connection info:
   Instance ID:    ${instance_id}
   Region:         ${REGION}
+  Role:           ${FLEX_ROLE}
   Public IP:      ${public_ip}
   Private IP:     ${private_ip}
   RPC Endpoint:   http://${public_ip}:${RPC_PORT}
-  RPC Host:       ${public_ip}:${RPC_PORT}
+EOF
+
+if [[ "$FLEX_ROLE" == "sandbox-host" ]]; then
+	cat <<EOF
 
 Sandbox config:
   Pool:           ${POOL_NAME}
   Bases dataset:  ${BASES_DATASET}
   Sessions ds:    ${SESSIONS_DATASET}
   Base snapshot:  ${BASES_DATASET}/default@initial
+EOF
+fi
+
+cat <<EOF
 
 If you used --skip-binary-deploy, run:
   GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /tmp/flexagent ./cmd/flexagent
   scp -i ${SSH_KEY_PATH} /tmp/flexagent ubuntu@${public_ip}:/tmp/flexagent
-  ssh -i ${SSH_KEY_PATH} ubuntu@${public_ip} 'sudo install -m 0755 /tmp/flexagent /usr/local/bin/flexagent && sudo systemctl daemon-reload && sudo systemctl enable --now flexagent-sandbox-host'
+  ssh -i ${SSH_KEY_PATH} ubuntu@${public_ip} 'sudo install -m 0755 /tmp/flexagent /usr/local/bin/flexagent && sudo systemctl daemon-reload && sudo systemctl enable --now ${SERVICE_NAME}'
 
 Teardown:
   scripts/ec2-sandbox/teardown.sh --region ${REGION} --instance-id ${instance_id} --security-group-id ${SG_ID}

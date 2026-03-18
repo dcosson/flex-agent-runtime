@@ -1,45 +1,37 @@
-# EC2 Sandbox Host Scripts
+# EC2 Provisioning Scripts
 
-Manual provisioning scripts for a disposable EC2 host that can run:
+Provision disposable EC2 instances for flexagent. Supports two roles:
 
-`flexagent serve sandbox-host`
-
-The provisioning flow sets up:
-- Ubuntu LTS instance (default from Canonical SSM parameter)
-- extra gp3 EBS volume for ZFS pool
-- `zfsutils-linux`
-- `runsc` (gVisor runtime)
-- ZFS datasets and initial base snapshot
-- systemd unit for `flexagent-sandbox-host`
-- optional local build/deploy of `flexagent`
+- **sandbox-host**: ZFS + gVisor isolation, runs `flexagent serve sandbox-host`
+- **orchestrator**: Minimal setup, runs `flexagent serve all`
 
 ## Files
 
 - `provision.sh`: Create SG + EC2 + bootstrap + deploy/start service.
 - `teardown.sh`: Terminate instance and delete SG.
+- `iam-policy.json`: IAM policy for the `flexagent-ec2` user.
 
 ## Quick Start
 
-```bash
-scripts/ec2-sandbox/provision.sh \
-  --key-name my-ec2-key \
-  --ssh-key-path ~/.ssh/my-ec2-key.pem
-```
-
-The script prints:
-- instance ID
-- public/private IPs
-- sandbox-host RPC endpoint
-- default base snapshot (`<pool>/bases/default@initial`)
-
-If you need to skip local binary deployment:
+Provision a sandbox-host:
 
 ```bash
 scripts/ec2-sandbox/provision.sh \
-  --key-name my-ec2-key \
-  --ssh-key-path ~/.ssh/my-ec2-key.pem \
-  --skip-binary-deploy
+  --flex-role sandbox-host \
+  --key-name flexagent-ec2-key \
+  --ssh-key-path ~/.ssh/flexagent-ec2-key.pem
 ```
+
+Provision an orchestrator:
+
+```bash
+scripts/ec2-sandbox/provision.sh \
+  --flex-role orchestrator \
+  --key-name flexagent-ec2-key \
+  --ssh-key-path ~/.ssh/flexagent-ec2-key.pem
+```
+
+The script prints instance ID, public/private IPs, and RPC endpoint. For sandbox-host, it also prints ZFS pool and dataset info.
 
 ## Teardown
 
@@ -106,6 +98,7 @@ From here on, use the scoped-down profile:
 
 ```bash
 AWS_PROFILE=flexagent-ec2 scripts/ec2-sandbox/provision.sh \
+  --flex-role sandbox-host \
   --key-name flexagent-ec2-key \
   --ssh-key-path ~/.ssh/flexagent-ec2-key.pem
 ```
