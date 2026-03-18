@@ -109,6 +109,19 @@ See `iam-policy.json` for the full policy. For more secure setups, consider AWS 
 
 Launched instances need **AmazonSSMManagedInstanceCore** so the SSM agent can receive commands. Create an instance profile with a role that has this policy, and pass it via `--iam-instance-profile`. The deployer policy allows `iam:PassRole` for roles matching `flexagent-sandbox-*`.
 
+## Connecting orchestrator to sandbox-host
+
+The provision script sets up each instance independently. To connect an orchestrator to a sandbox-host, SSH into the orchestrator and add the sandbox-host address to its config:
+
+```bash
+ssh -i ~/.ssh/flexagent-ec2-key.pem ubuntu@<orchestrator-public-ip>
+sudo vi /etc/default/flexagent-orchestrator
+# Add: SANDBOX_HOST_ADDR=<sandbox-host-private-ip>:8080
+sudo systemctl restart flexagent-orchestrator
+```
+
+Use the sandbox-host's **private IP** if both instances are in the same VPC (avoids NAT and is faster). The private IP is printed by the provision script and saved in `.last_provision.env`.
+
 ## Notes
 
 - Defaults are intentionally simple for manual testing, not hardened production.
