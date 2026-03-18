@@ -276,7 +276,7 @@ Section 15 lists 14 steps. Checking dependency correctness:
 10. Integration tests -- depends on steps 1-9, correct
 11. cmd/agent-server binary -- depends on steps 3, 7, 8, correct
 12. SandboxControl interface -- independent of agent service, could be parallel
-13. NativeSandboxControl -- depends on step 12, correct
+13. NodeSandboxControl -- depends on step 12, correct
 14. E2E test -- depends on all above, correct
 
 **One concern:** Step 11 (cmd/agent-server binary) comes before step 12 (SandboxControl). This is fine since the binary does not require SandboxControl (it's the orchestrator that uses SandboxControl). But the graceful shutdown logic (section 7.4) is part of step 11 and depends on `AgentLoopService.Close()` (step 3). This dependency is satisfied.

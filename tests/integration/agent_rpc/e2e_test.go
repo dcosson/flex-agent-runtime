@@ -25,7 +25,7 @@ import (
 	"github.com/dcosson/flex-agent-runtime/internal/rpc/transport"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control"
-	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control/native"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control/node"
 	"github.com/dcosson/flex-agent-runtime/internal/termmux/driver"
 	"github.com/dcosson/flex-agent-runtime/internal/termmux/driver/claudecode"
 )
@@ -209,7 +209,7 @@ func TestE2E_OrchestratorAgentSandbox(t *testing.T) {
 	waitProcessExited(t, ctx, ctrl, sandboxResp.SandboxID, replacementID)
 }
 
-func newSandboxHostControl(t *testing.T) (*rpcserver.SandboxServer, *native.NativeSandboxControl) {
+func newSandboxHostControl(t *testing.T) (*rpcserver.SandboxServer, *node.NodeSandboxControl) {
 	t.Helper()
 	cfg := sandbox.DefaultServiceConfig()
 	cfg.StorageBackend = sandbox.StorageBackendLocalDisk
@@ -222,7 +222,7 @@ func newSandboxHostControl(t *testing.T) (*rpcserver.SandboxServer, *native.Nati
 	}
 	svc := rpcserver.NewSandboxServer(host)
 	t.Cleanup(func() { _ = svc.Close() })
-	return svc, native.NewNativeSandboxControl(svc)
+	return svc, node.NewNodeSandboxControl(svc)
 }
 
 func launchHelperProcess(t *testing.T, ctx context.Context, ctrl control.SandboxControl, sandboxID string) (string, string) {

@@ -139,23 +139,23 @@ This is acknowledged in the plan's backpressure section (12.4) but only for the 
 
 ### Analysis
 
-`NativeSandboxControl` (section 6.1) wraps the existing `api.SandboxService` RPC interface for most operations and adds new `LaunchProcess` operations.
+`NodeSandboxControl` (section 6.1) wraps the existing `api.SandboxService` RPC interface for most operations and adds new `LaunchProcess` operations.
 
 ### Findings
 
-**F10 (P1): NativeSandboxControl.CreateSandbox maps to SandboxService.CreateSession -- semantic name mismatch creates confusion**
+**F10 (P1): NodeSandboxControl.CreateSandbox maps to SandboxService.CreateSession -- semantic name mismatch creates confusion**
 
 The plan maps `CreateSandbox` -> `sandboxClient.CreateSession()`, `DestroySandbox` -> `sandboxClient.DestroySession()`, etc. At the SandboxControl level, the abstraction is "sandboxes" (a container/environment). At the SandboxService level, the abstraction is "sessions" (a sandbox-host session). These are the same underlying resource, but the naming divergence is confusing.
 
 More critically, the existing `SandboxService.CreateSession` (in `internal/rpc/api/types.go`) takes a `CreateSessionRequest{BaseSnapshot, SessionID, Quota, Labels}`. The plan's `CreateSandboxRequest{Labels, Template, Resources}` has different fields. `Template` maps to `BaseSnapshot`, but `Resources ResourceSpec` (CPUs, MemMB) does not exist in the current `CreateSessionRequest`. The current `CreateSessionRequest` has `Quota int64` (storage quota) which is not present in `CreateSandboxRequest`.
 
-This means `NativeSandboxControl.CreateSandbox` must map `CreateSandboxRequest` -> `CreateSessionRequest` with lossy field translation: `Template` -> `BaseSnapshot`, `Labels` -> `Labels`, `Resources` -> (dropped or mapped elsewhere). The `Quota` field from the existing API has no counterpart in `CreateSandboxRequest`.
+This means `NodeSandboxControl.CreateSandbox` must map `CreateSandboxRequest` -> `CreateSessionRequest` with lossy field translation: `Template` -> `BaseSnapshot`, `Labels` -> `Labels`, `Resources` -> (dropped or mapped elsewhere). The `Quota` field from the existing API has no counterpart in `CreateSandboxRequest`.
 
-**Recommendation:** Either: (a) extend `CreateSandboxRequest` to include a `Quota int64` field, or (b) document that NativeSandboxControl uses a default quota, or (c) add provider-specific options via an `Options any` escape hatch (similar to `environment.SessionConfig.Options`).
+**Recommendation:** Either: (a) extend `CreateSandboxRequest` to include a `Quota int64` field, or (b) document that NodeSandboxControl uses a default quota, or (c) add provider-specific options via an `Options any` escape hatch (similar to `environment.SessionConfig.Options`).
 
 **F11 (P1): LaunchProcess requires a new RPC endpoint that does not exist on the sandbox-host**
 
-The plan acknowledges this (section 6.1): "requires **new LaunchProcess RPC endpoint on sandbox-host**" and says a standalone addendum (`11-sandbox-host-service.add03`) should be created. This is a hard dependency: `NativeSandboxControl.LaunchProcess` cannot be implemented until the sandbox-host supports this endpoint. The plan's implementation order (section 15, step 13) says to use a "mock sandbox-host for testing."
+The plan acknowledges this (section 6.1): "requires **new LaunchProcess RPC endpoint on sandbox-host**" and says a standalone addendum (`11-sandbox-host-service.add03`) should be created. This is a hard dependency: `NodeSandboxControl.LaunchProcess` cannot be implemented until the sandbox-host supports this endpoint. The plan's implementation order (section 15, step 13) says to use a "mock sandbox-host for testing."
 
 However, the plan does not define the RPC procedure name, request/response wire format, or how the LaunchProcess endpoint is registered on the existing `transport.Server`. The current `transport.Server.Handler()` only registers `SandboxService` and `AgentEventService` procedures. Adding `LaunchProcess` requires either:
 - A new `SandboxControlService` RPC service on the sandbox-host (separate from `SandboxService`)

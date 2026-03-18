@@ -229,11 +229,11 @@ Add all missing seams to the connected components table with specific contract d
 
 Implementation order (section 14):
 - Step 8: SandboxControl interface
-- Step 9: NativeSandboxControl with LaunchProcess
+- Step 9: NodeSandboxControl with LaunchProcess
 
 But LaunchProcess is needed to deploy agent-server inside a sandbox (step 10: cmd/agent-server binary, step 11: e2e test). However, the plan lists the sandbox-host as needing a new `LaunchProcess` RPC endpoint (connected components table), which is a change to the sandbox-host service (plan 11). This cross-plan dependency is not captured in the plan header: "Depends on: 05-agent, 13-rpc-layer, 11-sandbox-host-service.add01" -- the add01 doesn't include LaunchProcess.
 
-Furthermore, the NativeSandboxControl tests (step 9) require the sandbox-host to actually support `LaunchProcess`. Unless a mock is used, this step depends on changes to plan 11's sandbox-host binary.
+Furthermore, the NodeSandboxControl tests (step 9) require the sandbox-host to actually support `LaunchProcess`. Unless a mock is used, this step depends on changes to plan 11's sandbox-host binary.
 
 **Required fix**
 

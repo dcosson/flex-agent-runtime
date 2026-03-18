@@ -1,4 +1,4 @@
-package native
+package node
 
 import (
 	"context"
@@ -213,10 +213,10 @@ func (m *mockSandboxService) HealthCheck(_ context.Context, _ *api.HealthCheckRe
 
 // --- Tests ---
 
-// SC1: NativeSandboxControl CreateSandbox/DestroySandbox
-func TestSC1_NativeSandboxControl_CreateDestroy(t *testing.T) {
+// SC1: NodeSandboxControl CreateSandbox/DestroySandbox
+func TestSC1_NodeSandboxControl_CreateDestroy(t *testing.T) {
 	mock := newMockSandboxService()
-	ctrl := NewNativeSandboxControl(mock)
+	ctrl := NewNodeSandboxControl(mock)
 	ctx := context.Background()
 
 	resp, err := ctrl.CreateSandbox(ctx, control.CreateSandboxRequest{
@@ -258,10 +258,10 @@ func TestSC1_NativeSandboxControl_CreateDestroy(t *testing.T) {
 	}
 }
 
-// SC2: NativeSandboxControl Pause/Resume
-func TestSC2_NativeSandboxControl_PauseResume(t *testing.T) {
+// SC2: NodeSandboxControl Pause/Resume
+func TestSC2_NodeSandboxControl_PauseResume(t *testing.T) {
 	mock := newMockSandboxService()
-	ctrl := NewNativeSandboxControl(mock)
+	ctrl := NewNodeSandboxControl(mock)
 	ctx := context.Background()
 
 	resp, err := ctrl.CreateSandbox(ctx, control.CreateSandboxRequest{
@@ -283,11 +283,11 @@ func TestSC2_NativeSandboxControl_PauseResume(t *testing.T) {
 	}
 }
 
-// SC3: NativeSandboxControl LaunchProcess/KillProcess/GetProcessStatus
-func TestSC3_NativeSandboxControl_LaunchProcess(t *testing.T) {
+// SC3: NodeSandboxControl LaunchProcess/KillProcess/GetProcessStatus
+func TestSC3_NodeSandboxControl_LaunchProcess(t *testing.T) {
 	mock := newMockSandboxService()
 	mock.setLaunchProcessResult("proc-1", "sandbox-host:9100")
-	ctrl := NewNativeSandboxControl(mock)
+	ctrl := NewNodeSandboxControl(mock)
 	ctx := context.Background()
 
 	sandboxResp, err := ctrl.CreateSandbox(ctx, control.CreateSandboxRequest{
@@ -357,17 +357,17 @@ func TestSC3_NativeSandboxControl_LaunchProcess(t *testing.T) {
 }
 
 // SC4: CloudSandboxControl placeholder compliance (tested in cloud package).
-// Here we verify that NativeSandboxControl satisfies the interface.
-func TestNativeSandboxControl_InterfaceCompliance(t *testing.T) {
+// Here we verify that NodeSandboxControl satisfies the interface.
+func TestNodeSandboxControl_InterfaceCompliance(t *testing.T) {
 	mock := newMockSandboxService()
-	var _ control.SandboxControl = NewNativeSandboxControl(mock)
+	var _ control.SandboxControl = NewNodeSandboxControl(mock)
 }
 
 // Additional tests beyond SC1-SC4.
 
-func TestNativeSandboxControl_CreateSandboxFieldMapping(t *testing.T) {
+func TestNodeSandboxControl_CreateSandboxFieldMapping(t *testing.T) {
 	mock := newMockSandboxService()
-	ctrl := NewNativeSandboxControl(mock, WithDefaultQuota(10*1024*1024*1024))
+	ctrl := NewNodeSandboxControl(mock, WithDefaultQuota(10*1024*1024*1024))
 	ctx := context.Background()
 
 	resp, err := ctrl.CreateSandbox(ctx, control.CreateSandboxRequest{
@@ -395,9 +395,9 @@ func TestNativeSandboxControl_CreateSandboxFieldMapping(t *testing.T) {
 	}
 }
 
-func TestNativeSandboxControl_ErrorPropagation(t *testing.T) {
+func TestNodeSandboxControl_ErrorPropagation(t *testing.T) {
 	mock := newMockSandboxService()
-	ctrl := NewNativeSandboxControl(mock)
+	ctrl := NewNodeSandboxControl(mock)
 	ctx := context.Background()
 
 	testErr := errors.New("injected error")
@@ -443,9 +443,9 @@ func TestNativeSandboxControl_ErrorPropagation(t *testing.T) {
 	}
 }
 
-func TestNativeSandboxControl_KillProcessDefaultSignal(t *testing.T) {
+func TestNodeSandboxControl_KillProcessDefaultSignal(t *testing.T) {
 	mock := newMockSandboxService()
-	ctrl := NewNativeSandboxControl(mock)
+	ctrl := NewNodeSandboxControl(mock)
 	ctx := context.Background()
 
 	// Signal=0 means default (SIGTERM). Verify it passes through.
@@ -459,9 +459,9 @@ func TestNativeSandboxControl_KillProcessDefaultSignal(t *testing.T) {
 	}
 }
 
-func TestNativeSandboxControl_PauseNonexistent(t *testing.T) {
+func TestNodeSandboxControl_PauseNonexistent(t *testing.T) {
 	mock := newMockSandboxService()
-	ctrl := NewNativeSandboxControl(mock)
+	ctrl := NewNodeSandboxControl(mock)
 	ctx := context.Background()
 
 	if err := ctrl.PauseSandbox(ctx, "nonexistent"); err == nil {
@@ -469,14 +469,14 @@ func TestNativeSandboxControl_PauseNonexistent(t *testing.T) {
 	}
 }
 
-func TestNativeSandboxControl_AddressToURL(t *testing.T) {
+func TestNodeSandboxControl_AddressToURL(t *testing.T) {
 	url := control.AddressToURL("sandbox-host:9100")
 	if url != "http://sandbox-host:9100" {
 		t.Errorf("AddressToURL = %q, want http://sandbox-host:9100", url)
 	}
 }
 
-func TestNativeSandboxControl_ProcessStatusMapping(t *testing.T) {
+func TestNodeSandboxControl_ProcessStatusMapping(t *testing.T) {
 	// Verify ProcessStatus constants match between control and api packages.
 	if control.ProcessStatus(api.ProcessStatusStarting) != control.ProcessStarting {
 		t.Error("ProcessStarting mismatch")

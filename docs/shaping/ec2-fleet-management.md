@@ -20,7 +20,7 @@ shaping: true
 > D1 is described as an infrastructure provisioning layer that sits BELOW
 > `SandboxControl`: it provisions EC2 instances with sandbox-host, then delegates
 > all sandbox operations (ZFS snapshots, gVisor isolation, tool execution) to
-> `NativeSandboxControl`. This document shapes the fleet management layer that
+> `NodeSandboxControl`. This document shapes the fleet management layer that
 > makes D1 production-ready.
 >
 > **Key architectural constraint:** EC2 fleet management does NOT implement
@@ -127,11 +127,11 @@ A fleet management layer that:
 | ID | Requirement | Source | Category |
 |----|-------------|--------|----------|
 | R0 | **Auto-scale instances based on demand** — Provision new sandbox-host instances when pending sandbox requests exceed available capacity. Scale metric is queue depth of pending `CreateSandbox` calls plus projected demand from in-flight agent sessions. | Operational need | Core |
-| R1 | **Warm pool of pre-provisioned instances** — Maintain N ready instances with sandbox-host running and healthy, so `CreateSandbox` can assign immediately without waiting for EC2 boot. Target: `CreateSandbox` on warm hit < 2s (dominated by `NativeSandboxControl.CreateSandbox` on the instance, not EC2 boot). | D1 cold start gap (OQ6 in cloud-sandbox-providers) | Core |
+| R1 | **Warm pool of pre-provisioned instances** — Maintain N ready instances with sandbox-host running and healthy, so `CreateSandbox` can assign immediately without waiting for EC2 boot. Target: `CreateSandbox` on warm hit < 2s (dominated by `NodeSandboxControl.CreateSandbox` on the instance, not EC2 boot). | D1 cold start gap (OQ6 in cloud-sandbox-providers) | Core |
 | R2 | **Multi-sandbox per instance packing** — Assign multiple sandboxes to a single instance based on resource availability (CPU, memory, ZFS pool space). Track per-instance resource usage and refuse assignment when an instance is full. | D1 multi-sandbox question (OQ7 in cloud-sandbox-providers), cost optimization | Core |
 | R3 | **Instance health monitoring and replacement** — Periodically check instance and sandbox-host health (EC2 status checks, sandbox-host RPC health endpoint, ZFS pool health). Automatically replace unhealthy instances: drain if possible, then terminate and provision replacement. | Operational reliability | Core |
 | R4 | **Cost optimization via scale-down** — Terminate idle instances that have no active sandboxes and have been idle beyond a configurable grace period. Never terminate instances with active sandboxes. Prefer draining over immediate termination. | Operational cost | Core |
-| R5 | **Transparent integration with SandboxControl** — Callers of `SandboxControl.CreateSandbox` must not know about fleet management. `EC2InfraProvisioner` uses the fleet manager's `InstancePool` to acquire an instance, then delegates to `NativeSandboxControl`. The fleet manager is an internal implementation detail. | Architecture constraint from cloud-sandbox-providers D1 | Core |
+| R5 | **Transparent integration with SandboxControl** — Callers of `SandboxControl.CreateSandbox` must not know about fleet management. `EC2InfraProvisioner` uses the fleet manager's `InstancePool` to acquire an instance, then delegates to `NodeSandboxControl`. The fleet manager is an internal implementation detail. | Architecture constraint from cloud-sandbox-providers D1 | Core |
 | R6 | **AMI management** — Build and maintain pre-baked AMIs containing Ubuntu LTS + ZFS + gVisor + flexagent binary + systemd unit + base ZFS snapshot. AMI builds should be automated (Packer or EC2 Image Builder). Instance boot from AMI should reach sandbox-host healthy in < 30s (vs. 60-90s with user-data bootstrap). | Bootstrap fragility, cold start optimization | Must-have |
 | R7 | **Graceful instance lifecycle** — Before terminating an instance, drain it: stop accepting new sandbox assignments, wait for active sandboxes to complete or be migrated (with configurable timeout), then terminate. Support SIGTERM-initiated graceful shutdown of sandbox-host. | Data integrity, user experience | Must-have |
 
@@ -149,7 +149,7 @@ same process that handles `SandboxControl` calls.
 |------|-----------|-------|
 | **A1: Instance registry** | In-memory map of `instanceID -> InstanceState` tracking: instance ID, address, health status, resource capacity (total CPU/mem), resource usage (allocated CPU/mem), list of sandbox IDs, last health check time, state (provisioning, ready, draining, terminated). Persisted to DynamoDB or a local file for crash recovery. | Simple, fast lookups. Single-process means no coordination overhead. |
 | **A2: Warm pool maintenance** | Background goroutine runs a reconciliation loop every 10-30s. Compares `count(ready instances with available capacity)` against `warmPoolTarget` config. If below target, calls `RunInstances` to provision new instances from pre-baked AMI. Waits for sandbox-host health check to pass before marking instance ready. | `warmPoolTarget` is a static config value initially (e.g., 2-5 instances). Can be made dynamic later based on demand trends. |
-| **A3: Instance assignment** | `AcquireInstance(resources ResourceSpec) -> (instanceAddr, error)`. Scans ready instances for one with sufficient available capacity (CPU, memory, ZFS quota). Uses best-fit packing: prefers the instance with the least remaining capacity that still fits the request, to maximize packing density. Returns instance address for `NativeSandboxControl` to use. | Best-fit packing minimizes instance count. Could also support first-fit or spread strategies via config. |
+| **A3: Instance assignment** | `AcquireInstance(resources ResourceSpec) -> (instanceAddr, error)`. Scans ready instances for one with sufficient available capacity (CPU, memory, ZFS quota). Uses best-fit packing: prefers the instance with the least remaining capacity that still fits the request, to maximize packing density. Returns instance address for `NodeSandboxControl` to use. | Best-fit packing minimizes instance count. Could also support first-fit or spread strategies via config. |
 | **A4: Resource tracking** | On `AcquireInstance`, deducts requested resources from instance available capacity. On `ReleaseInstance(instanceID, sandboxID)`, credits resources back. Tracks at the fleet manager level, not by querying the instance (avoids round-trip latency on assignment). Periodic reconciliation with actual instance state corrects drift. | Over-allocation protection: never assign more than instance capacity. Under-utilization detection: flag instances using < 20% capacity for scale-down consideration. |
 | **A5: Health checking** | Background goroutine pings each instance's sandbox-host health endpoint every 15-30s via HTTP. Also checks EC2 instance status via `DescribeInstanceStatus`. Health states: healthy, degraded (sandbox-host slow but responding), unhealthy (no response or EC2 status check failed). After N consecutive unhealthy checks (configurable, default 3), mark instance for replacement. | Health check endpoint should return ZFS pool status, active sandbox count, resource usage, and sandbox-host version. |
 | **A6: Scale-down** | Background goroutine checks for instances with zero active sandboxes. After `idleGracePeriod` (configurable, default 10 min), moves instance to draining state, then terminates. Never terminates below `minInstances` (configurable floor). During draining, instance is excluded from new assignments but existing sandboxes continue. | Conservative: only terminate truly idle instances. Aggressive mode: also terminate instances with low utilization by migrating sandboxes (future). |
@@ -434,7 +434,7 @@ graph TD
     end
 
     subgraph "Native Sandbox"
-        NSC[NativeSandboxControl]
+        NSC[NodeSandboxControl]
         NSE[NativeSandboxEnvironment]
     end
 

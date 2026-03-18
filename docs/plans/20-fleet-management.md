@@ -108,7 +108,7 @@ internal/sandbox/control/instance     -- InstanceProvisioner interface + types (
 
 internal/sandbox/control/fleet        -> internal/sandbox/control (SandboxControl, types)
                                       -> internal/sandbox/control/instance (InstanceProvisioner, InstanceConfig, etc.)
-                                      -> internal/sandbox/control/native (NodeSandboxControl)
+                                      -> internal/sandbox/control/node (NodeSandboxControl)
                                       -> internal/rpc/api (SandboxService, HealthCheckResponse -- used in FleetNodeClient interface)
                                       -> internal/rpc/client (SandboxClient constructor -- wrapped in FleetNodeClient)
 
@@ -1058,8 +1058,8 @@ internal/
   sandbox/
     control/
       control.go                    # SandboxControl interface (existing)
-      native/
-        native.go                   # NodeSandboxControl (existing)
+      node/
+        node.go                     # NodeSandboxControl (existing)
       instance/
         provisioner.go              # InstanceProvisioner interface + associated types
                                     # (InstanceConfig, InstanceInfo, InstanceStatus,
@@ -1301,7 +1301,7 @@ The `SandboxClientFactory` in tests returns a mock `FleetNodeClient` that implem
 | Seam | How Used |
 |------|----------|
 | `internal/sandbox/control/control.go` | `SandboxControl` interface that `FleetSandboxControl` implements; `CreateSandboxRequest/Response`, `LaunchProcessRequest/Response`, etc. |
-| `internal/sandbox/control/native/native.go` | `NodeSandboxControl` created per instance to delegate sandbox operations |
+| `internal/sandbox/control/node/node.go` | `NodeSandboxControl` created per instance to delegate sandbox operations |
 | `internal/rpc/api/types.go` | `HealthCheckRequest/Response` for health polling |
 | `internal/rpc/client/` | `SandboxClient` constructor for creating RPC connections to sandbox-host instances |
 | AWS SDK v2 `ec2` package | Used by `EC2InstanceProvisioner` for instance lifecycle |
@@ -1328,7 +1328,7 @@ cmd/flexagent (orchestrator)
 internal/sandbox/control/fleet
   -> internal/sandbox/control            (SandboxControl interface, types)
   -> internal/sandbox/control/instance   (InstanceProvisioner, InstanceConfig, InstanceInfo, etc.)
-  -> internal/sandbox/control/native     (NodeSandboxControl)
+  -> internal/sandbox/control/node     (NodeSandboxControl)
   -> internal/rpc/api                    (SandboxService, HealthCheck types)
   -> internal/rpc/client                 (NewSandboxClient)
 

@@ -24,7 +24,7 @@ This addendum specifies the sandbox-host side of these RPCs: the request/respons
 
 **What this addendum does NOT cover:**
 - The `SandboxControl` interface itself (defined in plan 18, section 6)
-- `NativeSandboxControl` client-side implementation (plan 18, section 6.1)
+- `NodeSandboxControl` client-side implementation (plan 18, section 6.1)
 - Cloud provider implementations of process management (plan 18, section 6.2)
 
 ---
@@ -36,7 +36,7 @@ This addendum specifies the sandbox-host side of these RPCs: the request/respons
 ```mermaid
 graph TD
     subgraph "Orchestrator"
-        SC[NativeSandboxControl]
+        SC[NodeSandboxControl]
     end
 
     subgraph "Sandbox Host"
@@ -1036,12 +1036,12 @@ The types defined here are the sandbox-host-side (server) counterparts to the `S
 
 | Plan 18 (SandboxControl) | This Addendum (SandboxHostService) | Codec Mapping |
 |--------------------------|-------------------------------------|---------------|
-| `control.LaunchProcessRequest` | `sandbox.LaunchProcessRequest` | `NativeSandboxControl` calls `codec.ToLaunchProcessRequest(apiReq)` -> RPC -> `codec.ToLaunchProcessRequest(apiReq)` |
+| `control.LaunchProcessRequest` | `sandbox.LaunchProcessRequest` | `NodeSandboxControl` calls `codec.ToLaunchProcessRequest(apiReq)` -> RPC -> `codec.ToLaunchProcessRequest(apiReq)` |
 | `control.LaunchProcessResponse` | `sandbox.LaunchProcessResponse` | Reverse mapping via codec |
 | `control.KillProcessRequest` | `sandbox.KillProcessRequest` | Direct field mapping |
 | `control.GetProcessStatusResponse` | `sandbox.GetProcessStatusResponse` | `ProcessStatus` string type alignment |
 
-The `NativeSandboxControl` (plan 18 section 6.1) wraps the RPC client to call these endpoints. The `api.*` types serve as the wire-format intermediary between `control.*` types on the client and `sandbox.*` types on the server.
+The `NodeSandboxControl` (plan 18 section 6.1) wraps the RPC client to call these endpoints. The `api.*` types serve as the wire-format intermediary between `control.*` types on the client and `sandbox.*` types on the server.
 
 ---
 

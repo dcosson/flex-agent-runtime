@@ -1,6 +1,6 @@
-// Package native implements NativeSandboxControl, which wraps our
+// Package node implements NodeSandboxControl, which wraps our
 // sandbox-host RPC service to satisfy the SandboxControl interface.
-package native
+package node
 
 import (
 	"context"
@@ -10,12 +10,12 @@ import (
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control"
 )
 
-// Option configures a NativeSandboxControl.
-type Option func(*NativeSandboxControl)
+// Option configures a NodeSandboxControl.
+type Option func(*NodeSandboxControl)
 
 // WithLogger sets the structured logger.
 func WithLogger(logger *slog.Logger) Option {
-	return func(n *NativeSandboxControl) {
+	return func(n *NodeSandboxControl) {
 		if logger != nil {
 			n.logger = logger
 		}
@@ -24,21 +24,21 @@ func WithLogger(logger *slog.Logger) Option {
 
 // WithDefaultQuota sets the default disk quota (bytes) for new sandboxes.
 func WithDefaultQuota(bytes int64) Option {
-	return func(n *NativeSandboxControl) { n.defaultQuota = bytes }
+	return func(n *NodeSandboxControl) { n.defaultQuota = bytes }
 }
 
-// NativeSandboxControl wraps a sandbox-host RPC client to provide
-// SandboxControl for native (on-premise gVisor + ZFS) sandboxes.
-type NativeSandboxControl struct {
+// NodeSandboxControl wraps a sandbox-host RPC client to provide
+// SandboxControl for node (on-premise gVisor + ZFS) sandboxes.
+type NodeSandboxControl struct {
 	client       api.SandboxService
 	logger       *slog.Logger
 	defaultQuota int64
 }
 
-// NewNativeSandboxControl creates a NativeSandboxControl wrapping the given
+// NewNodeSandboxControl creates a NodeSandboxControl wrapping the given
 // sandbox-host RPC client.
-func NewNativeSandboxControl(client api.SandboxService, opts ...Option) *NativeSandboxControl {
-	n := &NativeSandboxControl{
+func NewNodeSandboxControl(client api.SandboxService, opts ...Option) *NodeSandboxControl {
+	n := &NodeSandboxControl{
 		client: client,
 		logger: slog.Default(),
 	}
@@ -50,10 +50,10 @@ func NewNativeSandboxControl(client api.SandboxService, opts ...Option) *NativeS
 
 // CreateSandbox provisions a new sandbox by calling CreateSession on the
 // sandbox-host. Field mapping:
-//   - Template  → BaseSnapshot
-//   - Labels    → Labels
-//   - Resources → logged (resource limits set at sandbox-host level)
-func (n *NativeSandboxControl) CreateSandbox(ctx context.Context, req control.CreateSandboxRequest) (*control.CreateSandboxResponse, error) {
+//   - Template  -> BaseSnapshot
+//   - Labels    -> Labels
+//   - Resources -> logged (resource limits set at sandbox-host level)
+func (n *NodeSandboxControl) CreateSandbox(ctx context.Context, req control.CreateSandboxRequest) (*control.CreateSandboxResponse, error) {
 	n.logger.DebugContext(ctx, "creating sandbox",
 		"template", req.Template,
 		"cpus", req.Resources.CPUs,
@@ -77,7 +77,7 @@ func (n *NativeSandboxControl) CreateSandbox(ctx context.Context, req control.Cr
 }
 
 // DestroySandbox tears down a sandbox by calling DestroySession.
-func (n *NativeSandboxControl) DestroySandbox(ctx context.Context, sandboxID string) error {
+func (n *NodeSandboxControl) DestroySandbox(ctx context.Context, sandboxID string) error {
 	_, err := n.client.DestroySession(ctx, &api.DestroySessionRequest{
 		SessionID: sandboxID,
 	})
@@ -86,7 +86,7 @@ func (n *NativeSandboxControl) DestroySandbox(ctx context.Context, sandboxID str
 
 // LaunchProcess starts a long-running process inside the sandbox by calling
 // the sandbox-host LaunchProcess RPC.
-func (n *NativeSandboxControl) LaunchProcess(ctx context.Context, req control.LaunchProcessRequest) (*control.LaunchProcessResponse, error) {
+func (n *NodeSandboxControl) LaunchProcess(ctx context.Context, req control.LaunchProcessRequest) (*control.LaunchProcessResponse, error) {
 	resp, err := n.client.LaunchProcess(ctx, &api.LaunchProcessRequest{
 		SessionID:  req.SandboxID,
 		Binary:     req.Binary,
@@ -106,7 +106,7 @@ func (n *NativeSandboxControl) LaunchProcess(ctx context.Context, req control.La
 }
 
 // KillProcess sends a signal to a running process via the sandbox-host.
-func (n *NativeSandboxControl) KillProcess(ctx context.Context, req control.KillProcessRequest) error {
+func (n *NodeSandboxControl) KillProcess(ctx context.Context, req control.KillProcessRequest) error {
 	_, err := n.client.KillProcess(ctx, &api.KillProcessRequest{
 		SessionID: req.SandboxID,
 		ProcessID: req.ProcessID,
@@ -116,7 +116,7 @@ func (n *NativeSandboxControl) KillProcess(ctx context.Context, req control.Kill
 }
 
 // GetProcessStatus queries the status of a launched process.
-func (n *NativeSandboxControl) GetProcessStatus(ctx context.Context, req control.GetProcessStatusRequest) (*control.GetProcessStatusResponse, error) {
+func (n *NodeSandboxControl) GetProcessStatus(ctx context.Context, req control.GetProcessStatusRequest) (*control.GetProcessStatusResponse, error) {
 	resp, err := n.client.GetProcessStatus(ctx, &api.GetProcessStatusRequest{
 		SessionID: req.SandboxID,
 		ProcessID: req.ProcessID,
@@ -132,7 +132,7 @@ func (n *NativeSandboxControl) GetProcessStatus(ctx context.Context, req control
 }
 
 // PauseSandbox pauses a sandbox by calling PauseSession.
-func (n *NativeSandboxControl) PauseSandbox(ctx context.Context, sandboxID string) error {
+func (n *NodeSandboxControl) PauseSandbox(ctx context.Context, sandboxID string) error {
 	_, err := n.client.PauseSession(ctx, &api.PauseSessionRequest{
 		SessionID: sandboxID,
 	})
@@ -140,15 +140,15 @@ func (n *NativeSandboxControl) PauseSandbox(ctx context.Context, sandboxID strin
 }
 
 // ResumeSandbox resumes a paused sandbox by calling ResumeSession.
-func (n *NativeSandboxControl) ResumeSandbox(ctx context.Context, sandboxID string) error {
+func (n *NodeSandboxControl) ResumeSandbox(ctx context.Context, sandboxID string) error {
 	_, err := n.client.ResumeSession(ctx, &api.ResumeSessionRequest{
 		SessionID: sandboxID,
 	})
 	return err
 }
 
-// Capabilities returns the native sandbox provider capabilities.
-func (n *NativeSandboxControl) Capabilities() control.SandboxCapabilities {
+// Capabilities returns the node sandbox provider capabilities.
+func (n *NodeSandboxControl) Capabilities() control.SandboxCapabilities {
 	return control.SandboxCapabilities{
 		Snapshots:     true,
 		Rollback:      true,

@@ -1391,12 +1391,12 @@ func TestEventStreamFidelity_DestroyClosesStreams(t *testing.T) {
 
 ## 10. SandboxControl Tests
 
-### SC1. NativeSandboxControl with Mock Sandbox-Host
+### SC1. NodeSandboxControl with Mock Sandbox-Host
 
 ```go
-func TestNativeSandboxControl_CreateDestroy(t *testing.T) {
+func TestNodeSandboxControl_CreateDestroy(t *testing.T) {
     mockSandboxService := newMockSandboxService(t)
-    ctrl := native.NewNativeSandboxControl(mockSandboxService)
+    ctrl := node.NewNodeSandboxControl(mockSandboxService)
 
     ctx := context.Background()
 
@@ -1421,12 +1421,12 @@ func TestNativeSandboxControl_CreateDestroy(t *testing.T) {
 }
 ```
 
-### SC2. NativeSandboxControl Pause/Resume
+### SC2. NodeSandboxControl Pause/Resume
 
 ```go
-func TestNativeSandboxControl_PauseResume(t *testing.T) {
+func TestNodeSandboxControl_PauseResume(t *testing.T) {
     mockSandboxService := newMockSandboxService(t)
-    ctrl := native.NewNativeSandboxControl(mockSandboxService)
+    ctrl := node.NewNodeSandboxControl(mockSandboxService)
     ctx := context.Background()
 
     resp, _ := ctrl.CreateSandbox(ctx, control.CreateSandboxRequest{
@@ -1440,16 +1440,16 @@ func TestNativeSandboxControl_PauseResume(t *testing.T) {
 }
 ```
 
-### SC3. NativeSandboxControl LaunchProcess (Mock)
+### SC3. NodeSandboxControl LaunchProcess (Mock)
 
 Since `LaunchProcess` depends on `11-sandbox-host-service.add03`, this test uses a mock.
 
 ```go
-func TestNativeSandboxControl_LaunchProcess_Mock(t *testing.T) {
+func TestNodeSandboxControl_LaunchProcess_Mock(t *testing.T) {
     mockSandboxService := newMockSandboxService(t)
     mockSandboxService.SetLaunchProcessResult("proc-1", "sandbox-host:9100")
 
-    ctrl := native.NewNativeSandboxControl(mockSandboxService)
+    ctrl := node.NewNodeSandboxControl(mockSandboxService)
     ctx := context.Background()
 
     sandboxResp, _ := ctrl.CreateSandbox(ctx, control.CreateSandboxRequest{
@@ -2272,7 +2272,7 @@ func TestSecurity_LaunchProcessEnvNotLeaked(t *testing.T) {
     logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
     mockSandboxService := newMockSandboxService(t)
-    ctrl := native.NewNativeSandboxControl(mockSandboxService, native.WithLogger(logger))
+    ctrl := node.NewNodeSandboxControl(mockSandboxService, node.WithLogger(logger))
 
     ctx := context.Background()
     sandboxResp, _ := ctrl.CreateSandbox(ctx, control.CreateSandboxRequest{
@@ -2319,7 +2319,7 @@ All tiers run with `-race` flag.
 | `internal/rpc/client/agent_client.go` | 85% |
 | `internal/rpc/codec/agent_map.go` | 90% |
 | `internal/sandbox/control/` | 80% |
-| `internal/sandbox/control/native/` | 80% |
+| `internal/sandbox/control/node/` | 80% |
 
 ---
 
@@ -2337,7 +2337,7 @@ Before Plan 18 implementation is considered complete:
 8. **All benchmarks meet targets** -- session creation <5ms, event throughput >10K/s, RPC overhead <50us, codec <10us
 9. **All stress tests pass under `-race`** -- no races in session churn, soak, or burst operations
 10. **Graceful shutdown tests pass** -- drain period, force shutdown, new session rejection
-11. **SandboxControl tests pass** -- NativeSandboxControl with mock sandbox-host
+11. **SandboxControl tests pass** -- NodeSandboxControl with mock sandbox-host
 12. **Security tests pass** -- no API key leaks, session ID validation, env var protection
 13. **Test coverage meets thresholds** -- per package requirements above
 14. **`go test -race ./internal/agent/... ./internal/rpc/... ./internal/sandbox/control/...`** passes with zero race conditions
@@ -2376,7 +2376,7 @@ Before Plan 18 implementation is considered complete:
 | `internal/agent/service_fault_test.go` | FI1-FI5 |
 | `internal/rpc/server/agent_server_test.go` | RT1-RT3 |
 | `internal/rpc/rpctest/agent_harness_test.go` | EF1-EF4, B3, RPC round-trip harness |
-| `internal/sandbox/control/native/native_test.go` | SC1-SC4 |
+| `internal/sandbox/control/node/node_test.go` | SC1-SC4 |
 | `tests/integration/scenarios/agent_rpc_fork_test.go` | FK1-FK2 |
 | `tests/integration/scenarios/agent_rpc_resume_test.go` | CR1, CR3 |
 
@@ -2404,7 +2404,7 @@ Before Plan 18 implementation is considered complete:
 | FK1-FK2 | PASS | `tests/integration/scenarios/agent_rpc_fork_test.go` |
 | CR1-CR3 | PASS | `tests/integration/scenarios/agent_rpc_resume_test.go` |
 | EF1-EF4 | PASS | `internal/rpc/rpctest/agent_harness_test.go` |
-| SC1-SC4 | PASS | `internal/sandbox/control/native/native_test.go`, `internal/sandbox/control/cloud/cloud_test.go` |
+| SC1-SC4 | PASS | `internal/sandbox/control/node/node_test.go`, `internal/sandbox/control/cloud/cloud_test.go` |
 | DV1-DV2 | PASS | `internal/agent/service_test.go` (`TestDV1_StructuredAndTurnStreamsIndependent`, `TestDV2_EventStreamSurvivesSubscriberFailure`) |
 | GS1-GS3 | PASS | `internal/agent/service_test.go` (`TestCloseDrainsActiveSessions`, `TestGS2_ForceShutdownAfterDeadline`, `TestCloseRejectsNewSessions`) |
 | FI1-FI5 | PASS | `internal/agent/harness_test.go`, `internal/agent/service_test.go` (fault-path coverage present; naming differs but scope is satisfied) |

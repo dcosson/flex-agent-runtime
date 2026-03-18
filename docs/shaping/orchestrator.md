@@ -105,7 +105,7 @@ Plan A must come first. Plan B depends on it.
 
 The orchestrator needs a **SandboxControl** interface for creating/destroying sandboxes, independent of provider:
 
-- **NativeSandboxControl** — RPC client to our sandbox-host (which manages ZFS + gVisor internally)
+- **NodeSandboxControl** — RPC client to our sandbox-host (which manages ZFS + gVisor internally)
 - **E2BSandboxControl** — HTTP client to E2B API
 - **DaytonaSandboxControl** — HTTP client to Daytona API
 - **FlySandboxControl** — HTTP client to Fly Machines API

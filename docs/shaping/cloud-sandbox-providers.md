@@ -10,7 +10,7 @@ shaping: true
 > management: `ExecutionEnvironment` (tool-level: execute tools, snapshot,
 > rollback, pause/resume) and `SandboxControl` (orchestrator-level: create/destroy
 > sandboxes, launch/kill long-running processes, pause/resume). The only
-> implementations today are `NativeSandboxControl` and `NativeSandboxEnvironment`,
+> implementations today are `NodeSandboxControl` and `NativeSandboxEnvironment`,
 > which wrap our own sandbox-host service (ZFS + gVisor on EC2). We want to add
 > adapters for 3rd party cloud sandbox providers so callers can swap sandbox
 > backends without changing agent code.
@@ -175,14 +175,14 @@ API, full VM lifecycle control, suspend/resume, volumes, and global deployment.
 infrastructure for our native sandbox. In this shape, `SandboxControl.CreateSandbox`
 provisions an EC2 instance, installs and starts the sandbox-host service, then
 delegates all actual sandbox management (ZFS snapshots, gVisor isolation,
-tool execution) to `NativeSandboxControl`. EC2 sits BELOW `SandboxControl` as an
+tool execution) to `NodeSandboxControl`. EC2 sits BELOW `SandboxControl` as an
 infrastructure provisioner, not alongside E2B/Daytona/Fly as a sandbox provider.
 This enables scaling our native sandbox — which has the richest feature set — to
 multiple machines.
 
 | Part | Mechanism | Notes |
 |------|-----------|:-----:|
-| **D1-1: Create/Destroy** | `RunInstances` / `TerminateInstances` provisions the underlying EC2 instance. Instance is set up with ZFS + gVisor + sandbox-host via user data or AMI. Once sandbox-host is running, `NativeSandboxControl` handles sandbox creation on the instance. | **Provisioning layer** |
+| **D1-1: Create/Destroy** | `RunInstances` / `TerminateInstances` provisions the underlying EC2 instance. Instance is set up with ZFS + gVisor + sandbox-host via user data or AMI. Once sandbox-host is running, `NodeSandboxControl` handles sandbox creation on the instance. | **Provisioning layer** |
 | **D1-2: Execute commands** | Delegated to `NativeSandboxEnvironment` via sandbox-host RPC once the instance is running. Full native command execution with streaming. | **Via native sandbox** |
 | **D1-3: Streaming output** | Delegated to native sandbox. Full gRPC streaming via sandbox-host. | **Via native sandbox** |
 | **D1-4: Filesystem persistence** | ZFS datasets on EBS. Full persistence managed by native sandbox. | **Via native sandbox** |
@@ -332,7 +332,7 @@ The agent loop runs inside the sandbox as a long-running process.
 | **A: E2B** | **Good** | Launch agent via `commands.start()`. Port exposure via `getHost()`. 24h max lifetime requires session checkpointing for longer runs. |
 | **B: Daytona** | **Feasible** | Must disable auto-stop. Agent process must handle being killed on sandbox stop. Port exposure and network work. |
 | **C: Fly.io** | **Excellent** | The Machine IS the agent process. No lifetime limit. Full suspend/resume with process state. Best fit for long-running agents. |
-| **D1: EC2 Infra Provisioner** | **Excellent** | Full native sandbox capabilities. Launch agent process via NativeSandboxControl. No lifetime limits. Pause/resume via gVisor container pause. |
+| **D1: EC2 Infra Provisioner** | **Excellent** | Full native sandbox capabilities. Launch agent process via NodeSandboxControl. No lifetime limits. Pause/resume via gVisor container pause. |
 | **D2: EC2 Lightweight Sandbox** | **Best fit (multi-agent, no isolation)** | Multiple agents share one instance, each running as a process on the same OS. Like running `flexagent serve all` for N agents sharing a filesystem. No per-agent isolation, but simple and cost-efficient for collaborative teams. |
 
 ### All in Sandbox
@@ -355,7 +355,7 @@ is not suitable when isolation between agents or tools is needed.
    supports all capabilities (instant ZFS snapshots, gVisor isolation, native
    streaming, full pause/resume). D1 adds the infrastructure automation layer:
    `SandboxControl.CreateSandbox` provisions an EC2 instance, installs
-   sandbox-host, then delegates to `NativeSandboxControl`. This is high priority
+   sandbox-host, then delegates to `NodeSandboxControl`. This is high priority
    because it unlocks horizontal scaling of the backend we already have and know
    works well, without depending on any 3rd party provider.
 
@@ -393,7 +393,7 @@ provider-specific API calls.
 
 The EC2 Infra Provisioner (D1) is different: it sits below `SandboxControl` as
 an infrastructure layer, provisioning EC2 instances and then delegating to the
-existing `NativeSandboxControl`/`NativeSandboxEnvironment`. The EC2 Lightweight
+existing `NodeSandboxControl`/`NativeSandboxEnvironment`. The EC2 Lightweight
 Sandbox (D2) implements the interfaces directly but with reduced capabilities
 (no isolation, shared filesystem).
 
@@ -406,7 +406,7 @@ graph TD
 
     subgraph "Existing"
         NE[NativeSandboxEnvironment<br/>ZFS + gVisor]
-        NC[NativeSandboxControl<br/>sandbox-host RPC]
+        NC[NodeSandboxControl<br/>sandbox-host RPC]
     end
 
     subgraph "New: 3rd Party Adapters"
@@ -483,7 +483,7 @@ graph TD
    adapter.** D1 wraps `SandboxControl` by managing EC2 instance lifecycle:
    `CreateSandbox` provisions an EC2 instance (from a pre-baked AMI or via
    user data), waits for sandbox-host to be healthy, then hands off to
-   `NativeSandboxControl` for all sandbox operations. The caller gets the
+   `NodeSandboxControl` for all sandbox operations. The caller gets the
    full native sandbox feature set. D1 needs to manage instance pooling,
    health checks, and teardown, but does not need to re-implement any
    sandbox logic.
