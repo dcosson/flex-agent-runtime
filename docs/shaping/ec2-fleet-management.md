@@ -40,6 +40,43 @@ shaping: true
 
 ---
 
+## Decision: Shape A Selected (In-Process Fleet Management)
+
+**Shape A (Simple In-Process Pool Manager) is selected.** The core reasoning:
+
+1. **Multi-provider portability.** The scaling logic is a straightforward control
+   loop (~500 lines) that polls health, scales up when demand exceeds capacity,
+   scales down when instances idle past a cooldown, and maintains a warm pool.
+   This control loop works with any cloud provider's simple start/stop instance
+   APIs — it only needs a thin `InstanceProvisioner` interface (see
+   [Key interfaces](#key-interfaces) below) that each provider implements:
+   - **AWS:** `RunInstances` / `TerminateInstances` / `StopInstances` / `StartInstances`
+   - **GCP:** `instances.insert` / `instances.delete` / `instances.stop` / `instances.start`
+   - **Azure:** VMs `CreateOrUpdate` / `Delete` / `Deallocate` / `Start`
+
+2. **Avoids AWS-specific coupling.** Shape B (AWS ASG) requires CloudWatch custom
+   metrics, Auto Scaling Groups, lifecycle hooks, SNS/SQS, and Cloud Map — none
+   of which exist on other providers. That coupling adds operational surface area
+   without proportional benefit, since the fleet control loop itself is simple
+   enough to manage directly.
+
+3. **Shape C (Control Plane Service) is functionally identical to Shape A, just
+   deployed as a separate process.** That separation is unnecessary unless we need
+   multi-caller fleet sharing (multiple independent services acquiring instances
+   from the same pool). For now there is a single `EC2InfraProvisioner` consumer.
+   If multi-caller is needed later, the `InstancePool` interface already supports
+   extracting to a service without changing callers.
+
+4. **Shape D (ECS-based) was already eliminated** in the parent
+   [cloud-sandbox-providers](cloud-sandbox-providers.md) shaping.
+
+The fleet control loop, routing, scaling, health monitoring, and warm pool
+management are all provider-agnostic. Only the `InstanceProvisioner`
+implementation is provider-specific, and it is a thin adapter (~100-200 lines
+per provider).
+
+---
+
 ## Problem
 
 The manual provisioning approach (`scripts/ec2-sandbox/provision.sh`) has
@@ -285,31 +322,38 @@ observability (C > B > A) and operational overhead (C > B > A).
 
 ## Implementation Priority Recommendation
 
-### Recommended: Shape A (Simple In-Process Pool Manager)
+### Selected: Shape A (In-Process Fleet Management)
 
-**Start with Shape A.** It provides the best balance of capability, simplicity,
-and time-to-production for our current scale.
+**Shape A is selected.** See [Decision](#decision-shape-a-selected-in-process-fleet-management)
+above for the full rationale. The key factors driving this decision:
 
-1. **Fastest scale-up reaction time.** Synchronous provisioning on warm pool
-   miss means callers get an instance as fast as EC2 can provide one. No
-   CloudWatch delay. Combined with a properly sized warm pool, most
-   `CreateSandbox` calls will hit a warm instance (<2s).
+1. **Provider-agnostic control loop.** The fleet management logic (poll health,
+   scale up if demand > capacity, scale down if idle > cooldown, maintain warm
+   pool) is ~500 lines of straightforward Go. It works identically against any
+   cloud provider that implements the `InstanceProvisioner` interface — AWS
+   `RunInstances`/`TerminateInstances`, GCP `instances.insert`/`delete`, Azure
+   VMs `CreateOrUpdate`/`Delete`. No provider-specific scaling infrastructure
+   required.
 
-2. **Lowest operational complexity.** No external services to deploy, no
-   CloudWatch metrics to configure, no ASG lifecycle hooks to manage. One
-   process with goroutines. The AWS surface area is just `RunInstances`,
-   `TerminateInstances`, `DescribeInstanceStatus`, and `CreateImage`.
+2. **No AWS coupling.** Shape B (ASG) requires CloudWatch, Auto Scaling Groups,
+   lifecycle hooks, Cloud Map, SNS/SQS — none of which exist on other providers
+   and none of which add proportional value given that the fleet control loop
+   itself is simple to implement directly.
 
-3. **Sufficient for current scale.** With fleet sizes of 10-50 instances and
-   a single `EC2InfraProvisioner` process, Shape A handles all requirements.
-   The single-process constraint is not a limitation until we need multiple
-   independent callers or multi-region.
+3. **Shape C adds deployment complexity without functional benefit.** Shape C is
+   architecturally identical to Shape A but deployed as a separate service. That
+   separation is only justified when multiple independent callers need to share
+   the fleet, which is not the current requirement.
 
-4. **Clean upgrade path.** Shape A's `InstancePool` interface can later be
-   backed by a Shape C control plane service without changing the
-   `EC2InfraProvisioner` code. Shape B's ASG can be introduced under Shape A's
-   reconciliation loop for automated instance replacement. The abstraction
-   boundary is the same across all shapes.
+4. **Fastest reaction time.** Synchronous provisioning on warm pool miss means
+   callers get an instance as fast as the cloud provider can boot one. No
+   CloudWatch metric propagation delay (2-4 min in Shape B).
+
+5. **Clean upgrade path.** The `InstancePool` interface consumed by
+   `EC2InfraProvisioner` is the same whether backed by an in-process pool
+   manager or a remote fleet controller service. If multi-caller fleet sharing
+   or multi-region is needed later, Shape A can be extracted to Shape C without
+   changing any caller code.
 
 ### Phased implementation
 
@@ -334,18 +378,24 @@ and time-to-production for our current scale.
   support, AZ rebalancing), layer Shape B's ASG under Shape A's reconciliation
   loop.
 
-### When to consider Shape B
+### Why Shape B (ASG) was not selected
 
-Shape B (ASG) becomes attractive when:
+Shape B adds AWS-specific coupling (CloudWatch, ASG, lifecycle hooks, SNS/SQS,
+Cloud Map) without proportional benefit. The fleet control loop is simple enough
+to manage directly, and provider-specific auto-scaling infrastructure does not
+port to GCP or Azure. Shape B could be reconsidered if:
 - Spot instance support is needed for cost savings (ASG mixed instance policies).
 - Multi-AZ distribution is required for availability.
 - AWS-native instance replacement on failure is preferred over our own.
 - The team is comfortable with CloudWatch-based scaling's 2-4 min reaction time
   (or willing to oversize the warm pool to compensate).
 
-### When to consider Shape C
+### Why Shape C (Control Plane Service) was not selected
 
-Shape C (Control Plane Service) becomes attractive when:
+Shape C is functionally identical to Shape A but deployed as a separate process.
+The extra deployment and operational overhead (separate binary, database, service
+discovery, monitoring) is unnecessary when there is a single `EC2InfraProvisioner`
+consumer. Shape C could be reconsidered if:
 - Multiple independent services need to acquire sandbox-host instances
   (not just one `EC2InfraProvisioner` process).
 - Multi-region fleet management is required.
@@ -409,6 +459,35 @@ graph TD
 ```
 
 ### Key interfaces
+
+```
+// InstanceProvisioner abstracts cloud provider instance lifecycle.
+// Each cloud provider implements this thin interface (~100-200 lines).
+// The fleet control loop (routing, scaling, health monitoring, warm pool)
+// is entirely provider-agnostic and operates through this interface.
+type InstanceProvisioner interface {
+    // LaunchInstance provisions a new instance from a pre-baked image.
+    LaunchInstance(ctx context.Context, config InstanceConfig) (instanceID string, address string, err error)
+
+    // TerminateInstance permanently destroys an instance and its storage.
+    TerminateInstance(ctx context.Context, instanceID string) error
+
+    // StopInstance stops an instance but preserves its storage (for warm pool
+    // hibernation on providers that support it). Not all providers need to
+    // implement this — can alias to TerminateInstance.
+    StopInstance(ctx context.Context, instanceID string) error
+
+    // StartInstance starts a previously stopped instance.
+    StartInstance(ctx context.Context, instanceID string) error
+}
+
+type InstanceConfig struct {
+    ImageID      string            // AMI ID, GCP image, Azure image reference.
+    InstanceType string            // e.g., "m5.xlarge", "n2-standard-4", "Standard_D4s_v3".
+    Region       string            // Provider-specific region/zone.
+    Tags         map[string]string // Instance tags/labels.
+}
+```
 
 ```
 // InstancePool is the interface the EC2InfraProvisioner uses to acquire
