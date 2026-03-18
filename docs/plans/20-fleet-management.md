@@ -21,12 +21,12 @@
 - **Graceful drain** before instance termination to avoid killing active sandboxes.
 - **SandboxID-encoded routing** so every subsequent call (DestroySandbox, LaunchProcess, etc.) routes to the correct instance without maintaining a session-to-instance map.
 
-`FleetSandboxControl` wraps `NativeSandboxControl` -- it does not re-implement sandbox logic. For each instance in the fleet, it constructs a `NativeSandboxControl` client pointing at that instance's sandbox-host RPC address, and delegates all sandbox operations to it. The fleet layer's job is to decide WHICH instance to use and manage instance lifecycle.
+`FleetSandboxControl` wraps `NodeSandboxControl` -- it does not re-implement sandbox logic. For each instance in the fleet, it constructs a `NodeSandboxControl` client pointing at that instance's sandbox-host RPC address, and delegates all sandbox operations to it. The fleet layer's job is to decide WHICH instance to use and manage instance lifecycle.
 
 ### Relationship to Other SandboxControl Implementations
 
 ```
-NativeSandboxControl       -- Single sandbox-host, direct RPC (existing)
+NodeSandboxControl       -- Single sandbox-host, direct RPC (existing)
 FleetSandboxControl        -- Multi-instance fleet of sandbox-hosts (THIS PLAN)
 EC2DirectSandboxControl    -- Raw EC2, no sandbox-host, shared OS (plan 19)
 E2BSandboxControl          -- 3rd party E2B (future)
@@ -34,7 +34,7 @@ DaytonaSandboxControl      -- 3rd party Daytona (future)
 FlySandboxControl          -- 3rd party Fly.io (future)
 ```
 
-`FleetSandboxControl` is the production-scale version of `NativeSandboxControl`. It provides the same full capability set (instant ZFS snapshots, gVisor isolation, pause/resume, long-running processes) but across a dynamically managed fleet of instances.
+`FleetSandboxControl` is the production-scale version of `NodeSandboxControl`. It provides the same full capability set (instant ZFS snapshots, gVisor isolation, pause/resume, long-running processes) but across a dynamically managed fleet of instances.
 
 ---
 
@@ -62,15 +62,15 @@ graph TD
     subgraph "Fleet: Sandbox-Host Instances"
         subgraph "Instance 1 (active)"
             SH1[sandbox-host :9100<br/>3 sandboxes]
-            NSC1[NativeSandboxControl<br/>client]
+            NSC1[NodeSandboxControl<br/>client]
         end
         subgraph "Instance 2 (active)"
             SH2[sandbox-host :9100<br/>1 sandbox]
-            NSC2[NativeSandboxControl<br/>client]
+            NSC2[NodeSandboxControl<br/>client]
         end
         subgraph "Instance 3 (warm/idle)"
             SH3[sandbox-host :9100<br/>0 sandboxes]
-            NSC3[NativeSandboxControl<br/>client]
+            NSC3[NodeSandboxControl<br/>client]
         end
     end
 
@@ -105,7 +105,7 @@ graph TD
 
 ```
 internal/sandbox/control/fleet        -> internal/sandbox/control (SandboxControl, types)
-                                      -> internal/sandbox/control/native (NativeSandboxControl)
+                                      -> internal/sandbox/control/native (NodeSandboxControl)
                                       -> internal/rpc/api (SandboxService, HealthCheckResponse -- used in FleetNodeClient interface)
                                       -> internal/rpc/client (SandboxClient constructor -- wrapped in FleetNodeClient)
 
@@ -299,7 +299,7 @@ Every `InstanceProvisioner` implementation must pass a shared contract test suit
 
 ## 4. FleetSandboxControl
 
-`FleetSandboxControl` implements `SandboxControl` by managing a pool of sandbox-host instances and delegating sandbox operations to per-instance `NativeSandboxControl` clients.
+`FleetSandboxControl` implements `SandboxControl` by managing a pool of sandbox-host instances and delegating sandbox operations to per-instance `NodeSandboxControl` clients.
 
 ### 4.1 Constructor and Configuration
 
@@ -309,7 +309,7 @@ Every `InstanceProvisioner` implementation must pass a shared contract test suit
 // FleetSandboxControl implements SandboxControl by managing a fleet of
 // sandbox-host instances. It provisions instances via InstanceProvisioner,
 // monitors health, maintains a warm pool, and routes sandbox operations
-// to per-instance NativeSandboxControl clients.
+// to per-instance NodeSandboxControl clients.
 //
 // Lock ordering discipline (MUST be followed throughout):
 //   1. FleetSandboxControl.mu  (fleet-level lock)
@@ -346,7 +346,7 @@ type FleetNodeClient interface {
 // SandboxClientFactory creates a FleetNodeClient for a given sandbox-host
 // address. This is injected for testability -- unit tests provide a mock
 // factory, production code provides the real RPC client constructor
-// wrapping the connection in a NativeSandboxControl + health client.
+// wrapping the connection in a NodeSandboxControl + health client.
 // The factory must return a FleetNodeClient (not just SandboxControl)
 // because the fleet control loop calls HealthCheck on every instance.
 type SandboxClientFactory func(addr string) (FleetNodeClient, error)
@@ -485,7 +485,7 @@ sequenceDiagram
     participant FSC as FleetSandboxControl
     participant RT as Capacity Router
     participant ISM as Instance State Machine
-    participant NSC as NativeSandboxControl (instance N)
+    participant NSC as NodeSandboxControl (instance N)
     participant SH as sandbox-host (instance N)
 
     Caller->>FSC: CreateSandbox(req)
@@ -514,7 +514,7 @@ sequenceDiagram
         NSC-->>FSC: CreateSandboxResponse (address is mountpoint, NOT routable)
         FSC->>FSC: Encode SandboxID = "fleet:instance-2:sess-abc"
         FSC->>FSC: Override Address = "{PrivateIP}:{SandboxHostPort}" (routable endpoint)
-        Note over FSC: Address rewriting is required because NativeSandboxControl<br/>maps Address to the ZFS session mountpoint, not a network endpoint.<br/>The fleet layer replaces it with the instance's routable address.
+        Note over FSC: Address rewriting is required because NodeSandboxControl<br/>maps Address to the ZFS session mountpoint, not a network endpoint.<br/>The fleet layer replaces it with the instance's routable address.
         FSC-->>Caller: CreateSandboxResponse{SandboxID: "fleet:instance-2:sess-abc", Address: "10.0.1.5:9100"}
     else RPC failure
         NSC-->>FSC: error
@@ -523,11 +523,11 @@ sequenceDiagram
     end
 ```
 
-**Address rewriting contract:** `NativeSandboxControl.CreateSandbox` returns `CreateSandboxResponse.Address` set to the ZFS session mountpoint (e.g., `/pool/sessions/sess-abc`), which is a filesystem path, not a network endpoint. `FleetSandboxControl` MUST override this with the instance's routable address (`{PrivateIP}:{SandboxHostPort}`) before returning the response to the caller. This ensures the orchestrator receives a valid `host:port` address for reaching the sandbox over the network. Unit tests assert that `Address` returned from fleet `CreateSandbox` is in `"host:port"` format, not a filesystem path.
+**Address rewriting contract:** `NodeSandboxControl.CreateSandbox` returns `CreateSandboxResponse.Address` set to the ZFS session mountpoint (e.g., `/pool/sessions/sess-abc`), which is a filesystem path, not a network endpoint. `FleetSandboxControl` MUST override this with the instance's routable address (`{PrivateIP}:{SandboxHostPort}`) before returning the response to the caller. This ensures the orchestrator receives a valid `host:port` address for reaching the sandbox over the network. Unit tests assert that `Address` returned from fleet `CreateSandbox` is in `"host:port"` format, not a filesystem path.
 
 ### 4.3 DestroySandbox / LaunchProcess / KillProcess / GetProcessStatus / PauseSandbox / ResumeSandbox
 
-All subsequent operations decode the instance from the SandboxID and delegate to the appropriate per-instance `NativeSandboxControl`.
+All subsequent operations decode the instance from the SandboxID and delegate to the appropriate per-instance `NodeSandboxControl`.
 
 ```go
 func (f *FleetSandboxControl) DestroySandbox(ctx context.Context, sandboxID string) error {
@@ -569,7 +569,7 @@ func (f *FleetSandboxControl) LaunchProcess(ctx context.Context, req control.Lau
         return nil, err
     }
     // Rewrite the request with the session-local ID. The per-instance
-    // NativeSandboxControl passes req.SandboxID directly to the RPC as
+    // NodeSandboxControl passes req.SandboxID directly to the RPC as
     // SessionID, so it MUST be the local session ID, not the fleet-encoded ID.
     delegateReq := control.LaunchProcessRequest{
         SandboxID:  sessionID,  // parsed local part, NOT the fleet SandboxID
@@ -618,13 +618,13 @@ Note: session count accuracy is ultimately guaranteed by the reconciliation algo
 func (f *FleetSandboxControl) Close() error
 ```
 
-`FleetSandboxControl` also implements `io.Closer`, so generic cleanup code can use type assertion (`if closer, ok := sc.(io.Closer); ok { closer.Close() }`). Note that `Close()` is intentionally NOT part of the `SandboxControl` interface: `NativeSandboxControl` has no background goroutines and does not need `Close()`. The orchestrator is responsible for knowing the concrete type and calling `Close()` on fleet providers. The `Close()` method has no context parameter; shutdown duration is bounded by `DrainTimeout` in `FleetConfig`.
+`FleetSandboxControl` also implements `io.Closer`, so generic cleanup code can use type assertion (`if closer, ok := sc.(io.Closer); ok { closer.Close() }`). Note that `Close()` is intentionally NOT part of the `SandboxControl` interface: `NodeSandboxControl` has no background goroutines and does not need `Close()`. The orchestrator is responsible for knowing the concrete type and calling `Close()` on fleet providers. The `Close()` method has no context parameter; shutdown duration is bounded by `DrainTimeout` in `FleetConfig`.
 
 In-flight `CreateSandbox` calls that have already claimed a slot (section 4.1.1) are allowed to complete their RPC. The `Close` method waits for all in-flight operations to finish before beginning the drain sequence.
 
 ### 4.5 Capabilities
 
-`FleetSandboxControl` reports the same feature capabilities as the native sandbox (since it delegates all sandbox operations to `NativeSandboxControl`), but populates `ConcurrentSandboxes` with the fleet's theoretical maximum capacity:
+`FleetSandboxControl` reports the same feature capabilities as the native sandbox (since it delegates all sandbox operations to `NodeSandboxControl`), but populates `ConcurrentSandboxes` with the fleet's theoretical maximum capacity:
 
 ```go
 func (f *FleetSandboxControl) Capabilities() control.SandboxCapabilities {
@@ -1020,7 +1020,7 @@ internal/
     control/
       control.go                    # SandboxControl interface (existing)
       native/
-        native.go                   # NativeSandboxControl (existing)
+        native.go                   # NodeSandboxControl (existing)
       fleet/
         fleet.go                    # FleetSandboxControl: SandboxControl implementation
         fleet_test.go               # Unit tests with mock InstanceProvisioner
@@ -1258,7 +1258,7 @@ The `SandboxClientFactory` in tests returns a mock `FleetNodeClient` that implem
 | Seam | How Used |
 |------|----------|
 | `internal/sandbox/control/control.go` | `SandboxControl` interface that `FleetSandboxControl` implements; `CreateSandboxRequest/Response`, `LaunchProcessRequest/Response`, etc. |
-| `internal/sandbox/control/native/native.go` | `NativeSandboxControl` created per instance to delegate sandbox operations |
+| `internal/sandbox/control/native/native.go` | `NodeSandboxControl` created per instance to delegate sandbox operations |
 | `internal/rpc/api/types.go` | `HealthCheckRequest/Response` for health polling |
 | `internal/rpc/client/` | `SandboxClient` constructor for creating RPC connections to sandbox-host instances |
 | AWS SDK v2 `ec2` package | Used by `EC2InstanceProvisioner` for instance lifecycle |
@@ -1273,7 +1273,7 @@ The `SandboxClientFactory` in tests returns a mock `FleetNodeClient` that implem
 
 ### 12.3 Modified Seams
 
-No existing code is modified by this plan. `FleetSandboxControl` is a new `SandboxControl` implementation alongside `NativeSandboxControl` and `EC2DirectSandboxControl`. The orchestrator selects which implementation to use via configuration.
+No existing code is modified by this plan. `FleetSandboxControl` is a new `SandboxControl` implementation alongside `NodeSandboxControl` and `EC2DirectSandboxControl`. The orchestrator selects which implementation to use via configuration.
 
 ### 12.4 Import Flow
 
@@ -1284,7 +1284,7 @@ cmd/flexagent (orchestrator)
 
 internal/sandbox/control/fleet
   -> internal/sandbox/control            (SandboxControl interface, types)
-  -> internal/sandbox/control/native     (NativeSandboxControl)
+  -> internal/sandbox/control/native     (NodeSandboxControl)
   -> internal/rpc/api                    (SandboxService, HealthCheck types)
   -> internal/rpc/client                 (NewSandboxClient)
 
@@ -1475,7 +1475,7 @@ Findings from `docs/plans/20-fleet-management-review-coder-1-sea.md` and `docs/p
 | 15 | coder-1-sea P2 | P2 | Test strategy omits recovery/abstraction seams | **Fixed.** Added crash recovery tests to control_loop_test.go, added InstanceProvisioner contract test suite (step 8 in implementation order), added integration test for crash recovery. | 11.1, 13 |
 | 16 | r1-b P3-1, coder-1-sea P3 | P3 | Shape label mismatch (plan says "Shape B", shaping doc says Shape A) | **Fixed.** Plan header corrected to "Shape A selected". | Header |
 | 17 | r1-b P3-2 | P3 | CloudInstanceState values duplicate EC2-specific states | **Fixed.** CloudInstanceState comments now specify these are provider-neutral normalized values. Each provisioner maps native states (EC2 "shutting-down", GCP "STAGING", etc.) to these canonical values. | 3 |
-| 18 | r1-b P3-3 | P3 | SandboxClientFactory return type should be control.SandboxControl, not api.SandboxService | **Fixed.** SandboxClientFactory now returns `control.SandboxControl`. ManagedInstance.Client typed as `control.SandboxControl`. Factory constructs NativeSandboxControl wrapping the RPC client. | 4.1, 8 |
+| 18 | r1-b P3-3 | P3 | SandboxClientFactory return type should be control.SandboxControl, not api.SandboxService | **Fixed.** SandboxClientFactory now returns `control.SandboxControl`. ManagedInstance.Client typed as `control.SandboxControl`. Factory constructs NodeSandboxControl wrapping the RPC client. | 4.1, 8 |
 | 19 | r1-b P3-4 | P3 | Test list omits concurrent CreateSandbox + control loop drain interaction | **Fixed.** Added test case: "CreateSandbox that selects an instance racing with control loop drain transition is handled correctly (claim-slot prevents routing to draining instance)". | 11.1 |
 | 20 | r1-b P3 (CloudInstanceState) | P3 | CloudInstanceState should be string or truly minimal provider-neutral set | **Addressed.** Kept the 6-value enum but documented it as provider-neutral with mapping responsibility on each provisioner. The set is minimal and covers all lifecycle phases needed by the fleet manager's state machine. | 3 |
 
@@ -1484,7 +1484,7 @@ Findings from `docs/plans/20-fleet-management-review-coder-1-sea.md` and `docs/p
 | # | Source | Priority | Finding | Disposition | Section(s) Updated |
 |---|--------|----------|---------|-------------|-------------------|
 | 21 | seam-review P1-1 | P1 | HealthCheck seam gap: `SandboxClientFactory` returns `SandboxControl` which has no `HealthCheck` method, so control loop cannot poll health | **Fixed.** Introduced `FleetNodeClient` interface combining `control.SandboxControl` + `HealthCheck`. Updated `SandboxClientFactory` to return `FleetNodeClient`. Updated `ManagedInstance.Client` type to `FleetNodeClient`. | 4.1, 5.2, 8, 11.3 |
-| 22 | seam-review P1-2 | P1 | CreateSandbox address contract drift: `NativeSandboxControl` maps `Address` to ZFS mountpoint, not routable `host:port` | **Fixed.** Fleet layer explicitly overrides `CreateSandboxResponse.Address` with `{PrivateIP}:{SandboxHostPort}`. Added address rewriting note after section 4.2 sequence diagram. Added unit test assertion. | 4.2 |
+| 22 | seam-review P1-2 | P1 | CreateSandbox address contract drift: `NodeSandboxControl` maps `Address` to ZFS mountpoint, not routable `host:port` | **Fixed.** Fleet layer explicitly overrides `CreateSandboxResponse.Address` with `{PrivateIP}:{SandboxHostPort}`. Added address rewriting note after section 4.2 sequence diagram. Added unit test assertion. | 4.2 |
 | 23 | seam-review P1-3 | P1 | TerminateInstance failure handling in drain completion ambiguous -- state transition timing and retry path unclear | **Fixed.** Specified that transition to `Terminating` happens AFTER `TerminateInstance` succeeds. On failure, instance stays in `Draining` for retry. Added `MaxTerminateRetries` config. Added phase 5b for crash recovery cleanup of stuck `Terminating` instances. | 4.1 (FleetConfig), 5.1 |
 | 24 | seam-review P1-4 | P1 | `Capabilities()` returns `ConcurrentSandboxes = 0` (unlimited) but fleet has hard limit `MaxInstances * MaxSessionsPerInstance` | **Fixed.** `Capabilities()` now returns `ConcurrentSandboxes: MaxInstances * MaxSessionsPerInstance`. Documented as theoretical ceiling with `ErrNoCapacity` as primary backpressure signal. | 4.5 |
 | 25 | seam-review P2-1 | P2 | HealthCheck data contract overstated: plan claims CPU/memory/pool-space but actual RPC only has Status/PoolState/SessionCount/ActiveTools/Uptime/Errors | **Fixed.** Revised section 6.2 to accurately state available fields. Documented that pool space data requires `PoolCapacity`/`PoolFree` additions to `api.HealthCheckResponse`. CPU/memory would need new data source. | 6.2 |

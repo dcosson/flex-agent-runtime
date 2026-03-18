@@ -22,14 +22,14 @@ EC2 Direct is a SandboxControl adapter that provisions and manages raw EC2 insta
 ### Relationship to Other Adapters
 
 ```
-NativeSandboxControl     -- Full isolation (ZFS + gVisor), richest capabilities
+NodeSandboxControl     -- Full isolation (ZFS + gVisor), richest capabilities
 EC2DirectSandboxControl  -- No isolation, shared OS, simplest cloud option  <-- THIS PLAN
 E2BSandboxControl        -- 3rd party, per-sandbox isolation, 24h limit (future)
 DaytonaSandboxControl    -- 3rd party, per-sandbox isolation, lossy pause (future)
 FlySandboxControl        -- 3rd party, per-VM isolation, no lifetime limit (future)
 ```
 
-EC2 Direct sits at the opposite end of the capability spectrum from NativeSandboxControl. It trades isolation and snapshots for simplicity and shared-filesystem collaboration. It is intentionally minimal.
+EC2 Direct sits at the opposite end of the capability spectrum from NodeSandboxControl. It trades isolation and snapshots for simplicity and shared-filesystem collaboration. It is intentionally minimal.
 
 ### Key Design Decision: No Custom ExecutionEnvironment
 
@@ -399,7 +399,7 @@ func (c *EC2DirectSandboxControl) PauseSandbox(ctx context.Context, sandboxID st
 3. Update all process states to `ProcessExited` (processes do not survive stop).
 4. Update instance state to `instanceStatusStopped`.
 
-**Important: Lossy pause semantics.** EC2 Direct pause kills all running processes. Only the EBS-backed filesystem is preserved. The orchestrator MUST re-launch all agent processes after `ResumeSandbox`. This behavior differs from NativeSandboxControl, which preserves full process state via gVisor container pause. The `SandboxCapabilities` struct currently has no field to distinguish lossy vs. lossless pause (see Capabilities section 3.9 and Open Question OQ5). The orchestrator must use adapter-specific knowledge for now.
+**Important: Lossy pause semantics.** EC2 Direct pause kills all running processes. Only the EBS-backed filesystem is preserved. The orchestrator MUST re-launch all agent processes after `ResumeSandbox`. This behavior differs from NodeSandboxControl, which preserves full process state via gVisor container pause. The `SandboxCapabilities` struct currently has no field to distinguish lossy vs. lossless pause (see Capabilities section 3.9 and Open Question OQ5). The orchestrator must use adapter-specific knowledge for now.
 
 ### 3.8 ResumeSandbox
 
