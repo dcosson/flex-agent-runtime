@@ -65,28 +65,28 @@ If you don't have an access key yet, log into the AWS Console → click your acc
 ### 1. Create an IAM user and attach policy
 
 ```bash
-aws iam create-user --user-name flexagent-deployer
+aws iam create-user --user-name flexagent-ec2
 
 aws iam create-policy \
   --policy-name FlexAgentEC2Provisioning \
   --policy-document file://scripts/ec2-sandbox/iam-policy.json
 
 aws iam attach-user-policy \
-  --user-name flexagent-deployer \
+  --user-name flexagent-ec2 \
   --policy-arn arn:aws:iam::<ACCOUNT_ID>:policy/FlexAgentEC2Provisioning
 ```
 
 ### 2. Create access key and configure profile
 
 ```bash
-aws iam create-access-key --user-name flexagent-deployer
-aws configure --profile flexagent
+aws iam create-access-key --user-name flexagent-ec2
+aws configure --profile flexagent-ec2
 ```
 
 ### 3. Run scripts with the profile
 
 ```bash
-AWS_PROFILE=flexagent scripts/ec2-sandbox/provision.sh \
+AWS_PROFILE=flexagent-ec2 scripts/ec2-sandbox/provision.sh \
   --key-name my-ec2-key \
   --ssh-key-path ~/.ssh/my-ec2-key.pem
 ```
