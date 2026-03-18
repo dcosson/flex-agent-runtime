@@ -94,7 +94,22 @@ graph TB
 
 Reason: tools-sandbox must persist host identity per session for correct routing and health accounting, and Fleet already provides this abstraction.
 
-### 2.4 Three Placement Modes
+### 2.4 Sandbox ID Contract
+
+SandboxControl implementations use prefixed IDs to distinguish adapters:
+- **Direct**: `direct:{ec2InstanceID}` — the EC2 instance ID with prefix
+- **Fleet**: `fleet:{instanceID}:{hostLocalSessionID}` — encodes both the fleet instance and the host-local sandbox session ID
+- **Node**: raw session IDs (no prefix) — the sandbox-host's local ID
+
+For tools-sandbox mode, `ToolEnvironment.SandboxSessionID` requires the **host-local** session ID (not the fleet-prefixed one), because tool execution dispatches directly to the sandbox-host via `SandboxClient` RPC. The orchestrator must extract the host-local portion from the fleet-prefixed ID using `fleet.ParseSandboxID()` (to be exported).
+
+The sessionEntry stores both:
+- `sandboxID` — the full prefixed ID returned by `CreateSandbox()`, used for control-plane operations (PauseSandbox, DestroySandbox)
+- `toolSessionID` — the host-local session ID, used for `ToolEnvironment.SandboxSessionID` (only relevant for tools-sandbox mode)
+
+For Node (single host), these are the same value. For Fleet, they differ.
+
+### 2.5 Three Placement Modes
 
 Placement mode is per-session, not per-orchestrator. A single orchestrator can serve all three modes concurrently, provided it has the required backends configured.
 
@@ -278,6 +293,11 @@ type Orchestrator struct {
     createTimeout    time.Duration
     shutdownTimeout  time.Duration
 
+    // Lifecycle context: canceled on Close(). All background work (CreateSession
+    // provisioning, health checks) derives from this so shutdown cancels them.
+    lifecycleCtx    context.Context
+    lifecycleCancel context.CancelFunc
+
     // Health monitor
     healthCancel context.CancelFunc
     healthWg     sync.WaitGroup
@@ -301,13 +321,14 @@ const (
 type sessionEntry struct {
     mu sync.Mutex
 
-    sessionID     string
-    remoteSessionID string        // backend agent session ID; may differ
-    placement     PlacementMode
-    sandboxID     string           // from SandboxControl.CreateSandbox
-    processID     string           // from SandboxControl.LaunchProcess (empty for tools-sandbox)
-    sandboxControl control.SandboxControl // which SandboxControl manages this session's sandbox
-    sandboxHostAddr string         // host:port used for tools-sandbox dispatch and host health checks
+    sessionID       string
+    remoteSessionID string        // backend agent session ID; may differ from sessionID
+    placement       PlacementMode
+    sandboxID       string           // full prefixed ID from SandboxControl.CreateSandbox (for control-plane ops)
+    toolSessionID   string           // host-local session ID for ToolEnvironment.SandboxSessionID (tools-sandbox only)
+    processID       string           // from SandboxControl.LaunchProcess (empty for tools-sandbox)
+    sandboxControl  control.SandboxControl // which SandboxControl manages this session's sandbox
+    sandboxHostAddr string         // host:port from CreateSandboxResponse.Address (for tools-sandbox dispatch + health)
     sandboxHostID   string         // stable host key (fleet instance ID or single-node key)
 
     // The AgentService for this session -- either an AgentServiceClient (remote)
@@ -342,7 +363,10 @@ Client-visible session IDs are generated and owned by the orchestrator. Backend 
 func (o *Orchestrator) CreateSession(ctx context.Context, req *agentapi.CreateAgentSessionRequest) (*agentapi.CreateAgentSessionResponse, error) {
     placement := placementFromMetadata(req.SessionConfig.Metadata)
     clientSessionID := generateSessionID()
-    createCtx, cancel := context.WithTimeout(context.Background(), o.createTimeout)
+    // Derive from lifecycle context (canceled on Close), NOT from client ctx or
+    // context.Background(). This ensures provisioning is canceled on shutdown
+    // but is decoupled from client request deadlines.
+    createCtx, cancel := context.WithTimeout(o.lifecycleCtx, o.createTimeout)
     defer cancel()
 
     // 1. Validate placement is supported
@@ -389,42 +413,61 @@ Both agent-direct and agent-sandbox follow the same pattern -- they differ only 
        Env:        {LLM API keys, auth token},
        ExposePort: 8081,
    })
-4. agentClient := client.NewAgentServiceClient(httpClient, process.Address, clientCfg)
+4. agentClient := client.NewAgentServiceClient(httpClient, control.AddressToURL(process.Address), clientCfg)
 5. resp := agentClient.CreateSession(ctx, req) // req.SessionConfig.SessionID is clientSessionID
 6. entry.sandboxID = sandbox.SandboxID
    entry.processID = process.ProcessID
    entry.remoteSessionID = resp.SessionID
    entry.agentService = agentClient
    entry.sandboxControl = sc
+   entry.sandboxHostAddr = sandbox.Address
    entry.state = sessionActive
 7. o.registerSession(entry)
-8. return resp
+8. // Enforce client session ID ownership: always return orchestrator-owned ID
+   resp.SessionID = entry.sessionID
+   return resp
 ```
 
-On failure at any step, previously created resources are cleaned up (destroy sandbox if agent launch fails, etc.).
+On failure at any step, previously created resources are cleaned up (destroy sandbox if agent launch fails, etc.). Cleanup runs under the same `createCtx` (lifecycle-derived, not client-derived).
 
 #### createToolsSandboxSession
 
 ```
-1. host := o.selectToolsSandboxHost() // returns {hostID, hostAddr, sandboxControl}
-2. sandbox := host.sandboxControl.CreateSandbox(ctx, sandboxReq)  // for tool execution filesystem
+1. sc := o.nodeControl   // Node or Fleet, determined at startup
+2. sandbox := sc.CreateSandbox(ctx, sandboxReq)  // for tool execution filesystem
+   // Derive host address from CreateSandbox response (Fleet picks the host
+   // internally; Address is the selected host's address).
+   hostAddr := sandbox.Address
+   // Extract host-local session ID for direct sandbox-host RPC.
+   // For Node (no prefix): toolSessionID = sandbox.SandboxID
+   // For Fleet ("fleet:{instanceID}:{sessionID}"): toolSessionID = sessionID portion
+   toolSessionID := extractHostLocalSessionID(sandbox.SandboxID)
 3. sessionCfg := req.SessionConfig
    sessionCfg.ToolEnvironment = agentapi.ToolEnvironmentConfig{
        Type:             agentapi.ToolEnvSandbox,
-       SandboxHostAddr:  host.hostAddr,
-       SandboxSessionID: sandbox.SandboxID,
+       SandboxHostAddr:  hostAddr,
+       SandboxSessionID: toolSessionID,  // host-local ID, NOT fleet-prefixed
    }
-4. resp := o.agentLoopService.CreateSession(ctx, &agentapi.CreateAgentSessionRequest{SessionConfig: sessionCfg})
-5. entry.sandboxID = sandbox.SandboxID
+4. resp, err := o.agentLoopService.CreateSession(ctx, &agentapi.CreateAgentSessionRequest{SessionConfig: sessionCfg})
+   if err != nil {
+       // Compensation: destroy the sandbox we just created (best-effort).
+       sc.DestroySandbox(ctx, sandbox.SandboxID)
+       return nil, err
+   }
+5. entry.sandboxID = sandbox.SandboxID        // full prefixed ID for control-plane ops
+   entry.toolSessionID = toolSessionID         // host-local ID for ToolEnvironment
    entry.remoteSessionID = resp.SessionID
    entry.agentService = o.agentLoopService
-   entry.sandboxControl = host.sandboxControl
-   entry.sandboxHostAddr = host.hostAddr
-   entry.sandboxHostID = host.hostID
+   entry.sandboxControl = sc
+   entry.sandboxHostAddr = hostAddr
    entry.state = sessionActive
 6. o.registerSession(entry)
-7. return resp
+7. // Enforce client session ID ownership
+   resp.SessionID = entry.sessionID
+   return resp
 ```
+
+`extractHostLocalSessionID(id)` checks for the `fleet:` prefix and calls `fleet.ParseSandboxID()` (to be exported) to extract the host-local session ID. For unprefixed IDs (Node), returns the ID unchanged.
 
 ### 3.6 Proxy Behavior
 
@@ -664,7 +707,8 @@ A follow-up task should add `PlacementMode` as a first-class field on `CreateAge
 - Return error to client with `rpc.CodeInternal`
 
 ### 5.2a Client Deadline/Cancel During CreateSession
-- Provisioning + cleanup run under orchestrator-owned bounded context (`--create-session-timeout`) so cleanup still executes even if client context is canceled.
+- Provisioning + cleanup run under orchestrator lifecycle context with `--create-session-timeout` deadline, decoupled from client request context.
+- On orchestrator `Close()`, the lifecycle context is canceled, which cancels all in-flight provisioning.
 - Client still receives cancellation/deadline error from the original request path.
 
 ### 5.3 Agent Crash Mid-Session
@@ -685,8 +729,9 @@ A follow-up task should add `PlacementMode` as a first-class field on `CreateAge
 
 ### 5.6 Close()/Shutdown Semantics
 - `Close()` is idempotent.
-- First `Close()` call sets `closing=true`, rejects new sessions, stops health loop, waits in-flight operations, and runs best-effort teardown for all sessions.
+- First `Close()` call: cancels `lifecycleCtx` (stops in-flight provisioning), sets `closing=true` (rejects new sessions), stops health loop, waits in-flight operations, and runs best-effort teardown for all sessions.
 - Subsequent `Close()` calls return nil.
+- HTTP server shutdown is external (in `runServeOrchestrator`), not part of `Close()`.
 
 ---
 
@@ -704,6 +749,7 @@ A follow-up task should add `PlacementMode` as a first-class field on `CreateAge
 - `cmd/flexagent/serve_orchestrator.go` -- replace placeholder with full CLI wiring
 - Unit tests with mock `SandboxControl` and mock `AgentServiceClient`
 - Session-ID translation helpers and tests (client session ID <-> remote session ID)
+- Response rewrite: `CreateSession` always returns orchestrator-owned session ID
 
 **Why agent-direct first:** It is the simplest mode (no sandbox-host dependency, no in-process agent loop complexity). It exercises the full CreateSession -> proxy -> DestroySession lifecycle with real SandboxControl and AgentServiceClient interactions. If the proxy layer works for agent-direct, agent-sandbox is almost identical.
 
@@ -717,7 +763,10 @@ A follow-up task should add `PlacementMode` as a first-class field on `CreateAge
 - Pause/resume logic for all three modes, including lossy-pause handling for agent-direct
 - Config validation for sandbox-host connectivity
 - Explicit Node(single host)/Fleet(multi host) selection
+- Export `fleet.ParseSandboxID()` and `extractHostLocalSessionID()` helper for dual-ID support
+- tools-sandbox compensation cleanup (destroy sandbox on AgentLoopService failure)
 - Unit tests for agent-sandbox and tools-sandbox flows
+- Unit tests for Fleet sandbox ID extraction (host-local vs fleet-prefixed)
 - Unit tests for pause/resume with mock SandboxControl
 
 ### Bead 3: Health monitoring + error recovery
@@ -750,6 +799,7 @@ Test cases:
 - CreateSession with unsupported placement returns error
 - CreateSession reads placement from `SessionConfig.Metadata` (not `req.Metadata`)
 - Client-facing session IDs remain stable when backend IDs differ
+- CreateSession response always contains orchestrator-owned session ID, not backend ID
 - Proxy methods (SendMessage, Steer, etc.) delegate to the correct backend
 - Stream proxying passes through events correctly
 - Stream proxy rewrites only `SessionID` and preserves all non-ID fields after codec roundtrip
@@ -765,6 +815,9 @@ Test cases:
 - Close() is idempotent and waits for in-flight operations
 - Pause/resume propagates to sandbox and agent layers
 - ResumeSession forwards caller-provided conversation log with ID translation
+- tools-sandbox with Fleet: ToolEnvironment.SandboxSessionID is host-local, not fleet-prefixed
+- tools-sandbox compensation: sandbox destroyed when AgentLoopService.CreateSession fails
+- CreateSession provisioning cancels on orchestrator Close() (lifecycle context)
 
 ### 7.2 Integration Test Skeleton
 
@@ -784,6 +837,7 @@ A test harness that can be run against real infrastructure (EC2 for agent-direct
 - Health check running concurrently with session operations
 - Client-canceled stream while backend stream is active does not leak goroutines
 - Client-canceled CreateSession during slow provisioning still performs bounded cleanup
+- Orchestrator Close() cancels in-flight CreateSession provisioning via lifecycle context
 - Race detector (`make test-race`) must pass clean
 
 ---
@@ -796,3 +850,37 @@ A test harness that can be run against real infrastructure (EC2 for agent-direct
 - **Metrics/observability**: Prometheus metrics for session counts, placement mode distribution, sandbox creation latency, agent health status
 - **Client authentication/authorization**: per-session auth, role-based access control
 - **Session migration**: move a session from one sandbox-host to another (snapshot + restore)
+
+---
+
+## Review Incorporation History
+
+### R1 (incorporated in 6cf6b6e)
+
+Sources: `21-serve-orchestrator-r1-review-1.md` (coder-1-sea), `21-serve-orchestrator-r1-review-2.md` (coder-2-sea)
+
+| # | Source | Severity | Finding | Disposition |
+|---|--------|----------|---------|-------------|
+| 1 | both | P1 | Session ID namespace collision | Incorporated: orchestrator-owned IDs with remoteSessionID mapping |
+| 2 | r1-1 | P1 | Placement metadata wrong API shape | Incorporated: SessionConfig.Metadata |
+| 3 | r1-1 | P1 | tools-sandbox host routing underspecified | Incorporated: sandboxHostAddr/sandboxHostID on sessionEntry |
+| 4 | r1-1 | P1 | DestroySession not failure-tolerant | Incorporated: best-effort with per-step timeouts |
+| 5 | r1-2 | P1 | Event fidelity through proxy | Incorporated: rewriting receiver + fidelity test |
+| 6 | r1-2 | P2 | FleetSandboxControl integration | Incorporated: Fleet in scope (section 2.3) |
+| 7 | r1-2 | P2 | ResumeSession underspecified | Incorporated: caller-provided conversation log |
+| 8 | r1-2 | P2 | agent-max-sessions not enforced | Incorporated: relies on AgentLoopService built-in limit |
+| 9 | r1-2 | P2 | CreateSession timeout | Incorporated: --create-session-timeout flag |
+| 10 | r1-2 | P2 | Close() semantics | Incorporated: section 5.6 |
+| 11 | r1-1 | P2 | Test plan gaps | Incorporated: compensation, cancellation, leak tests |
+
+### R2 (incorporated in this commit)
+
+Sources: `21-serve-orchestrator-r2-review-1.md` (coder-2-sea), `21-serve-orchestrator-r2-review-2.md` (coder-1-sea)
+
+| # | Source | Severity | Finding | Disposition |
+|---|--------|----------|---------|-------------|
+| 1 | r2-2 | P1 | Fleet sandbox ID shape mismatch for tools-sandbox | Incorporated: section 2.4 Sandbox ID Contract, dual IDs (sandboxID + toolSessionID), extractHostLocalSessionID helper |
+| 2 | r2-2 | P1 | CreateSession response doesn't enforce client session ID | Incorporated: explicit resp.SessionID = entry.sessionID rewrite in both creation flows |
+| 3 | r2-2 | P2 | CreateSession context not tied to shutdown | Incorporated: lifecycleCtx on Orchestrator, createCtx derives from it |
+| 4 | r2-1 | P2 | selectToolsSandboxHost ordering with Fleet | Incorporated: hostAddr derived from CreateSandboxResponse.Address after CreateSandbox |
+| 5 | r2-1 | P2 | tools-sandbox compensation cleanup | Incorporated: explicit DestroySandbox on AgentLoopService.CreateSession failure |
