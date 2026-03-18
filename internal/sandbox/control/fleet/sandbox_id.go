@@ -29,6 +29,19 @@ func encodeSandboxID(instanceID, sessionID string) (string, error) {
 	return sandboxIDPrefix + instanceID + ":" + sessionID, nil
 }
 
+// SandboxIDPrefix is the prefix for fleet-managed sandbox IDs.
+// Exported so the orchestrator can detect fleet-prefixed IDs.
+const SandboxIDPrefix = sandboxIDPrefix
+
+// ParseSandboxID extracts the instance ID and session ID from a fleet
+// SandboxID. Returns an error if the ID is malformed (wrong prefix, missing
+// separator, or empty components).
+//
+// This is the exported entry point; internal callers use parseSandboxID.
+func ParseSandboxID(sandboxID string) (instanceID, sessionID string, err error) {
+	return parseSandboxID(sandboxID)
+}
+
 // parseSandboxID extracts the instance ID and session ID from a fleet
 // SandboxID. Returns an error if the ID is malformed (wrong prefix, missing
 // separator, or empty components).

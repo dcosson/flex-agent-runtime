@@ -16,13 +16,15 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	awsssm "github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/dcosson/flex-agent-runtime/internal/agent"
 	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
 	"github.com/dcosson/flex-agent-runtime/internal/orchestrator"
-	"github.com/dcosson/flex-agent-runtime/internal/rpc/client"
+	rpcclient "github.com/dcosson/flex-agent-runtime/internal/rpc/client"
 	"github.com/dcosson/flex-agent-runtime/internal/rpc/transport"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control"
 	directcontrol "github.com/dcosson/flex-agent-runtime/internal/sandbox/control/direct"
 	ec2provisioner "github.com/dcosson/flex-agent-runtime/internal/sandbox/control/fleet/ec2"
+	nodecontrol "github.com/dcosson/flex-agent-runtime/internal/sandbox/control/node"
 )
 
 type serveOrchestratorConfig struct {
@@ -123,9 +125,6 @@ func (cfg serveOrchestratorConfig) validate() error {
 			errs = append(errs, fmt.Errorf("direct-security-group-ids is required when direct-ami-id is set"))
 		}
 	}
-	if strings.TrimSpace(cfg.SandboxHostAddr) != "" {
-		errs = append(errs, fmt.Errorf("sandbox-host modes are not implemented in aiag-agy.1"))
-	}
 	return errors.Join(errs...)
 }
 
@@ -141,16 +140,42 @@ func runServeOrchestrator(args []string) {
 		os.Exit(1)
 	}
 
-	directControl, err := buildDirectControl(context.Background(), cfg, logger)
-	if err != nil {
-		logger.Error("failed to build direct sandbox control", "error", err)
-		os.Exit(1)
+	// Build DirectSandboxControl if direct mode is configured.
+	var directControl control.SandboxControl
+	if strings.TrimSpace(cfg.DirectAMIID) != "" {
+		dc, dcErr := buildDirectControl(context.Background(), cfg, logger)
+		if dcErr != nil {
+			logger.Error("failed to build direct sandbox control", "error", dcErr)
+			os.Exit(1)
+		}
+		directControl = dc
+	}
+
+	// Build Node/Fleet SandboxControl if sandbox-host addresses are configured.
+	var nodeControl control.SandboxControl
+	var sandboxHostAddrs []string
+	if strings.TrimSpace(cfg.SandboxHostAddr) != "" {
+		sandboxHostAddrs = splitCommaList(cfg.SandboxHostAddr)
+		nc, ncErr := buildNodeOrFleetControl(sandboxHostAddrs, cfg, logger)
+		if ncErr != nil {
+			logger.Error("failed to build sandbox-host control", "error", ncErr)
+			os.Exit(1)
+		}
+		nodeControl = nc
+	}
+
+	// Build in-process AgentLoopService for tools-sandbox mode.
+	var agentLoopSvc agentapi.AgentService
+	if nodeControl != nil {
+		agentLoopSvc = agent.NewAgentLoopService(
+			nil,
+			agent.WithMaxSessions(cfg.AgentMaxSessions),
+			agent.WithCloseDrainTimeout(cfg.ShutdownTimeout),
+			agent.WithToolCatalogFactory(newRuntimeToolCatalogFactory(logger)),
+		)
 	}
 
 	agentLaunchArgs := []string{"serve", "agent", "--listen", ":8081", "--api-version", cfg.APIVersion, "--min-api-version", cfg.MinAPIVersion}
-	if cfg.AuthToken != "" {
-		agentLaunchArgs = append(agentLaunchArgs, "--auth-token", cfg.AuthToken)
-	}
 
 	agentEnv := map[string]string{}
 	if cfg.AuthToken != "" {
@@ -158,15 +183,18 @@ func runServeOrchestrator(args []string) {
 	}
 
 	orch, err := orchestrator.New(orchestrator.OrchestratorConfig{
-		DirectControl:   directControl,
-		MaxSessions:     cfg.MaxSessions,
-		CreateTimeout:   cfg.CreateSessionTimeout,
-		ShutdownTimeout: cfg.ShutdownTimeout,
-		Logger:          logger,
-		AgentBinary:     "flexagent",
-		AgentPort:       8081,
-		AgentArgs:       agentLaunchArgs,
-		AgentEnv:        agentEnv,
+		DirectControl:    directControl,
+		NodeControl:      nodeControl,
+		AgentLoopService: agentLoopSvc,
+		SandboxHostAddrs: sandboxHostAddrs,
+		MaxSessions:      cfg.MaxSessions,
+		CreateTimeout:    cfg.CreateSessionTimeout,
+		ShutdownTimeout:  cfg.ShutdownTimeout,
+		Logger:           logger,
+		AgentBinary:      "flexagent",
+		AgentPort:        8081,
+		AgentArgs:        agentLaunchArgs,
+		AgentEnv:         agentEnv,
 		AgentServiceFactory: func(address string) (agentapi.AgentService, error) {
 			clientCfg := transport.ClientConfig{
 				APIVersion:      cfg.APIVersion,
@@ -175,7 +203,7 @@ func runServeOrchestrator(args []string) {
 			if cfg.AuthToken != "" {
 				clientCfg.HeaderInjector = transport.HeaderTokenAuth("authorization", "Bearer "+cfg.AuthToken)
 			}
-			return client.NewAgentServiceClient(http.DefaultClient, control.AddressToURL(address), clientCfg), nil
+			return rpcclient.NewAgentServiceClient(http.DefaultClient, control.AddressToURL(address), clientCfg), nil
 		},
 	})
 	if err != nil {
@@ -271,6 +299,35 @@ func splitCommaList(raw string) []string {
 		}
 	}
 	return out
+}
+
+// buildNodeOrFleetControl constructs Node or Fleet SandboxControl based on
+// the number of sandbox-host addresses.
+// - 1 host  -> NodeSandboxControl
+// - N hosts -> FleetSandboxControl (future: not yet wired in this bead)
+func buildNodeOrFleetControl(addrs []string, cfg serveOrchestratorConfig, logger *slog.Logger) (control.SandboxControl, error) {
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("no sandbox-host addresses provided")
+	}
+	if len(addrs) == 1 {
+		baseURL := addrs[0]
+		if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+			baseURL = control.AddressToURL(baseURL)
+		}
+		clientCfg := transport.ClientConfig{APIVersion: cfg.APIVersion}
+		if cfg.AuthToken != "" {
+			clientCfg.HeaderInjector = transport.HeaderTokenAuth("authorization", "Bearer "+cfg.AuthToken)
+		}
+		sandboxSvc := rpcclient.NewSandboxServiceClient(
+			&http.Client{Timeout: 30 * time.Second},
+			baseURL,
+			clientCfg,
+		)
+		return nodecontrol.NewNodeSandboxControl(sandboxSvc, nodecontrol.WithLogger(logger)), nil
+	}
+	// Multiple hosts: FleetSandboxControl will be wired in a follow-up.
+	// For now, return error since Fleet requires additional config (InstanceProvisioner, etc.)
+	return nil, fmt.Errorf("fleet mode (multiple sandbox-host addresses) is not yet wired in serve_orchestrator")
 }
 
 func instanceProfileName(raw string) string {

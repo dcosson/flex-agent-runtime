@@ -30,11 +30,11 @@ type sessionEntry struct {
 	placement       PlacementMode
 
 	sandboxID       string
+	toolSessionID   string // host-local session ID for ToolEnvironment (tools-sandbox only)
 	processID       string
 	sandboxControl  control.SandboxControl
 	sandboxHostAddr string
-
-	agentService agentapi.AgentService
+	agentService    agentapi.AgentService
 
 	state      sessionState
 	createdAt  time.Time

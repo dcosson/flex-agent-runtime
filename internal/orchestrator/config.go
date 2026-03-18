@@ -40,6 +40,11 @@ type OrchestratorConfig struct {
 	NodeControl      control.SandboxControl
 	AgentLoopService agentapi.AgentService
 
+	// SandboxHostAddrs are the configured --sandbox-host-addr values.
+	// Used by resolveToolsSandboxHostAddr in Node mode (single host)
+	// where CreateSandboxResponse.Address is a mountpoint, not an RPC addr.
+	SandboxHostAddrs []string
+
 	MaxSessions     int
 	CreateTimeout   time.Duration
 	ShutdownTimeout time.Duration

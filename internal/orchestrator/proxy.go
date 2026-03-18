@@ -11,6 +11,7 @@ import (
 	agentapi "github.com/dcosson/flex-agent-runtime/internal/agent/api"
 	"github.com/dcosson/flex-agent-runtime/internal/rpc"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control/fleet"
 )
 
 func (o *Orchestrator) CreateSession(ctx context.Context, req *agentapi.CreateAgentSessionRequest) (*agentapi.CreateAgentSessionResponse, error) {
@@ -47,8 +48,10 @@ func (o *Orchestrator) CreateSession(ctx context.Context, req *agentapi.CreateAg
 	switch placement {
 	case PlacementAgentDirect:
 		return o.createAgentDirectSession(createCtx, entry, &createReq)
-	case PlacementAgentSandbox, PlacementToolsSandbox:
-		return nil, rpc.NewRPCError(rpc.CodeUnavailable, fmt.Sprintf("placement %q is not implemented in this bead", placement), nil)
+	case PlacementAgentSandbox:
+		return o.createAgentSandboxSession(createCtx, entry, &createReq)
+	case PlacementToolsSandbox:
+		return o.createToolsSandboxSession(createCtx, entry, &createReq)
 	default:
 		return nil, rpc.NewRPCError(rpc.CodeInvalidArgument, fmt.Sprintf("unsupported placement %q", placement), nil)
 	}
@@ -86,7 +89,9 @@ func (o *Orchestrator) createAgentDirectSession(ctx context.Context, entry *sess
 
 	createResp, err := agentService.CreateSession(ctx, req)
 	if err != nil {
+		_, destroyErr := agentService.DestroySession(ctx, &agentapi.DestroyAgentSessionRequest{SessionID: req.SessionConfig.SessionID})
 		cleanupErr := joinErrors(
+			destroyErr,
 			agentService.Close(),
 			sc.KillProcess(ctx, control.KillProcessRequest{SandboxID: sandboxResp.SandboxID, ProcessID: launchResp.ProcessID}),
 			sc.DestroySandbox(ctx, sandboxResp.SandboxID),
@@ -122,6 +127,243 @@ func (o *Orchestrator) createAgentDirectSession(ctx context.Context, entry *sess
 	resp := *createResp
 	resp.SessionID = entry.sessionID
 	return &resp, nil
+}
+
+func (o *Orchestrator) createAgentSandboxSession(ctx context.Context, entry *sessionEntry, req *agentapi.CreateAgentSessionRequest) (*agentapi.CreateAgentSessionResponse, error) {
+	sc := o.config.NodeControl
+	sandboxResp, err := sc.CreateSandbox(ctx, control.CreateSandboxRequest{
+		Labels: metadataStringLabels(req.SessionConfig.Metadata),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	launchResp, err := sc.LaunchProcess(ctx, control.LaunchProcessRequest{
+		SandboxID:  sandboxResp.SandboxID,
+		Binary:     o.config.AgentBinary,
+		Args:       o.agentLaunchArgs(),
+		Env:        cloneStringMap(o.config.AgentEnv),
+		ExposePort: o.config.AgentPort,
+	})
+	if err != nil {
+		cleanupErr := sc.DestroySandbox(ctx, sandboxResp.SandboxID)
+		return nil, joinErrors(err, cleanupErr)
+	}
+
+	agentService, err := o.config.AgentServiceFactory(launchResp.Address)
+	if err != nil {
+		cleanupErr := joinErrors(
+			sc.KillProcess(ctx, control.KillProcessRequest{SandboxID: sandboxResp.SandboxID, ProcessID: launchResp.ProcessID}),
+			sc.DestroySandbox(ctx, sandboxResp.SandboxID),
+		)
+		return nil, joinErrors(err, cleanupErr)
+	}
+
+	createResp, err := agentService.CreateSession(ctx, req)
+	if err != nil {
+		_, destroySessionErr := agentService.DestroySession(ctx, &agentapi.DestroyAgentSessionRequest{SessionID: req.SessionConfig.SessionID})
+		cleanupErr := joinErrors(
+			destroySessionErr,
+			agentService.Close(),
+			sc.KillProcess(ctx, control.KillProcessRequest{SandboxID: sandboxResp.SandboxID, ProcessID: launchResp.ProcessID}),
+			sc.DestroySandbox(ctx, sandboxResp.SandboxID),
+		)
+		return nil, joinErrors(err, cleanupErr)
+	}
+
+	remoteSessionID := createResp.SessionID
+	if strings.TrimSpace(remoteSessionID) == "" {
+		remoteSessionID = req.SessionConfig.SessionID
+	}
+
+	entry.remoteSessionID = remoteSessionID
+	entry.sandboxID = sandboxResp.SandboxID
+	entry.processID = launchResp.ProcessID
+	entry.sandboxControl = sc
+	entry.sandboxHostAddr = sandboxResp.Address
+	entry.agentService = agentService
+	entry.state = sessionActive
+	entry.lastHealth = time.Now()
+
+	if err := o.addSession(entry); err != nil {
+		_, destroyErr := agentService.DestroySession(ctx, &agentapi.DestroyAgentSessionRequest{SessionID: remoteSessionID})
+		cleanupErr := joinErrors(
+			destroyErr,
+			agentService.Close(),
+			sc.KillProcess(ctx, control.KillProcessRequest{SandboxID: sandboxResp.SandboxID, ProcessID: launchResp.ProcessID}),
+			sc.DestroySandbox(ctx, sandboxResp.SandboxID),
+		)
+		return nil, joinErrors(err, cleanupErr)
+	}
+
+	resp := *createResp
+	resp.SessionID = entry.sessionID
+	return &resp, nil
+}
+
+func (o *Orchestrator) createToolsSandboxSession(ctx context.Context, entry *sessionEntry, req *agentapi.CreateAgentSessionRequest) (*agentapi.CreateAgentSessionResponse, error) {
+	sc := o.config.NodeControl
+	sandboxResp, err := sc.CreateSandbox(ctx, control.CreateSandboxRequest{
+		Labels: metadataStringLabels(req.SessionConfig.Metadata),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	hostAddr := o.resolveToolsSandboxHostAddr(sandboxResp)
+	toolSessionID := extractHostLocalSessionID(sandboxResp.SandboxID)
+
+	toolsReq := cloneCreateSessionRequest(req)
+	toolsReq.SessionConfig.ToolEnvironment = agentapi.ToolEnvironmentConfig{
+		Type:             agentapi.ToolEnvSandbox,
+		SandboxHostAddr:  hostAddr,
+		SandboxSessionID: toolSessionID,
+	}
+
+	createResp, err := o.config.AgentLoopService.CreateSession(ctx, &toolsReq)
+	if err != nil {
+		// Compensation: destroy sandbox we just created.
+		cleanupErr := sc.DestroySandbox(ctx, sandboxResp.SandboxID)
+		return nil, joinErrors(err, cleanupErr)
+	}
+
+	remoteSessionID := createResp.SessionID
+	if strings.TrimSpace(remoteSessionID) == "" {
+		remoteSessionID = req.SessionConfig.SessionID
+	}
+
+	entry.remoteSessionID = remoteSessionID
+	entry.sandboxID = sandboxResp.SandboxID
+	entry.toolSessionID = toolSessionID
+	entry.sandboxControl = sc
+	entry.sandboxHostAddr = hostAddr
+	entry.agentService = o.config.AgentLoopService
+	entry.state = sessionActive
+	entry.lastHealth = time.Now()
+
+	if err := o.addSession(entry); err != nil {
+		_, destroySessionErr := o.config.AgentLoopService.DestroySession(ctx, &agentapi.DestroyAgentSessionRequest{SessionID: remoteSessionID})
+		cleanupErr := joinErrors(
+			destroySessionErr,
+			sc.DestroySandbox(ctx, sandboxResp.SandboxID),
+		)
+		return nil, joinErrors(err, cleanupErr)
+	}
+
+	resp := *createResp
+	resp.SessionID = entry.sessionID
+	return &resp, nil
+}
+
+// resolveToolsSandboxHostAddr determines the RPC address of the sandbox-host
+// for tool dispatch. Node mode returns a mountpoint in Address (useless for
+// RPC), so we use the configured --sandbox-host-addr. Fleet mode returns
+// host:port directly.
+func (o *Orchestrator) resolveToolsSandboxHostAddr(sandbox *control.CreateSandboxResponse) string {
+	if isFleetSandboxID(sandbox.SandboxID) {
+		return sandbox.Address
+	}
+	// Node mode: use configured sandbox-host address.
+	if len(o.config.SandboxHostAddrs) > 0 {
+		return o.config.SandboxHostAddrs[0]
+	}
+	return sandbox.Address
+}
+
+// extractHostLocalSessionID extracts the host-local session ID from a sandbox
+// ID. For Fleet IDs ("fleet:{instanceID}:{sessionID}"), returns the sessionID
+// portion. For Node IDs (no prefix), returns the ID unchanged.
+func extractHostLocalSessionID(sandboxID string) string {
+	if !isFleetSandboxID(sandboxID) {
+		return sandboxID
+	}
+	_, sessionID, err := fleet.ParseSandboxID(sandboxID)
+	if err != nil {
+		return sandboxID
+	}
+	return sessionID
+}
+
+// isFleetSandboxID returns true if the sandbox ID has a fleet prefix.
+func isFleetSandboxID(sandboxID string) bool {
+	return strings.HasPrefix(sandboxID, fleet.SandboxIDPrefix)
+}
+
+// PauseSession pauses a session's sandbox. For agent-direct (lossy pause),
+// the agent process is aborted first since EC2 stop kills all processes.
+func (o *Orchestrator) PauseSession(ctx context.Context, sessionID string) error {
+	entry, err := o.getSessionEntry(sessionID)
+	if err != nil {
+		return err
+	}
+	if entry.state != sessionActive {
+		return rpc.NewRPCError(rpc.CodeFailedPrecondition, fmt.Sprintf("session %q is %s, not active", sessionID, entry.state), nil)
+	}
+	if entry.sandboxControl == nil {
+		return rpc.NewRPCError(rpc.CodeInternal, "session has no sandbox control", nil)
+	}
+
+	// For lossy-pause providers (agent-direct), abort the active turn first.
+	caps := entry.sandboxControl.Capabilities()
+	if caps.Pause && entry.placement == PlacementAgentDirect {
+		_, _ = entry.agentService.Abort(ctx, &agentapi.AbortRequest{
+			SessionID: entry.remoteSessionID,
+			Reason:    "pause: lossy sandbox pause requires agent stop",
+		})
+	}
+
+	if err := entry.sandboxControl.PauseSandbox(ctx, entry.sandboxID); err != nil {
+		return err
+	}
+	entry.state = sessionPaused
+	return nil
+}
+
+// ResumeSessionSandbox resumes a paused session. For agent-direct (lossy),
+// re-launches the agent process and reconnects the agent service.
+func (o *Orchestrator) ResumeSessionSandbox(ctx context.Context, sessionID string) error {
+	entry, err := o.getSessionEntry(sessionID)
+	if err != nil {
+		return err
+	}
+	if entry.state != sessionPaused {
+		return rpc.NewRPCError(rpc.CodeFailedPrecondition, fmt.Sprintf("session %q is %s, not paused", sessionID, entry.state), nil)
+	}
+	if entry.sandboxControl == nil {
+		return rpc.NewRPCError(rpc.CodeInternal, "session has no sandbox control", nil)
+	}
+
+	if err := entry.sandboxControl.ResumeSandbox(ctx, entry.sandboxID); err != nil {
+		return err
+	}
+
+	// For agent-direct (lossy pause), re-launch agent and reconnect.
+	if entry.placement == PlacementAgentDirect {
+		launchResp, err := entry.sandboxControl.LaunchProcess(ctx, control.LaunchProcessRequest{
+			SandboxID:  entry.sandboxID,
+			Binary:     o.config.AgentBinary,
+			Args:       o.agentLaunchArgs(),
+			Env:        cloneStringMap(o.config.AgentEnv),
+			ExposePort: o.config.AgentPort,
+		})
+		if err != nil {
+			return fmt.Errorf("re-launch agent after resume: %w", err)
+		}
+		entry.processID = launchResp.ProcessID
+
+		agentService, err := o.config.AgentServiceFactory(launchResp.Address)
+		if err != nil {
+			return fmt.Errorf("reconnect agent after resume: %w", err)
+		}
+		if entry.agentService != nil {
+			_ = entry.agentService.Close()
+		}
+		entry.agentService = agentService
+	}
+
+	entry.state = sessionActive
+	entry.lastHealth = time.Now()
+	return nil
 }
 
 func (o *Orchestrator) GetSession(ctx context.Context, req *agentapi.GetAgentSessionRequest) (*agentapi.GetAgentSessionResponse, error) {

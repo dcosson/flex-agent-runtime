@@ -88,6 +88,74 @@ func TestCreateSessionLaunchFailureCompensatesWithDestroySandbox(t *testing.T) {
 	}
 }
 
+func TestCreateSessionFactoryFailureCompensatesKillAndDestroy(t *testing.T) {
+	sc := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "direct:i-123", Address: "10.0.0.10:0"},
+		launchResp: &control.LaunchProcessResponse{ProcessID: "proc-1", Address: "10.0.0.10:8081", Status: control.ProcessRunning},
+	}
+	orch, err := New(OrchestratorConfig{
+		DirectControl: sc,
+		AgentServiceFactory: func(_ string) (agentapi.AgentService, error) {
+			return nil, errors.New("factory failed")
+		},
+		CreateTimeout:   5 * time.Second,
+		ShutdownTimeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{Metadata: map[string]any{"placement_mode": string(PlacementAgentDirect)}},
+	})
+	if err == nil {
+		t.Fatal("CreateSession() expected error")
+	}
+	if sc.lastKillReq.SandboxID != "direct:i-123" || sc.lastKillReq.ProcessID != "proc-1" {
+		t.Fatalf("KillProcess request = %#v, want sandbox direct:i-123 and process proc-1", sc.lastKillReq)
+	}
+	if sc.destroyCount != 1 || sc.lastDestroyedSandboxID != "direct:i-123" {
+		t.Fatalf("DestroySandbox not called as expected: count=%d sandbox=%q", sc.destroyCount, sc.lastDestroyedSandboxID)
+	}
+}
+
+func TestCreateSessionBackendFailureCompensatesFullTeardown(t *testing.T) {
+	calls := &[]string{}
+	sc := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "direct:i-123", Address: "10.0.0.10:0"},
+		launchResp: &control.LaunchProcessResponse{ProcessID: "proc-1", Address: "10.0.0.10:8081", Status: control.ProcessRunning},
+		calls:      calls,
+	}
+	agentSvc := &mockAgentService{
+		createErr: errors.New("backend create failed"),
+		calls:     calls,
+	}
+	orch := mustNewOrchestrator(t, sc, agentSvc, 0)
+
+	_, err := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{Metadata: map[string]any{"placement_mode": string(PlacementAgentDirect)}},
+	})
+	if err == nil {
+		t.Fatal("CreateSession() expected error")
+	}
+
+	wantCalls := []string{"create-session", "agent-destroy", "agent-close", "kill-process", "destroy-sandbox"}
+	for _, want := range wantCalls {
+		if !containsCall(*calls, want) {
+			t.Fatalf("call log missing %q: %#v", want, *calls)
+		}
+	}
+	if callIndex(*calls, "agent-destroy") > callIndex(*calls, "agent-close") {
+		t.Fatalf("expected agent-destroy before agent-close: %#v", *calls)
+	}
+	if callIndex(*calls, "agent-close") > callIndex(*calls, "kill-process") {
+		t.Fatalf("expected agent-close before kill-process: %#v", *calls)
+	}
+	if callIndex(*calls, "kill-process") > callIndex(*calls, "destroy-sandbox") {
+		t.Fatalf("expected kill-process before destroy-sandbox: %#v", *calls)
+	}
+}
+
 func TestDestroySessionOrdersAgentThenProcessThenSandbox(t *testing.T) {
 	calls := &[]string{}
 	sc := &mockSandboxControl{
@@ -256,13 +324,20 @@ type mockSandboxControl struct {
 	launchErr  error
 	killErr    error
 	destroyErr error
+	pauseErr   error
+	resumeErr  error
+	caps       *control.SandboxCapabilities
 
 	lastCreateReq          control.CreateSandboxRequest
 	lastLaunchReq          control.LaunchProcessRequest
 	lastKillReq            control.KillProcessRequest
 	lastDestroyedSandboxID string
+	lastPausedSandboxID    string
+	lastResumedSandboxID   string
 
 	destroyCount int
+	pauseCount   int
+	resumeCount  int
 	calls        *[]string
 	mu           sync.Mutex
 }
@@ -326,9 +401,30 @@ func (m *mockSandboxControl) GetProcessStatus(_ context.Context, _ control.GetPr
 	return &control.GetProcessStatusResponse{Status: control.ProcessRunning}, nil
 }
 
-func (m *mockSandboxControl) PauseSandbox(_ context.Context, _ string) error  { return nil }
-func (m *mockSandboxControl) ResumeSandbox(_ context.Context, _ string) error { return nil }
+func (m *mockSandboxControl) PauseSandbox(_ context.Context, sandboxID string) error {
+	m.mu.Lock()
+	m.lastPausedSandboxID = sandboxID
+	m.pauseCount++
+	if m.calls != nil {
+		*m.calls = append(*m.calls, "pause-sandbox")
+	}
+	m.mu.Unlock()
+	return m.pauseErr
+}
+func (m *mockSandboxControl) ResumeSandbox(_ context.Context, sandboxID string) error {
+	m.mu.Lock()
+	m.lastResumedSandboxID = sandboxID
+	m.resumeCount++
+	if m.calls != nil {
+		*m.calls = append(*m.calls, "resume-sandbox")
+	}
+	m.mu.Unlock()
+	return m.resumeErr
+}
 func (m *mockSandboxControl) Capabilities() control.SandboxCapabilities {
+	if m.caps != nil {
+		return *m.caps
+	}
 	return control.SandboxCapabilities{Pause: true, LaunchProcess: true}
 }
 
@@ -556,4 +652,506 @@ func callIndex(calls []string, want string) int {
 		}
 	}
 	return -1
+}
+
+// --- agent-sandbox tests ---
+
+func TestCreateSessionAgentSandboxRoutesAndRewritesIDs(t *testing.T) {
+	nodeSC := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "sess-abc", Address: "/zfs/sessions/abc"},
+		launchResp: &control.LaunchProcessResponse{ProcessID: "proc-1", Address: "10.0.0.5:8081", Status: control.ProcessRunning},
+	}
+	agentSvc := &mockAgentService{
+		createResp: &agentapi.CreateAgentSessionResponse{SessionID: "remote-sb-1", State: "idle"},
+	}
+	orch, err := New(OrchestratorConfig{
+		NodeControl:      nodeSC,
+		AgentLoopService: agentSvc,
+		CreateTimeout:    5 * time.Second,
+		ShutdownTimeout:  2 * time.Second,
+		AgentServiceFactory: func(_ string) (agentapi.AgentService, error) {
+			return agentSvc, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	resp, err := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{
+			Metadata: map[string]any{"placement_mode": "agent-sandbox"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if !strings.HasPrefix(resp.SessionID, "orch-") {
+		t.Fatalf("SessionID = %q, want orch-*", resp.SessionID)
+	}
+	if resp.SessionID == "remote-sb-1" {
+		t.Fatal("SessionID should not be the backend ID")
+	}
+	if agentSvc.lastCreateReq == nil {
+		t.Fatal("backend CreateSession not called")
+	}
+	if agentSvc.lastCreateReq.SessionConfig.SessionID != resp.SessionID {
+		t.Fatalf("backend session ID = %q, want %q", agentSvc.lastCreateReq.SessionConfig.SessionID, resp.SessionID)
+	}
+}
+
+func TestCreateSessionAgentSandboxLaunchFailureCompensates(t *testing.T) {
+	nodeSC := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "sess-abc", Address: "/zfs/sessions/abc"},
+		launchErr:  errors.New("launch in sandbox failed"),
+	}
+	orch, err := New(OrchestratorConfig{
+		NodeControl:      nodeSC,
+		AgentLoopService: &mockAgentService{},
+		CreateTimeout:    5 * time.Second,
+		ShutdownTimeout:  2 * time.Second,
+		AgentServiceFactory: func(_ string) (agentapi.AgentService, error) {
+			return &mockAgentService{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{
+			Metadata: map[string]any{"placement_mode": "agent-sandbox"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if nodeSC.destroyCount != 1 {
+		t.Fatalf("DestroySandbox calls = %d, want 1", nodeSC.destroyCount)
+	}
+}
+
+// --- tools-sandbox tests ---
+
+func TestCreateSessionToolsSandboxNodeModeWiresToolEnvironment(t *testing.T) {
+	nodeSC := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{
+			SandboxID: "local-sess-42",
+			Address:   "/zfs/sessions/42",
+		},
+	}
+	agentLoopSvc := &mockAgentService{
+		createResp: &agentapi.CreateAgentSessionResponse{SessionID: "loop-sess-1", State: "idle"},
+	}
+	orch, err := New(OrchestratorConfig{
+		NodeControl:      nodeSC,
+		AgentLoopService: agentLoopSvc,
+		SandboxHostAddrs: []string{"10.0.0.5:8082"},
+		CreateTimeout:    5 * time.Second,
+		ShutdownTimeout:  2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	resp, err := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{
+			Metadata: map[string]any{"placement_mode": "tools-sandbox"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if !strings.HasPrefix(resp.SessionID, "orch-") {
+		t.Fatalf("SessionID = %q, want orch-*", resp.SessionID)
+	}
+
+	if agentLoopSvc.lastCreateReq == nil {
+		t.Fatal("AgentLoopService.CreateSession not called")
+	}
+	toolEnv := agentLoopSvc.lastCreateReq.SessionConfig.ToolEnvironment
+	if toolEnv.Type != agentapi.ToolEnvSandbox {
+		t.Fatalf("ToolEnvironment.Type = %q, want %q", toolEnv.Type, agentapi.ToolEnvSandbox)
+	}
+	if toolEnv.SandboxHostAddr != "10.0.0.5:8082" {
+		t.Fatalf("ToolEnvironment.SandboxHostAddr = %q, want 10.0.0.5:8082", toolEnv.SandboxHostAddr)
+	}
+	if toolEnv.SandboxSessionID != "local-sess-42" {
+		t.Fatalf("ToolEnvironment.SandboxSessionID = %q, want local-sess-42", toolEnv.SandboxSessionID)
+	}
+}
+
+func TestCreateSessionToolsSandboxFleetModeExtractsHostLocalID(t *testing.T) {
+	nodeSC := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{
+			SandboxID: "fleet:i-abc123:session-xyz",
+			Address:   "10.0.1.5:8082",
+		},
+	}
+	agentLoopSvc := &mockAgentService{
+		createResp: &agentapi.CreateAgentSessionResponse{SessionID: "loop-sess-2", State: "idle"},
+	}
+	orch, err := New(OrchestratorConfig{
+		NodeControl:      nodeSC,
+		AgentLoopService: agentLoopSvc,
+		SandboxHostAddrs: []string{"10.0.0.5:8082"},
+		CreateTimeout:    5 * time.Second,
+		ShutdownTimeout:  2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	resp, err := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{
+			Metadata: map[string]any{"placement_mode": "tools-sandbox"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	if agentLoopSvc.lastCreateReq == nil {
+		t.Fatal("AgentLoopService.CreateSession not called")
+	}
+	toolEnv := agentLoopSvc.lastCreateReq.SessionConfig.ToolEnvironment
+	if toolEnv.SandboxHostAddr != "10.0.1.5:8082" {
+		t.Fatalf("ToolEnvironment.SandboxHostAddr = %q, want 10.0.1.5:8082", toolEnv.SandboxHostAddr)
+	}
+	if toolEnv.SandboxSessionID != "session-xyz" {
+		t.Fatalf("ToolEnvironment.SandboxSessionID = %q, want session-xyz", toolEnv.SandboxSessionID)
+	}
+	if resp.SessionID == "loop-sess-2" {
+		t.Fatal("SessionID should not be the backend ID")
+	}
+}
+
+func TestCreateSessionToolsSandboxCompensatesOnLoopFailure(t *testing.T) {
+	nodeSC := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "local-sess-42", Address: "/zfs/sessions/42"},
+	}
+	agentLoopSvc := &mockAgentService{
+		createErr: errors.New("max sessions exceeded"),
+	}
+	orch, err := New(OrchestratorConfig{
+		NodeControl:      nodeSC,
+		AgentLoopService: agentLoopSvc,
+		SandboxHostAddrs: []string{"10.0.0.5:8082"},
+		CreateTimeout:    5 * time.Second,
+		ShutdownTimeout:  2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{
+			Metadata: map[string]any{"placement_mode": "tools-sandbox"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if nodeSC.destroyCount != 1 {
+		t.Fatalf("DestroySandbox calls = %d, want 1", nodeSC.destroyCount)
+	}
+	if nodeSC.lastDestroyedSandboxID != "local-sess-42" {
+		t.Fatalf("destroyed sandbox ID = %q, want local-sess-42", nodeSC.lastDestroyedSandboxID)
+	}
+}
+
+func TestCreateSessionToolsSandboxDualIDTracking(t *testing.T) {
+	nodeSC := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{
+			SandboxID: "fleet:i-abc:sess-local-1",
+			Address:   "10.0.1.5:8082",
+		},
+	}
+	agentLoopSvc := &mockAgentService{
+		createResp: &agentapi.CreateAgentSessionResponse{SessionID: "loop-id-1", State: "idle"},
+	}
+	orch, err := New(OrchestratorConfig{
+		NodeControl:      nodeSC,
+		AgentLoopService: agentLoopSvc,
+		SandboxHostAddrs: []string{"10.0.0.5:8082"},
+		CreateTimeout:    5 * time.Second,
+		ShutdownTimeout:  2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	resp, err := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{
+			Metadata: map[string]any{"placement_mode": "tools-sandbox"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	entry, err := orch.getSessionEntry(resp.SessionID)
+	if err != nil {
+		t.Fatalf("getSessionEntry() error = %v", err)
+	}
+	if entry.sandboxID != "fleet:i-abc:sess-local-1" {
+		t.Fatalf("sandboxID = %q, want fleet:i-abc:sess-local-1", entry.sandboxID)
+	}
+	if entry.toolSessionID != "sess-local-1" {
+		t.Fatalf("toolSessionID = %q, want sess-local-1", entry.toolSessionID)
+	}
+}
+
+// --- extractHostLocalSessionID tests ---
+
+func TestExtractHostLocalSessionIDNode(t *testing.T) {
+	got := extractHostLocalSessionID("abc-123")
+	if got != "abc-123" {
+		t.Fatalf("got %q, want abc-123", got)
+	}
+}
+
+func TestExtractHostLocalSessionIDFleet(t *testing.T) {
+	got := extractHostLocalSessionID("fleet:i-abc:session-xyz")
+	if got != "session-xyz" {
+		t.Fatalf("got %q, want session-xyz", got)
+	}
+}
+
+func TestExtractHostLocalSessionIDFleetColonInSession(t *testing.T) {
+	got := extractHostLocalSessionID("fleet:i-abc:sess:with:colons")
+	if got != "sess:with:colons" {
+		t.Fatalf("got %q, want sess:with:colons", got)
+	}
+}
+
+// --- Pause/Resume tests ---
+
+func TestPauseSessionCallsSandboxControl(t *testing.T) {
+	nodeSC := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "sess-abc", Address: "/zfs/sessions/abc"},
+	}
+	agentLoopSvc := &mockAgentService{
+		createResp: &agentapi.CreateAgentSessionResponse{SessionID: "loop-1", State: "idle"},
+	}
+	orch, err := New(OrchestratorConfig{
+		NodeControl:      nodeSC,
+		AgentLoopService: agentLoopSvc,
+		SandboxHostAddrs: []string{"10.0.0.5:8082"},
+		CreateTimeout:    5 * time.Second,
+		ShutdownTimeout:  2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	resp, err := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{
+			Metadata: map[string]any{"placement_mode": "tools-sandbox"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	if err := orch.PauseSession(context.Background(), resp.SessionID); err != nil {
+		t.Fatalf("PauseSession() error = %v", err)
+	}
+	if nodeSC.pauseCount != 1 {
+		t.Fatalf("PauseSandbox calls = %d, want 1", nodeSC.pauseCount)
+	}
+	if nodeSC.lastPausedSandboxID != "sess-abc" {
+		t.Fatalf("paused sandbox ID = %q, want sess-abc", nodeSC.lastPausedSandboxID)
+	}
+	entry, _ := orch.getSessionEntry(resp.SessionID)
+	if entry.state != sessionPaused {
+		t.Fatalf("state = %q, want %q", entry.state, sessionPaused)
+	}
+}
+
+func TestResumeSessionSandboxRestoresActiveState(t *testing.T) {
+	nodeSC := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "sess-abc", Address: "/zfs/sessions/abc"},
+	}
+	agentLoopSvc := &mockAgentService{
+		createResp: &agentapi.CreateAgentSessionResponse{SessionID: "loop-1", State: "idle"},
+	}
+	orch, err := New(OrchestratorConfig{
+		NodeControl:      nodeSC,
+		AgentLoopService: agentLoopSvc,
+		SandboxHostAddrs: []string{"10.0.0.5:8082"},
+		CreateTimeout:    5 * time.Second,
+		ShutdownTimeout:  2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	resp, _ := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{
+			Metadata: map[string]any{"placement_mode": "tools-sandbox"},
+		},
+	})
+	_ = orch.PauseSession(context.Background(), resp.SessionID)
+	if err := orch.ResumeSessionSandbox(context.Background(), resp.SessionID); err != nil {
+		t.Fatalf("ResumeSessionSandbox() error = %v", err)
+	}
+	if nodeSC.resumeCount != 1 {
+		t.Fatalf("ResumeSandbox calls = %d, want 1", nodeSC.resumeCount)
+	}
+	entry, _ := orch.getSessionEntry(resp.SessionID)
+	if entry.state != sessionActive {
+		t.Fatalf("state = %q, want %q", entry.state, sessionActive)
+	}
+}
+
+func TestPauseSessionAgentDirectAbortsFirst(t *testing.T) {
+	directSC := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "direct:i-123", Address: "10.0.0.10:0"},
+		launchResp: &control.LaunchProcessResponse{ProcessID: "proc-1", Address: "10.0.0.10:8081", Status: control.ProcessRunning},
+	}
+	agentSvc := &mockAgentService{
+		createResp: &agentapi.CreateAgentSessionResponse{SessionID: "remote-1", State: "idle"},
+	}
+	orch := mustNewOrchestrator(t, directSC, agentSvc, 0)
+
+	resp, err := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{
+			Metadata: map[string]any{"placement_mode": "agent-direct"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	if err := orch.PauseSession(context.Background(), resp.SessionID); err != nil {
+		t.Fatalf("PauseSession() error = %v", err)
+	}
+	if agentSvc.lastAbortReq == nil {
+		t.Fatal("Abort was not called before pause")
+	}
+	if agentSvc.lastAbortReq.SessionID != "remote-1" {
+		t.Fatalf("Abort session ID = %q, want remote-1", agentSvc.lastAbortReq.SessionID)
+	}
+	if directSC.pauseCount != 1 {
+		t.Fatalf("PauseSandbox calls = %d, want 1", directSC.pauseCount)
+	}
+}
+
+func TestResumeSessionAgentDirectRelaunchesAgent(t *testing.T) {
+	directSC := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "direct:i-123", Address: "10.0.0.10:0"},
+		launchResp: &control.LaunchProcessResponse{ProcessID: "proc-1", Address: "10.0.0.10:8081", Status: control.ProcessRunning},
+	}
+	agentSvc := &mockAgentService{
+		createResp: &agentapi.CreateAgentSessionResponse{SessionID: "remote-1", State: "idle"},
+	}
+	var agentFactoryCalls int
+	orch, err := New(OrchestratorConfig{
+		DirectControl:   directSC,
+		CreateTimeout:   5 * time.Second,
+		ShutdownTimeout: 2 * time.Second,
+		AgentServiceFactory: func(_ string) (agentapi.AgentService, error) {
+			agentFactoryCalls++
+			return agentSvc, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	resp, _ := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{
+			Metadata: map[string]any{"placement_mode": "agent-direct"},
+		},
+	})
+	initialFactoryCalls := agentFactoryCalls
+
+	_ = orch.PauseSession(context.Background(), resp.SessionID)
+
+	directSC.launchResp = &control.LaunchProcessResponse{
+		ProcessID: "proc-2",
+		Address:   "10.0.0.10:8081",
+		Status:    control.ProcessRunning,
+	}
+	if err := orch.ResumeSessionSandbox(context.Background(), resp.SessionID); err != nil {
+		t.Fatalf("ResumeSessionSandbox() error = %v", err)
+	}
+	if directSC.resumeCount != 1 {
+		t.Fatalf("ResumeSandbox calls = %d, want 1", directSC.resumeCount)
+	}
+	if agentFactoryCalls != initialFactoryCalls+1 {
+		t.Fatalf("AgentServiceFactory calls = %d, want %d", agentFactoryCalls, initialFactoryCalls+1)
+	}
+	entry, _ := orch.getSessionEntry(resp.SessionID)
+	if entry.processID != "proc-2" {
+		t.Fatalf("processID = %q, want proc-2", entry.processID)
+	}
+	if entry.state != sessionActive {
+		t.Fatalf("state = %q, want active", entry.state)
+	}
+}
+
+func TestPauseNonActiveFails(t *testing.T) {
+	nodeSC := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "sess-abc", Address: "/zfs/sessions/abc"},
+	}
+	agentLoopSvc := &mockAgentService{
+		createResp: &agentapi.CreateAgentSessionResponse{SessionID: "loop-1", State: "idle"},
+	}
+	orch, err := New(OrchestratorConfig{
+		NodeControl:      nodeSC,
+		AgentLoopService: agentLoopSvc,
+		SandboxHostAddrs: []string{"10.0.0.5:8082"},
+		CreateTimeout:    5 * time.Second,
+		ShutdownTimeout:  2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	resp, _ := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{
+			Metadata: map[string]any{"placement_mode": "tools-sandbox"},
+		},
+	})
+	_ = orch.PauseSession(context.Background(), resp.SessionID)
+
+	err = orch.PauseSession(context.Background(), resp.SessionID)
+	if err == nil {
+		t.Fatal("expected error on double-pause")
+	}
+	var rpcErr *rpc.RPCError
+	if !errors.As(err, &rpcErr) || rpcErr.Code != rpc.CodeFailedPrecondition {
+		t.Fatalf("expected CodeFailedPrecondition, got %v", err)
+	}
+}
+
+func TestValidatePlacementToolsSandboxRequiresBothBackends(t *testing.T) {
+	orch, err := New(OrchestratorConfig{
+		NodeControl:     &mockSandboxControl{},
+		CreateTimeout:   5 * time.Second,
+		ShutdownTimeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	err = orch.validatePlacement(PlacementToolsSandbox)
+	if err == nil {
+		t.Fatal("expected error for tools-sandbox without AgentLoopService")
+	}
+}
+
+func TestValidatePlacementAgentSandboxRequiresNodeControl(t *testing.T) {
+	orch, err := New(OrchestratorConfig{
+		DirectControl:   &mockSandboxControl{},
+		CreateTimeout:   5 * time.Second,
+		ShutdownTimeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	err = orch.validatePlacement(PlacementAgentSandbox)
+	if err == nil {
+		t.Fatal("expected error for agent-sandbox without NodeControl")
+	}
 }

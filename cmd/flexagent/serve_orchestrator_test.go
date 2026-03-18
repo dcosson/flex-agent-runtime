@@ -121,7 +121,7 @@ func TestServeOrchestratorConfigValidateErrors(t *testing.T) {
 	}
 }
 
-func TestServeOrchestratorConfigValidateSandboxHostUnsupported(t *testing.T) {
+func TestServeOrchestratorConfigValidateSandboxHostAccepted(t *testing.T) {
 	cfg := serveOrchestratorConfig{
 		ListenAddr:           ":8080",
 		SandboxHostAddr:      "10.0.0.2:8080",
@@ -132,9 +132,8 @@ func TestServeOrchestratorConfigValidateSandboxHostUnsupported(t *testing.T) {
 		APIVersion:           "v1",
 		MinAPIVersion:        "v1",
 	}
-	err := cfg.validate()
-	if err == nil || !strings.Contains(err.Error(), "sandbox-host modes are not implemented") {
-		t.Fatalf("validate() error = %v, want sandbox-host unsupported", err)
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate() unexpected error: %v", err)
 	}
 }
 
