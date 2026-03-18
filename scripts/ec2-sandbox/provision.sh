@@ -17,7 +17,7 @@ Required:
 
 Options:
   --region <region>             AWS region (default: aws configure get region).
-  --instance-type <type>        Instance type (default: t3.large).
+  --instance-type <type>        Instance type (default: t4g.large).
   --volume-size-gb <gb>         Extra EBS size for ZFS pool (default: 80).
   --rpc-port <port>             Sandbox-host RPC port (default: 8080).
   --ssh-cidr <cidr>             CIDR allowed for SSH ingress (default: caller_ip/32).
@@ -32,7 +32,7 @@ Options:
 
 Notes:
   - Assumes AWS CLI credentials are already configured.
-  - Launches Ubuntu amd64, installs zfsutils-linux and runsc in user-data.
+  - Launches Ubuntu arm64 (Graviton), installs zfsutils-linux and runsc in user-data.
   - Creates pool/datasets: <pool>/bases, <pool>/sessions, and base snapshot
     <pool>/bases/default@initial.
 EOF
@@ -62,7 +62,7 @@ resolve_ubuntu_ami() {
 	local ami
 
 	for release in 24.04 22.04; do
-		parameter="/aws/service/canonical/ubuntu/server/${release}/stable/current/amd64/hvm/ebs-gp3/ami-id"
+		parameter="/aws/service/canonical/ubuntu/server/${release}/stable/current/arm64/hvm/ebs-gp3/ami-id"
 		ami="$(aws ssm get-parameter \
 			--region "$region" \
 			--name "$parameter" \
@@ -101,7 +101,7 @@ STATE_FILE="$ROOT_DIR/scripts/ec2-sandbox/.last_provision.env"
 
 REGION="$(aws configure get region 2>/dev/null || true)"
 REGION="${REGION:-us-east-1}"
-INSTANCE_TYPE="t3.large"
+INSTANCE_TYPE="t4g.large"
 VOLUME_SIZE_GB="80"
 RPC_PORT="8080"
 SSH_CIDR=""
@@ -411,7 +411,7 @@ if [[ "$SKIP_BINARY_DEPLOY" -eq 0 ]]; then
 	log "building flexagent binary for linux/amd64"
 	(
 		cd "$ROOT_DIR"
-		GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$tmp_bin" ./cmd/flexagent
+		GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o "$tmp_bin" ./cmd/flexagent
 	)
 
 	log "copying binary to instance"
@@ -470,7 +470,7 @@ Sandbox config:
   Base snapshot:  ${BASES_DATASET}/default@initial
 
 If you used --skip-binary-deploy, run:
-  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/flexagent ./cmd/flexagent
+  GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o /tmp/flexagent ./cmd/flexagent
   scp -i ${SSH_KEY_PATH} /tmp/flexagent ubuntu@${public_ip}:/tmp/flexagent
   ssh -i ${SSH_KEY_PATH} ubuntu@${public_ip} 'sudo install -m 0755 /tmp/flexagent /usr/local/bin/flexagent && sudo systemctl daemon-reload && sudo systemctl enable --now flexagent-sandbox-host'
 
