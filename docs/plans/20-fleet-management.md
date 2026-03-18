@@ -698,9 +698,67 @@ internal/
 
 ---
 
-## 10. Testing Strategy
+## 10. TLA+ Formal Specification
 
-### 10.1 Unit Tests
+The fleet control loop involves concurrent processes (multiple `CreateSandbox` callers, the control loop itself, drain/termination sequences) with subtle interleaving hazards. We use TLA+ to model-check the core concurrency properties and verify that no interleaving produces a safety violation.
+
+### 10.1 Specification Scope
+
+The TLA+ spec models the following concurrent interactions:
+
+- **Fleet control loop concurrency:** Multiple `CreateSandbox` callers racing with the control loop's scale-up and scale-down decisions. A caller may attempt to route to an instance that the control loop is concurrently deciding to drain or terminate.
+- **Drain/routing race:** A drain begins on an instance at the same moment a new session is being routed to it. The spec verifies that the routing decision and drain initiation are mutually exclusive with respect to the instance state.
+- **Warm pool maintenance racing with session assignment:** The control loop provisions new warm instances while callers are consuming warm instances. The spec checks that the warm pool invariant holds across all interleavings.
+- **Instance failure during active sessions:** An instance becomes unhealthy while it has active sessions. The spec verifies that the drain protocol completes correctly and no session is orphaned.
+
+### 10.2 Safety Properties (Invariants)
+
+The model checker verifies these invariants hold in every reachable state:
+
+1. **No routing to draining/terminating instances.** For every session `s`, the instance that `s` is assigned to must be in state `Ready` or `Active` — never `Draining` or `Terminating`.
+
+2. **Scale-down never terminates an instance with active sessions (without completing drain first).** An instance may transition to `Terminating` only if its session count is 0 or the drain timeout has been exceeded.
+
+3. **Warm pool floor.** While the number of instances is below `MaxInstances` and provisioning capacity is available, the number of idle (zero-session, non-draining) instances never drops below `WarmPoolTarget`.
+
+4. **Session-to-instance uniqueness.** Every session's `SandboxID` maps to exactly one instance. No two instances claim the same session.
+
+5. **Instance state exclusivity.** No instance is in two states simultaneously. The instance state is a total function from instance IDs to a single `InstanceState` value.
+
+### 10.3 Liveness Properties
+
+The model checker verifies these temporal properties (under fairness assumptions):
+
+1. **CreateSandbox eventually completes.** Every `CreateSandbox` call eventually returns a result (success or error). There is no deadlock between the scale-up path and the routing path.
+
+2. **Drain eventually terminates.** Every instance that enters the `Draining` state eventually reaches `Terminating`. The drain does not hang forever (enforced by `DrainTimeout`).
+
+3. **Scale-up fires under pressure.** If all instances are above the capacity headroom threshold, the control loop eventually initiates a scale-up (unless `MaxInstances` is reached).
+
+4. **Warm pool replenishment.** After a warm (idle) instance is activated by a `CreateSandbox` call, the control loop eventually provisions a replacement to restore the warm pool to `WarmPoolTarget` (unless `MaxInstances` is reached).
+
+### 10.4 Spec File Location
+
+- **Spec:** `specs/fleet_control.tla` — the TLA+ specification module.
+- **Model-checker config:** `specs/fleet_control_mc.cfg` — the TLC model checker configuration file specifying constants, invariants, and temporal properties.
+
+### 10.5 Key Modeling Decisions
+
+- **N instances, parameterized.** The model is parameterized over the number of instances. Start with `N = 3` for tractable state-space exploration. This is sufficient to exercise all pairwise interactions (routing contention, drain overlap, warm pool boundary).
+
+- **M concurrent callers, parameterized.** The number of concurrent `CreateSandbox` callers is a separate parameter. Start with `M = 2` to model the minimal concurrent contention case. Increasing to 3 or 4 is feasible for targeted checks.
+
+- **Cloud API calls abstracted as atomic transitions.** Actual AWS API calls (`RunInstances`, `TerminateInstances`, etc.) are modeled as atomic state transitions with nondeterministic success or failure. This avoids modeling network-level details while preserving the essential concurrency structure: the fleet manager's state may be stale relative to the cloud provider's actual state.
+
+- **Control loop as a separate process.** The control loop is modeled as its own TLA+ process that interleaves with the caller processes. It executes the six phases (health check, handle unhealthy, scale-up, scale-down, drain completion, provisioning completion) atomically per phase but interleaves between phases with caller actions.
+
+- **Time as a monotonic counter.** Real wall-clock time is abstracted to a monotonic integer counter. Cooldown durations (`IdleCooldown`, `DrainTimeout`, `ProvisionTimeout`) are expressed as counter thresholds. The counter advances nondeterministically, allowing TLC to explore all timing interleavings without modeling continuous time.
+
+---
+
+## 11. Testing Strategy
+
+### 11.1 Unit Tests
 
 All unit tests use a mock `InstanceProvisioner` and mock `SandboxClientFactory`. No cloud API calls or real instances.
 
@@ -759,7 +817,7 @@ All unit tests use a mock `InstanceProvisioner` and mock `SandboxClientFactory`.
 - StartInstance calls StartInstances and waits for running
 - DescribeInstance returns mapped status
 
-### 10.2 Integration Tests (Build-Tag Gated)
+### 11.2 Integration Tests (Build-Tag Gated)
 
 Integration tests that interact with real AWS resources are gated behind `//go:build integration`. They are not run in CI by default. They require AWS credentials and will provision real EC2 instances.
 
@@ -777,7 +835,7 @@ Tests to include:
 - Scale-down: create sandbox, destroy it, wait for idle cooldown, verify instance terminated
 - Health failure: stop sandbox-host on an instance, verify fleet detects and drains
 
-### 10.3 Test Doubles
+### 11.3 Test Doubles
 
 ```go
 // internal/sandbox/control/fleet/fleet_test.go
@@ -801,9 +859,9 @@ The `SandboxClientFactory` in tests returns a mock `SandboxService` that records
 
 ---
 
-## 11. Connected Components / Seams
+## 12. Connected Components / Seams
 
-### 11.1 Consumed Seams
+### 12.1 Consumed Seams
 
 | Seam | How Used |
 |------|----------|
@@ -813,7 +871,7 @@ The `SandboxClientFactory` in tests returns a mock `SandboxService` that records
 | `internal/rpc/client/` | `SandboxClient` constructor for creating RPC connections to sandbox-host instances |
 | AWS SDK v2 `ec2` package | Used by `EC2InstanceProvisioner` for instance lifecycle |
 
-### 11.2 Produced Seams
+### 12.2 Produced Seams
 
 | Seam | Description |
 |------|-------------|
@@ -821,11 +879,11 @@ The `SandboxClientFactory` in tests returns a mock `SandboxService` that records
 | `internal/sandbox/control/fleet/fleet.go` | `FleetSandboxControl` -- consumed by orchestrator as a `SandboxControl` implementation |
 | `internal/sandbox/control/fleet/ec2/ec2_provisioner.go` | `EC2InstanceProvisioner` -- first `InstanceProvisioner` implementation |
 
-### 11.3 Modified Seams
+### 12.3 Modified Seams
 
 No existing code is modified by this plan. `FleetSandboxControl` is a new `SandboxControl` implementation alongside `NativeSandboxControl` and `EC2DirectSandboxControl`. The orchestrator selects which implementation to use via configuration.
 
-### 11.4 Import Flow
+### 12.4 Import Flow
 
 ```
 cmd/flexagent (orchestrator)
@@ -847,7 +905,7 @@ Key invariant: `internal/sandbox/control/fleet` does NOT import `internal/sandbo
 
 ---
 
-## 12. Implementation Order
+## 13. Implementation Order
 
 1. **InstanceProvisioner interface + types** (`fleet/provisioner.go`, `fleet/config.go`)
    - Define `InstanceProvisioner`, `InstanceConfig`, `InstanceInfo`, `InstanceStatus`, `CloudInstanceState`
@@ -889,7 +947,7 @@ Key invariant: `internal/sandbox/control/fleet` does NOT import `internal/sandbo
 
 ---
 
-## 13. Open Questions
+## 14. Open Questions
 
 ### OQ1: Warm Pool Sizing
 
