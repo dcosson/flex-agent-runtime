@@ -5,7 +5,7 @@
 //	flexagent serve agent          — runs the agent loop server
 //	flexagent serve sandbox-host   — runs the sandbox-host service
 //	flexagent serve all            — runs agent + sandbox-host in-process
-//	flexagent serve orchestrator   — placeholder for future orchestrator
+//	flexagent serve orchestrator   — runs the orchestrator control-plane
 package main
 
 import (
@@ -58,7 +58,7 @@ Commands:
   serve agent          Start the agent loop RPC server
   serve sandbox-host   Start the sandbox-host service
   serve all            Start agent + sandbox-host in a single process
-  serve orchestrator   (placeholder) Start the orchestrator
+  serve orchestrator   Start the orchestrator
 
   help                 Show this help message
 
