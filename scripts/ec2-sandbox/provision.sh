@@ -564,6 +564,11 @@ Sandbox config:
   Bases dataset:  ${BASES_DATASET}
   Sessions ds:    ${SESSIONS_DATASET}
   Base snapshot:  ${BASES_DATASET}/default@initial
+
+  ┌─────────────────────────────────────────────────────┐
+  │  SANDBOX_HOST_ADDR=${private_ip}:${RPC_PORT}        │
+  │  Use this when configuring the orchestrator.        │
+  └─────────────────────────────────────────────────────┘
 EOF
 fi
 
