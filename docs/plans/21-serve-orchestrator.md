@@ -81,10 +81,20 @@ graph TB
 1. **Connect to sandbox-host(s) at startup**, detect capabilities via `SandboxControl.Capabilities()`.
 2. **Expose RPC API** that implements `AgentService` interface to clients.
 3. **On CreateSession**: accept placement mode from client, create sandbox via appropriate SandboxControl, launch agent process (for agent-direct and agent-sandbox modes) or run agent loop in-process (tools-sandbox mode), proxy all subsequent requests.
-4. **Session lifecycle**: pause/resume/destroy propagate to both agent and sandbox layers.
-5. **Health monitoring** of sandbox-host connections and remote agent processes.
+4. **Session identity ownership**: orchestrator owns client-visible session IDs and translates to backend IDs for every proxied call.
+5. **Session lifecycle**: pause/resume/destroy propagate to both agent and sandbox layers.
+6. **Health monitoring** of sandbox-host connections and remote agent processes.
 
-### 2.3 Three Placement Modes
+### 2.3 Fleet Scope Decision
+
+`FleetSandboxControl` is already implemented and is in scope for this plan.
+
+- If one `--sandbox-host-addr` is configured, orchestrator uses `NodeSandboxControl`.
+- If multiple `--sandbox-host-addr` values are configured, orchestrator uses `FleetSandboxControl`.
+
+Reason: tools-sandbox must persist host identity per session for correct routing and health accounting, and Fleet already provides this abstraction.
+
+### 2.4 Three Placement Modes
 
 Placement mode is per-session, not per-orchestrator. A single orchestrator can serve all three modes concurrently, provided it has the required backends configured.
 
@@ -234,6 +244,7 @@ CLI flags for `flexagent serve orchestrator`:
 | `--agent-max-sessions` | `ORCHESTRATOR_AGENT_MAX_SESSIONS` | `0` | Max concurrent in-process agent sessions for tools-sandbox mode |
 | `--shutdown-timeout` | `FLEXAGENT_SHUTDOWN_TIMEOUT` | `30s` | Graceful shutdown drain period |
 | `--health-check-interval` | `ORCHESTRATOR_HEALTH_INTERVAL` | `15s` | Interval for health checks on remote agents and sandbox-hosts |
+| `--create-session-timeout` | `ORCHESTRATOR_CREATE_TIMEOUT` | `3m` | Max time for provisioning + launch + backend CreateSession |
 | `--auth-token` | `FLEXAGENT_AUTH_TOKEN` | (none) | Bearer auth token for client connections |
 | `--rpc-max-message-bytes` | `FLEXAGENT_RPC_MAX_MESSAGE_BYTES` | `16MB` | Max RPC message size |
 | `--api-version` | `FLEXAGENT_API_VERSION` | `v1` | Advertised API version |
@@ -250,12 +261,12 @@ Mode availability is determined by which backends are configured:
 // Orchestrator manages agent sessions across placement modes.
 type Orchestrator struct {
     mu       sync.Mutex
-    sessions map[string]*sessionEntry
+    sessions map[string]*sessionEntry // clientSessionID -> entry
     closing  bool
 
     // Placement backends (nil if not configured)
     directControl  control.SandboxControl  // DirectSandboxControl for agent-direct
-    nodeControl    control.SandboxControl  // NodeSandboxControl for agent-sandbox + tools-sandbox
+    nodeControl    control.SandboxControl  // Node/Fleet control for agent-sandbox + tools-sandbox
 
     // In-process agent loop for tools-sandbox mode
     agentLoopService *agent.AgentLoopService
@@ -264,6 +275,7 @@ type Orchestrator struct {
     config           OrchestratorConfig
     logger           *slog.Logger
     healthInterval   time.Duration
+    createTimeout    time.Duration
     shutdownTimeout  time.Duration
 
     // Health monitor
@@ -290,10 +302,13 @@ type sessionEntry struct {
     mu sync.Mutex
 
     sessionID     string
+    remoteSessionID string        // backend agent session ID; may differ
     placement     PlacementMode
     sandboxID     string           // from SandboxControl.CreateSandbox
     processID     string           // from SandboxControl.LaunchProcess (empty for tools-sandbox)
     sandboxControl control.SandboxControl // which SandboxControl manages this session's sandbox
+    sandboxHostAddr string         // host:port used for tools-sandbox dispatch and host health checks
+    sandboxHostID   string         // stable host key (fleet instance ID or single-node key)
 
     // The AgentService for this session -- either an AgentServiceClient (remote)
     // or the local AgentLoopService (tools-sandbox)
@@ -319,11 +334,16 @@ const (
 
 ### 3.5 CreateSession Flow
 
-The orchestrator implements `AgentService.CreateSession`. The request includes placement mode via a metadata field (to avoid changing the existing `CreateAgentSessionRequest` type for this initial implementation, though a dedicated field should be added in a follow-up).
+The orchestrator implements `AgentService.CreateSession`. Placement mode is read from `req.SessionConfig.Metadata["placement_mode"]` (to avoid changing API types in this initial implementation).
+
+Client-visible session IDs are generated and owned by the orchestrator. Backend session IDs are tracked as `entry.remoteSessionID`.
 
 ```go
 func (o *Orchestrator) CreateSession(ctx context.Context, req *agentapi.CreateAgentSessionRequest) (*agentapi.CreateAgentSessionResponse, error) {
-    placement := placementFromMetadata(req.Metadata)
+    placement := placementFromMetadata(req.SessionConfig.Metadata)
+    clientSessionID := generateSessionID()
+    createCtx, cancel := context.WithTimeout(context.Background(), o.createTimeout)
+    defer cancel()
 
     // 1. Validate placement is supported
     if err := o.validatePlacement(placement); err != nil {
@@ -332,20 +352,25 @@ func (o *Orchestrator) CreateSession(ctx context.Context, req *agentapi.CreateAg
 
     // 2. Create session entry
     entry := &sessionEntry{
-        sessionID: generateSessionID(),
+        sessionID: clientSessionID,
         placement: placement,
         state:     sessionCreating,
         createdAt: time.Now(),
     }
 
+    // Backend gets orchestrator-owned ID when explicit IDs are supported.
+    createReq := *req
+    createReq.SessionConfig = req.SessionConfig
+    createReq.SessionConfig.SessionID = clientSessionID
+
     // 3. Route to placement-specific creation
     switch placement {
     case PlacementAgentDirect:
-        return o.createAgentDirectSession(ctx, entry, req)
+        return o.createAgentDirectSession(createCtx, entry, &createReq)
     case PlacementAgentSandbox:
-        return o.createAgentSandboxSession(ctx, entry, req)
+        return o.createAgentSandboxSession(createCtx, entry, &createReq)
     case PlacementToolsSandbox:
-        return o.createToolsSandboxSession(ctx, entry, req)
+        return o.createToolsSandboxSession(createCtx, entry, &createReq)
     }
 }
 ```
@@ -365,9 +390,10 @@ Both agent-direct and agent-sandbox follow the same pattern -- they differ only 
        ExposePort: 8081,
    })
 4. agentClient := client.NewAgentServiceClient(httpClient, process.Address, clientCfg)
-5. resp := agentClient.CreateSession(ctx, req)
+5. resp := agentClient.CreateSession(ctx, req) // req.SessionConfig.SessionID is clientSessionID
 6. entry.sandboxID = sandbox.SandboxID
    entry.processID = process.ProcessID
+   entry.remoteSessionID = resp.SessionID
    entry.agentService = agentClient
    entry.sandboxControl = sc
    entry.state = sessionActive
@@ -380,18 +406,21 @@ On failure at any step, previously created resources are cleaned up (destroy san
 #### createToolsSandboxSession
 
 ```
-1. sc := o.nodeControl
-2. sandbox := sc.CreateSandbox(ctx, sandboxReq)  // for tool execution filesystem
+1. host := o.selectToolsSandboxHost() // returns {hostID, hostAddr, sandboxControl}
+2. sandbox := host.sandboxControl.CreateSandbox(ctx, sandboxReq)  // for tool execution filesystem
 3. sessionCfg := req.SessionConfig
    sessionCfg.ToolEnvironment = agentapi.ToolEnvironmentConfig{
        Type:             agentapi.ToolEnvSandbox,
-       SandboxHostAddr:  sandboxHostAddr,
+       SandboxHostAddr:  host.hostAddr,
        SandboxSessionID: sandbox.SandboxID,
    }
 4. resp := o.agentLoopService.CreateSession(ctx, &agentapi.CreateAgentSessionRequest{SessionConfig: sessionCfg})
 5. entry.sandboxID = sandbox.SandboxID
+   entry.remoteSessionID = resp.SessionID
    entry.agentService = o.agentLoopService
-   entry.sandboxControl = sc
+   entry.sandboxControl = host.sandboxControl
+   entry.sandboxHostAddr = host.hostAddr
+   entry.sandboxHostID = host.hostID
    entry.state = sessionActive
 6. o.registerSession(entry)
 7. return resp
@@ -399,7 +428,11 @@ On failure at any step, previously created resources are cleaned up (destroy san
 
 ### 3.6 Proxy Behavior
 
-The orchestrator implements the full `AgentService` interface. For each method, it looks up the session entry and delegates to the entry's `agentService`:
+The orchestrator implements the full `AgentService` interface. For each method, it:
+1) looks up the session entry by client session ID,
+2) rewrites request session IDs to `entry.remoteSessionID`,
+3) delegates to `entry.agentService`,
+4) rewrites response/event session IDs back to `entry.sessionID`.
 
 | Method | Behavior |
 |--------|----------|
@@ -415,9 +448,9 @@ The orchestrator implements the full `AgentService` interface. For each method, 
 | `ResumeSession` | Placement routing similar to CreateSession (re-provision sandbox if needed) |
 | `DestroySession` | Destroy agent session, then destroy sandbox (see below) |
 
-#### Stream Proxying
+#### Stream Proxying and Event Fidelity
 
-For streaming methods (SendMessage, Continue, SubscribeEvents), the orchestrator receives an `EventReceiver` from the backend `AgentService` and wraps it in a new `EventReceiver` that the RPC transport sends to the client. This is a straightforward pass-through -- no event transformation is needed.
+For streaming methods (SendMessage, Continue, SubscribeEvents), the orchestrator wraps backend `EventReceiver` with a rewriting receiver. Only `SessionID` is rewritten; all other event fields are forwarded unchanged.
 
 ```go
 func (o *Orchestrator) SendMessage(ctx context.Context, req *agentapi.SendMessageRequest) (agentapi.EventReceiver, error) {
@@ -425,28 +458,32 @@ func (o *Orchestrator) SendMessage(ctx context.Context, req *agentapi.SendMessag
     if err != nil {
         return nil, err
     }
-    return entry.agentService.SendMessage(ctx, req)
+    backendReq := *req
+    backendReq.SessionID = entry.remoteSessionID
+    recv, err := entry.agentService.SendMessage(ctx, &backendReq)
+    if err != nil {
+        return nil, err
+    }
+    return newSessionIDRewritingReceiver(recv, entry.sessionID), nil
 }
 ```
 
-For remote agents (`AgentServiceClient`), this means the orchestrator has two RPC hops: client -> orchestrator -> remote agent. The `EventReceiver` from `AgentServiceClient` already handles the ConnectRPC server-stream-to-Go-interface conversion, so the orchestrator just passes it through.
+For remote agents (`AgentServiceClient`), this means two RPC hops: client -> orchestrator -> remote agent, with explicit ID translation at the orchestrator boundary.
 
 ### 3.7 DestroySession Flow
 
-Destruction is ordered: stop the agent first, then tear down the sandbox.
+Destruction is ordered but best-effort and idempotent: every step is attempted with bounded timeout, and non-fatal errors are aggregated.
 
 ```
 1. entry := o.getSession(sessionID)
-2. entry.agentService.DestroySession(ctx, req)
-3. if entry.processID != "" {
-       entry.sandboxControl.KillProcess(ctx, KillProcessRequest{...})
-   }
-4. entry.sandboxControl.DestroySandbox(ctx, entry.sandboxID)
-5. if agentClient, ok := entry.agentService.(*client.AgentServiceClient); ok {
-       agentClient.Close()
-   }
-6. entry.state = sessionDestroyed
-7. o.unregisterSession(sessionID)
+2. For each step, use `context.WithTimeout(context.Background(), stepTimeout)`:
+   a. `entry.agentService.DestroySession(remoteSessionID)` (ignore not-found)
+   b. `KillProcess` when `processID != ""` (ignore not-found/already-exited)
+   c. `DestroySandbox` (ignore not-found)
+   d. close `AgentServiceClient` when applicable
+3. mark `entry.state = sessionDestroyed`
+4. unregister session even if some cleanup steps fail
+5. return aggregated error only when non-ignorable errors remain
 ```
 
 ### 3.8 Pause/Resume
@@ -461,10 +498,11 @@ Pause and resume propagate to both the agent layer and the sandbox layer:
 
 **Resume:**
 1. Call `entry.sandboxControl.ResumeSandbox(entry.sandboxID)`
-2. For agent-direct (lossy pause): re-launch the agent process via `LaunchProcess()`, create a new `AgentServiceClient`, call `ResumeSession` to restore conversation state
-3. For agent-sandbox (non-lossy pause): the process should still be running inside the resumed sandbox; verify via health check
-4. For tools-sandbox: the in-process agent loop is still alive; just resume the sandbox for tool execution
-5. Update `entry.state = sessionActive`
+2. For agent-direct (lossy pause): re-launch the agent process and reconnect `entry.agentService`
+3. Conversation-log source for `AgentService.ResumeSession` is always caller-provided (`ResumeSessionRequest.ConversationLog`); orchestrator only rewrites IDs and forwards
+4. For agent-sandbox (non-lossy pause): the process should still be running inside the resumed sandbox; verify via health check
+5. For tools-sandbox: the in-process agent loop is still alive; just resume the sandbox for tool execution
+6. Update `entry.state = sessionActive`
 
 ### 3.9 Health Monitoring
 
@@ -478,7 +516,8 @@ A background goroutine periodically checks the health of remote agents and sandb
 - If process exited: report to client via next event subscription
 
 **For sandbox-hosts:**
-- HTTP GET to `{sandboxHostAddr}/health` endpoint
+- Node mode: RPC `SandboxService.HealthCheck` against the configured host.
+- Fleet mode: use Fleet control-loop health + per-instance health state.
 - On failure: log warning, mark all sessions on that host as unhealthy
 - On recovery: re-check individual sessions
 
@@ -536,9 +575,10 @@ func runServeOrchestrator(args []string) {
     var sandboxHostAddrs []string
     if cfg.SandboxHostAddr != "" {
         sandboxHostAddrs = strings.Split(cfg.SandboxHostAddr, ",")
-        // For single sandbox-host, use NodeSandboxControl directly
-        // For multiple, use FleetSandboxControl (future, or just pick first for now)
-        nodeControl = buildNodeControl(sandboxHostAddrs[0], cfg, logger)
+        // Explicit scope decision:
+        // - 1 host  -> NodeSandboxControl
+        // - N hosts -> FleetSandboxControl
+        nodeControl = buildNodeOrFleetControl(sandboxHostAddrs, cfg, logger)
     }
 
     // Build in-process AgentLoopService for tools-sandbox mode
@@ -559,6 +599,7 @@ func runServeOrchestrator(args []string) {
         AgentLoopService: agentLoopSvc,
         MaxSessions:      cfg.MaxSessions,
         HealthInterval:   cfg.HealthCheckInterval,
+        CreateTimeout:    cfg.CreateSessionTimeout,
         ShutdownTimeout:  cfg.ShutdownTimeout,
         Logger:           logger,
         SandboxHostAddrs: sandboxHostAddrs,
@@ -597,16 +638,16 @@ Key design point: the orchestrator implements `AgentService`, so it plugs direct
 
 ## 4. API Extension: Placement Mode
 
-The existing `CreateAgentSessionRequest` includes a `Metadata map[string]any` field. For the initial implementation, placement mode will be passed via metadata:
+The existing `CreateAgentSessionRequest` carries metadata under `SessionConfig.Metadata`. For the initial implementation, placement mode will be passed there:
 
 ```go
 // Client sets placement:
-req.Metadata = map[string]any{
+req.SessionConfig.Metadata = map[string]any{
     "placement_mode": "agent-sandbox",
 }
 ```
 
-The orchestrator reads `req.Metadata["placement_mode"]` and defaults to `"tools-sandbox"` if unset (safest default -- keeps agent loop in-process).
+The orchestrator reads `req.SessionConfig.Metadata["placement_mode"]` and defaults to `"tools-sandbox"` if unset.
 
 A follow-up task should add `PlacementMode` as a first-class field on `CreateAgentSessionRequest` / `SessionConfig` and deprecate the metadata approach. This avoids changing the API types in this initial wiring task.
 
@@ -621,6 +662,10 @@ A follow-up task should add `PlacementMode` as a first-class field on `CreateAge
 ### 5.2 Agent Launch Failure
 - Destroy the sandbox that was just created (cleanup)
 - Return error to client with `rpc.CodeInternal`
+
+### 5.2a Client Deadline/Cancel During CreateSession
+- Provisioning + cleanup run under orchestrator-owned bounded context (`--create-session-timeout`) so cleanup still executes even if client context is canceled.
+- Client still receives cancellation/deadline error from the original request path.
 
 ### 5.3 Agent Crash Mid-Session
 - Detected via health check (HTTP /health endpoint unreachable, or `GetProcessStatus` returns `ProcessExited`)
@@ -638,6 +683,11 @@ A follow-up task should add `PlacementMode` as a first-class field on `CreateAge
 - In the initial implementation, orchestrator restart loses all session state (sessions are in-memory only)
 - Future work: persist session registry to SQLite (as outlined in 18-agent-loop-rpc.md's discussion of RuntimeController), enabling recovery on restart by reconnecting to still-running sandboxes and agent processes
 
+### 5.6 Close()/Shutdown Semantics
+- `Close()` is idempotent.
+- First `Close()` call sets `closing=true`, rejects new sessions, stops health loop, waits in-flight operations, and runs best-effort teardown for all sessions.
+- Subsequent `Close()` calls return nil.
+
 ---
 
 ## 6. Implementation Tasks
@@ -653,6 +703,7 @@ A follow-up task should add `PlacementMode` as a first-class field on `CreateAge
 - `internal/orchestrator/config.go` -- `OrchestratorConfig`, validation, `placementFromMetadata()`
 - `cmd/flexagent/serve_orchestrator.go` -- replace placeholder with full CLI wiring
 - Unit tests with mock `SandboxControl` and mock `AgentServiceClient`
+- Session-ID translation helpers and tests (client session ID <-> remote session ID)
 
 **Why agent-direct first:** It is the simplest mode (no sandbox-host dependency, no in-process agent loop complexity). It exercises the full CreateSession -> proxy -> DestroySession lifecycle with real SandboxControl and AgentServiceClient interactions. If the proxy layer works for agent-direct, agent-sandbox is almost identical.
 
@@ -665,6 +716,7 @@ A follow-up task should add `PlacementMode` as a first-class field on `CreateAge
 - tools-sandbox creation flow (in-process `AgentLoopService` with `SandboxBackend` tool environment)
 - Pause/resume logic for all three modes, including lossy-pause handling for agent-direct
 - Config validation for sandbox-host connectivity
+- Explicit Node(single host)/Fleet(multi host) selection
 - Unit tests for agent-sandbox and tools-sandbox flows
 - Unit tests for pause/resume with mock SandboxControl
 
@@ -677,6 +729,7 @@ A follow-up task should add `PlacementMode` as a first-class field on `CreateAge
 - Unhealthy session state transitions and error surfacing
 - Integration with `GetProcessStatus` for agent crash detection
 - Graceful shutdown improvements (drain active sessions before exit)
+- Event fidelity verification tests for stream proxying
 - Unit tests with simulated health check failures
 - Integration test skeleton (can be run against real EC2 in a future CI step)
 
@@ -695,15 +748,23 @@ All orchestrator logic is unit-testable with mocks:
 Test cases:
 - CreateSession routes to correct placement backend based on metadata
 - CreateSession with unsupported placement returns error
+- CreateSession reads placement from `SessionConfig.Metadata` (not `req.Metadata`)
+- Client-facing session IDs remain stable when backend IDs differ
 - Proxy methods (SendMessage, Steer, etc.) delegate to the correct backend
 - Stream proxying passes through events correctly
+- Stream proxy rewrites only `SessionID` and preserves all non-ID fields after codec roundtrip
 - DestroySession cleans up sandbox and agent session in correct order
+- DestroySession continues teardown after partial failures and aggregates errors
 - Agent launch failure triggers sandbox cleanup
+- CreateSession failure at each step triggers compensation cleanup (sandbox created, process launched, backend session created)
 - Session lookup for nonexistent session returns CodeNotFound
 - ListSessions returns all active sessions
 - Max sessions limit is enforced
+- `agent-max-sessions` applies only to tools-sandbox (in-process loop)
 - Closing orchestrator rejects new sessions with CodeUnavailable
+- Close() is idempotent and waits for in-flight operations
 - Pause/resume propagates to sandbox and agent layers
+- ResumeSession forwards caller-provided conversation log with ID translation
 
 ### 7.2 Integration Test Skeleton
 
@@ -721,6 +782,8 @@ A test harness that can be run against real infrastructure (EC2 for agent-direct
 - Concurrent SendMessage to different sessions
 - DestroySession while SendMessage is streaming
 - Health check running concurrently with session operations
+- Client-canceled stream while backend stream is active does not leak goroutines
+- Client-canceled CreateSession during slow provisioning still performs bounded cleanup
 - Race detector (`make test-race`) must pass clean
 
 ---
@@ -728,8 +791,7 @@ A test harness that can be run against real infrastructure (EC2 for agent-direct
 ## 8. Future Work (Out of Scope)
 
 - **Persistent session registry**: SQLite-backed session state for orchestrator restart recovery (tracked as part of RuntimeController design in 00-architecture.md)
-- **FleetSandboxControl integration**: using `FleetSandboxControl` (plan 20) instead of a single `NodeSandboxControl` for multi-instance sandbox-host pools
-- **Multi-sandbox-host routing**: load-balancing across `--sandbox-host-addr` addresses (currently uses first address only)
+- **Advanced fleet routing policies**: weighted placement, AZ affinity/anti-affinity, and cost-aware host selection
 - **First-class PlacementMode field**: add `PlacementMode` to `CreateAgentSessionRequest` / `SessionConfig` instead of metadata
 - **Metrics/observability**: Prometheus metrics for session counts, placement mode distribution, sandbox creation latency, agent health status
 - **Client authentication/authorization**: per-session auth, role-based access control
