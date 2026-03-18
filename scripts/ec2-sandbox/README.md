@@ -3,7 +3,7 @@
 Provision disposable EC2 instances for flexagent. Supports two roles:
 
 - **sandbox-host**: ZFS + gVisor isolation, runs `flexagent serve sandbox-host`
-- **orchestrator**: Minimal setup, runs `flexagent serve all`
+- **orchestrator**: Minimal setup, runs `flexagent serve agent`
 
 ## Files
 
@@ -22,16 +22,19 @@ scripts/ec2-sandbox/provision.sh \
   --ssh-key-path ~/.ssh/flexagent-ec2-key.pem
 ```
 
-Provision an orchestrator:
+Provision an orchestrator (requires a running sandbox-host):
 
 ```bash
 scripts/ec2-sandbox/provision.sh \
   --flex-role orchestrator \
+  --sandbox-host-addr <sandbox-host-private-ip>:8080 \
   --key-name flexagent-ec2-key \
   --ssh-key-path ~/.ssh/flexagent-ec2-key.pem
 ```
 
-The script prints instance ID, public/private IPs, and RPC endpoint. For sandbox-host, it also prints ZFS pool and dataset info.
+The sandbox-host's private IP is printed by the provision script and saved in `.last_provision_sandbox-host.env`.
+
+The script prints instance ID, public/private IPs, and RPC endpoint. For sandbox-host, it also prints the `SANDBOX_HOST_ADDR` to use when provisioning the orchestrator.
 
 ## Teardown
 
@@ -112,16 +115,24 @@ Launched instances need **AmazonSSMManagedInstanceCore** so the SSM agent can re
 
 ## Connecting orchestrator to sandbox-host
 
-The provision script sets up each instance independently. To connect an orchestrator to a sandbox-host, SSH into the orchestrator and add the sandbox-host address to its config:
+The `--sandbox-host-addr` flag configures the orchestrator at provision time. Provision the sandbox-host first, then pass its private IP to the orchestrator:
 
 ```bash
-ssh -i ~/.ssh/flexagent-ec2-key.pem ubuntu@<orchestrator-public-ip>
-sudo vi /etc/default/flexagent-orchestrator
-# Add: SANDBOX_HOST_ADDR=<sandbox-host-private-ip>:8080
-sudo systemctl restart flexagent-orchestrator
+# 1. Provision sandbox-host (note the SANDBOX_HOST_ADDR in the output)
+AWS_PROFILE=flexagent-ec2 scripts/ec2-sandbox/provision.sh \
+  --flex-role sandbox-host \
+  --key-name flexagent-ec2-key \
+  --ssh-key-path ~/.ssh/flexagent-ec2-key.pem
+
+# 2. Provision orchestrator with the sandbox-host address
+AWS_PROFILE=flexagent-ec2 scripts/ec2-sandbox/provision.sh \
+  --flex-role orchestrator \
+  --sandbox-host-addr 172.31.x.x:8080 \
+  --key-name flexagent-ec2-key \
+  --ssh-key-path ~/.ssh/flexagent-ec2-key.pem
 ```
 
-Use the sandbox-host's **private IP** if both instances are in the same VPC (avoids NAT and is faster). The private IP is printed by the provision script and saved in `.last_provision_<role>.env`.
+Use the sandbox-host's **private IP** if both instances are in the same VPC (avoids NAT and is faster).
 
 ## Notes
 
