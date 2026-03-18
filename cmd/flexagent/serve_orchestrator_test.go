@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control/fleet"
 )
 
@@ -114,7 +116,7 @@ func TestServeOrchestratorConfigValidateErrors(t *testing.T) {
 		"create-session-timeout must be > 0",
 		"shutdown-timeout must be > 0",
 		"health-check-interval must be > 0",
-		"at least one backend must be configured",
+		"at least one backend must be configured: direct-host-addr, direct-ami-id, or sandbox-host",
 	}
 	for _, want := range checks {
 		if !strings.Contains(err.Error(), want) {
@@ -201,6 +203,111 @@ func TestBuildNodeOrFleetControlFleetModeRejectsMixedPorts(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "same port") {
 		t.Fatalf("buildNodeOrFleetControl() error = %v, want same-port validation", err)
+	}
+}
+
+func TestServeOrchestratorConfigValidateDirectHostAddrAccepted(t *testing.T) {
+	cfg := serveOrchestratorConfig{
+		ListenAddr:           ":8080",
+		DirectHostAddr:       "10.0.0.5:8081",
+		ShutdownTimeout:      30 * time.Second,
+		HealthCheckInterval:  15 * time.Second,
+		CreateSessionTimeout: 2 * time.Minute,
+		RPCMaxMessageBytes:   1024,
+		APIVersion:           "v1",
+		MinAPIVersion:        "v1",
+	}
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate() unexpected error: %v", err)
+	}
+}
+
+func TestServeOrchestratorConfigValidateDirectHostAddrAndAMIMutuallyExclusive(t *testing.T) {
+	cfg := serveOrchestratorConfig{
+		ListenAddr:                ":8080",
+		DirectHostAddr:            "10.0.0.5:8081",
+		DirectAMIID:               "ami-123",
+		DirectSubnetID:            "subnet-123",
+		DirectSecurityGroupIDsRaw: "sg-a",
+		ShutdownTimeout:           30 * time.Second,
+		HealthCheckInterval:       15 * time.Second,
+		CreateSessionTimeout:      2 * time.Minute,
+		RPCMaxMessageBytes:        1024,
+		APIVersion:                "v1",
+		MinAPIVersion:             "v1",
+	}
+	err := cfg.validate()
+	if err == nil {
+		t.Fatal("validate() expected error for mutual exclusion")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("validate() error = %v, want mutually-exclusive message", err)
+	}
+}
+
+func TestParseServeOrchestratorConfigDirectHostAddrFlag(t *testing.T) {
+	cfg := parseServeOrchestratorConfig([]string{
+		"-direct-host-addr", "10.0.0.5:8081",
+	})
+	if cfg.DirectHostAddr != "10.0.0.5:8081" {
+		t.Fatalf("DirectHostAddr = %q, want 10.0.0.5:8081", cfg.DirectHostAddr)
+	}
+}
+
+func TestStaticHostControlSandboxControl(t *testing.T) {
+	sc := newStaticHostControl("10.0.0.5:8081")
+	ctx := context.Background()
+
+	resp, err := sc.CreateSandbox(ctx, control.CreateSandboxRequest{})
+	if err != nil {
+		t.Fatalf("CreateSandbox() error = %v", err)
+	}
+	if resp.SandboxID != "static-host" {
+		t.Fatalf("CreateSandbox().SandboxID = %q, want static-host", resp.SandboxID)
+	}
+	if resp.Address != "10.0.0.5:8081" {
+		t.Fatalf("CreateSandbox().Address = %q, want 10.0.0.5:8081", resp.Address)
+	}
+
+	launchResp, err := sc.LaunchProcess(ctx, control.LaunchProcessRequest{SandboxID: "static-host"})
+	if err != nil {
+		t.Fatalf("LaunchProcess() error = %v", err)
+	}
+	if launchResp.Address != "10.0.0.5:8081" {
+		t.Fatalf("LaunchProcess().Address = %q, want 10.0.0.5:8081", launchResp.Address)
+	}
+	if launchResp.Status != control.ProcessRunning {
+		t.Fatalf("LaunchProcess().Status = %q, want running", launchResp.Status)
+	}
+
+	if err := sc.KillProcess(ctx, control.KillProcessRequest{}); err != nil {
+		t.Fatalf("KillProcess() error = %v", err)
+	}
+	if err := sc.DestroySandbox(ctx, "static-host"); err != nil {
+		t.Fatalf("DestroySandbox() error = %v", err)
+	}
+
+	statusResp, err := sc.GetProcessStatus(ctx, control.GetProcessStatusRequest{})
+	if err != nil {
+		t.Fatalf("GetProcessStatus() error = %v", err)
+	}
+	if statusResp.Status != control.ProcessRunning {
+		t.Fatalf("GetProcessStatus().Status = %q, want running", statusResp.Status)
+	}
+
+	if err := sc.PauseSandbox(ctx, "static-host"); err == nil {
+		t.Fatal("PauseSandbox() expected error")
+	}
+	if err := sc.ResumeSandbox(ctx, "static-host"); err == nil {
+		t.Fatal("ResumeSandbox() expected error")
+	}
+
+	caps := sc.Capabilities()
+	if !caps.LaunchProcess {
+		t.Fatal("Capabilities().LaunchProcess = false, want true")
+	}
+	if caps.Pause || caps.Snapshots || caps.Rollback {
+		t.Fatal("Capabilities() should not report Pause/Snapshots/Rollback")
 	}
 }
 

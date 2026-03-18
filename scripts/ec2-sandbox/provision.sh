@@ -30,7 +30,8 @@ Common options (all roles):
   --help                        Show this help.
 
 Orchestrator options (only with --flex-role orchestrator):
-  --sandbox-host-addr <host:port>  Sandbox-host private IP and port (required).
+  --sandbox-host-addr <host:port>  Sandbox-host private IP and port.
+  --direct-host-addr <host:port>   Pre-existing agent host for direct mode (skips EC2 provisioning).
 
 Sandbox-host options (only with --flex-role sandbox-host):
   --volume-size-gb <gb>         Extra EBS size for ZFS pool (default: 80).
@@ -240,6 +241,7 @@ private_ip="\$(curl -fsSL -H "X-aws-ec2-metadata-token: \${imds_token}" http://1
 cat >/etc/default/flexagent-orchestrator <<ENVVARS
 FLEXAGENT_LISTEN=:${RPC_PORT}
 ORCHESTRATOR_SANDBOX_HOST_ADDR=${SANDBOX_HOST_ADDR}
+ORCHESTRATOR_DIRECT_HOST_ADDR=${DIRECT_HOST_ADDR}
 ENVVARS
 
 cat >/etc/systemd/system/flexagent-orchestrator.service <<UNIT
@@ -287,6 +289,7 @@ DEFAULT_QUOTA_GB="20"
 KEY_NAME=""
 SSH_KEY_PATH=""
 SANDBOX_HOST_ADDR=""
+DIRECT_HOST_ADDR=""
 SKIP_BINARY_DEPLOY=0
 
 while [[ $# -gt 0 ]]; do
@@ -351,6 +354,10 @@ while [[ $# -gt 0 ]]; do
 		SANDBOX_HOST_ADDR="$2"
 		shift 2
 		;;
+	--direct-host-addr)
+		DIRECT_HOST_ADDR="$2"
+		shift 2
+		;;
 	--skip-binary-deploy)
 		SKIP_BINARY_DEPLOY=1
 		shift
@@ -376,8 +383,8 @@ require_cmd curl
 [[ -n "$KEY_NAME" ]] || die "--key-name is required"
 [[ -n "$SSH_KEY_PATH" ]] || die "--ssh-key-path is required"
 [[ -f "$SSH_KEY_PATH" ]] || die "ssh key not found: $SSH_KEY_PATH"
-if [[ "$FLEX_ROLE" == "orchestrator" && -z "$SANDBOX_HOST_ADDR" ]]; then
-	die "--sandbox-host-addr is required for orchestrator (e.g. 172.31.x.x:8080)"
+if [[ "$FLEX_ROLE" == "orchestrator" && -z "$SANDBOX_HOST_ADDR" && -z "$DIRECT_HOST_ADDR" ]]; then
+	die "orchestrator requires --sandbox-host-addr and/or --direct-host-addr"
 fi
 
 # Role-specific defaults

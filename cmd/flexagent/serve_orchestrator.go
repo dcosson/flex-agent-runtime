@@ -40,6 +40,7 @@ type serveOrchestratorConfig struct {
 
 	SandboxHostAddr string
 
+	DirectHostAddr            string
 	DirectAMIID               string
 	DirectSubnetID            string
 	DirectSecurityGroupIDsRaw string
@@ -68,6 +69,7 @@ func parseServeOrchestratorConfig(args []string) serveOrchestratorConfig {
 
 	fs.StringVar(&cfg.SandboxHostAddr, "sandbox-host-addr", envOrDefault("ORCHESTRATOR_SANDBOX_HOST_ADDR", ""), "comma-separated sandbox-host RPC addresses")
 
+	fs.StringVar(&cfg.DirectHostAddr, "direct-host-addr", envOrDefault("ORCHESTRATOR_DIRECT_HOST_ADDR", ""), "pre-existing host:port for agent-direct mode (skips EC2 provisioning)")
 	fs.StringVar(&cfg.DirectAMIID, "direct-ami-id", envOrDefault("ORCHESTRATOR_DIRECT_AMI_ID", ""), "AMI ID for direct mode")
 	fs.StringVar(&cfg.DirectSubnetID, "direct-subnet-id", envOrDefault("ORCHESTRATOR_DIRECT_SUBNET_ID", ""), "subnet ID for direct mode")
 	fs.StringVar(&cfg.DirectSecurityGroupIDsRaw, "direct-security-group-ids", envOrDefault("ORCHESTRATOR_DIRECT_SG_IDS", ""), "comma-separated security group IDs")
@@ -121,12 +123,16 @@ func (cfg serveOrchestratorConfig) validate() error {
 		errs = append(errs, fmt.Errorf("health-check-interval must be > 0"))
 	}
 
-	hasDirect := strings.TrimSpace(cfg.DirectAMIID) != ""
+	hasDirectHost := strings.TrimSpace(cfg.DirectHostAddr) != ""
+	hasDirectEC2 := strings.TrimSpace(cfg.DirectAMIID) != ""
 	hasSandboxHost := strings.TrimSpace(cfg.SandboxHostAddr) != ""
-	if !hasDirect && !hasSandboxHost {
-		errs = append(errs, fmt.Errorf("at least one backend must be configured: direct or sandbox-host"))
+	if !hasDirectHost && !hasDirectEC2 && !hasSandboxHost {
+		errs = append(errs, fmt.Errorf("at least one backend must be configured: direct-host-addr, direct-ami-id, or sandbox-host"))
 	}
-	if hasDirect {
+	if hasDirectHost && hasDirectEC2 {
+		errs = append(errs, fmt.Errorf("direct-host-addr and direct-ami-id are mutually exclusive"))
+	}
+	if hasDirectEC2 {
 		if strings.TrimSpace(cfg.DirectSubnetID) == "" {
 			errs = append(errs, fmt.Errorf("direct-subnet-id is required when direct-ami-id is set"))
 		}
@@ -151,7 +157,10 @@ func runServeOrchestrator(args []string) {
 
 	// Build DirectSandboxControl if direct mode is configured.
 	var directControl control.SandboxControl
-	if strings.TrimSpace(cfg.DirectAMIID) != "" {
+	if strings.TrimSpace(cfg.DirectHostAddr) != "" {
+		directControl = newStaticHostControl(cfg.DirectHostAddr)
+		logger.Info("using static direct host", "addr", cfg.DirectHostAddr)
+	} else if strings.TrimSpace(cfg.DirectAMIID) != "" {
 		dc, dcErr := buildDirectControl(context.Background(), cfg, logger)
 		if dcErr != nil {
 			logger.Error("failed to build direct sandbox control", "error", dcErr)
@@ -548,4 +557,60 @@ func (c *fleetNodeClientAdapter) HealthCheck(ctx context.Context) (*fleet.Health
 		Uptime:       resp.Uptime,
 		Errors:       append([]string(nil), resp.Errors...),
 	}, nil
+}
+
+// staticHostControl implements SandboxControl for a pre-existing host that
+// already has the agent running. It skips all provisioning — CreateSandbox
+// and LaunchProcess return the static address, and destroy/kill are no-ops.
+type staticHostControl struct {
+	addr string // host:port where the agent is listening
+}
+
+var _ control.SandboxControl = (*staticHostControl)(nil)
+
+func newStaticHostControl(addr string) *staticHostControl {
+	return &staticHostControl{addr: addr}
+}
+
+func (s *staticHostControl) CreateSandbox(_ context.Context, _ control.CreateSandboxRequest) (*control.CreateSandboxResponse, error) {
+	return &control.CreateSandboxResponse{
+		SandboxID: "static-host",
+		Address:   s.addr,
+	}, nil
+}
+
+func (s *staticHostControl) DestroySandbox(_ context.Context, _ string) error {
+	return nil // no-op: we don't own the host
+}
+
+func (s *staticHostControl) LaunchProcess(_ context.Context, req control.LaunchProcessRequest) (*control.LaunchProcessResponse, error) {
+	return &control.LaunchProcessResponse{
+		ProcessID: "static",
+		Address:   s.addr,
+		Status:    control.ProcessRunning,
+	}, nil
+}
+
+func (s *staticHostControl) KillProcess(_ context.Context, _ control.KillProcessRequest) error {
+	return nil // no-op: we don't own the process
+}
+
+func (s *staticHostControl) GetProcessStatus(_ context.Context, _ control.GetProcessStatusRequest) (*control.GetProcessStatusResponse, error) {
+	return &control.GetProcessStatusResponse{
+		Status: control.ProcessRunning,
+	}, nil
+}
+
+func (s *staticHostControl) PauseSandbox(_ context.Context, _ string) error {
+	return fmt.Errorf("pause not supported for static direct host")
+}
+
+func (s *staticHostControl) ResumeSandbox(_ context.Context, _ string) error {
+	return fmt.Errorf("resume not supported for static direct host")
+}
+
+func (s *staticHostControl) Capabilities() control.SandboxCapabilities {
+	return control.SandboxCapabilities{
+		LaunchProcess: true,
+	}
 }
