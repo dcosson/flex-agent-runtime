@@ -1583,3 +1583,30 @@ Findings from `docs/plans/20-fleet-management-review-coder-1-sea.md` and `docs/p
 | 45 | F14 | P1 | Direct `Close()` has no mechanism to wait for in-flight `CreateSandbox` | **Accepted (Plan 19 change).** Plan 19 updated with `closing` flag and `inflightWg` WaitGroup. No change needed in Plan 20 -- Fleet already handles this correctly. | -- |
 
 **All P0 and P1 findings resolved. All P2 findings resolved, acknowledged, or explicitly deferred with justification. All P3 findings resolved or deferred.**
+
+---
+
+## Completion Signoff
+
+- **Status**: Partial
+- **Date**: 2026-03-18
+- **Branch**: main
+- **Verified by**: coder-1-sea
+- **Completed items**:
+  - `InstanceProvisioner` shared contract package implemented in `internal/sandbox/control/instance/` with provider contract tests.
+  - `FleetSandboxControl` implemented with claim-slot routing, reconciliation, control loop phases, drain lifecycle, and close semantics.
+  - `EC2InstanceProvisioner` implemented under `internal/sandbox/control/fleet/ec2/`.
+  - TLA+ artifacts present at `specs/fleet_control.tla` and `specs/fleet_control_mc.cfg`.
+  - Extensive unit coverage exists across fleet core, control loop, routing, state machine, sandbox ID, and EC2 provisioner packages.
+  - Verification tests passed:
+    - `go test ./internal/sandbox/control/fleet/... ./internal/sandbox/control/instance/... -count=1` — PASS
+    - `go test -race ./internal/sandbox/control/fleet/... ./internal/sandbox/control/instance/... -count=1` — PASS
+- **Deviations**:
+  - [Contractual] `FleetStatus` contract drift vs section 15.3: plan specifies `FleetStatusResponse` including `WarmPoolSize` and `Healthy`, but implementation exposes `FleetStatus` with different fields (`Closed`, no `WarmPoolSize`/`Healthy`) in `internal/sandbox/control/fleet/fleet.go`.
+  - [Missing] Section 15.1 metrics instrumentation (`fleet_*` gauges/counters/histograms) is not implemented in `internal/sandbox/control/fleet/`.
+  - [Missing] Section 11.2 fleet-specific build-tag integration suite is not implemented under fleet package/test hierarchy.
+  - [Structural] Import flow in section 2.2/12.4 is now more decoupled than documented: fleet core uses injected `FleetNodeClient` factory rather than directly constructing RPC clients.
+- **Outstanding gaps**:
+  - Gap 1: Implement fleet observability metrics from section 15.1 (suggested follow-up bead: `aiag-20-signoff.metrics`).
+  - Gap 2: Align FleetStatus API with section 15.3 (either implement planned fields or update plan contract + callers consistently; suggested bead: `aiag-20-signoff.fleetstatus-contract`).
+  - Gap 3: Add the fleet integration test suite described in section 11.2 (suggested bead: `aiag-20-signoff.integration-tests`).

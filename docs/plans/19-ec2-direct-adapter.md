@@ -1170,3 +1170,23 @@ This table tracks every finding from both R1 reviews and their disposition.
 | F11 | No shared error taxonomy across adapters | P2 | **Noted for future work** | Added note to section 8.2 recommending shared sentinel errors in `internal/sandbox/control/errors.go` as a cross-cutting improvement. |
 | F13 | `Close()` not in `SandboxControl` interface | P2 | **Noted for future work** | Added note to section 3.11 documenting the limitation and tracking it as a cross-cutting improvement. |
 | F14 | Direct `Close()` has no mechanism to wait for in-flight `CreateSandbox` | P1 | **Accepted** | Added `closing bool` flag and `inflightWg sync.WaitGroup` to `DirectSandboxControl` struct. `CreateSandbox` checks `closing` at entry (step 0) and before storing state (step 8). `Close()` sets `closing` and waits on `inflightWg` before cleanup. Added `ErrDirectClosed` sentinel error. Added test cases for concurrent close+create scenarios. |
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-18
+- **Branch**: main
+- **Commit**: 72b5c42
+- **Verified by**: coder-1-sea
+- **Test verification**:
+  - `go test ./internal/sandbox/control/direct/... -count=1` — PASS
+  - `go test -race ./internal/sandbox/control/direct/... -count=1` — PASS
+- **Acceptance tests**: N/A (no explicit acceptance criteria section in this plan)
+- **Deviations from plan**:
+  - [Cosmetic] Package split differs slightly from the illustrative layout in section 10 (for example `Close()` lives in `close.go`, and `Capabilities()` is implemented in `direct.go` rather than a dedicated `capabilities.go` file).
+  - [Cosmetic] Internal `instanceStatus` constants use `provisioning/running/stopped` rather than the exact example set in section 3.1; external behavior and method contracts are unchanged.
+- **Structural deviations resolved**: None found
+- **Additions beyond plan**:
+  - Additional end-to-end mock lifecycle coverage in `e2e_lifecycle_test.go` (multi-process and pause/resume flows).
