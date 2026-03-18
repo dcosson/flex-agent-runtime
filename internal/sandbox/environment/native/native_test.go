@@ -280,6 +280,25 @@ func TestCreate_RPCError(t *testing.T) {
 	}
 }
 
+func TestAttachSession_Success(t *testing.T) {
+	svc := newMockService()
+	env := NewNativeSandboxEnvironment(svc, DefaultConfig(), slog.Default())
+	if err := env.AttachSession("attached-1"); err != nil {
+		t.Fatalf("AttachSession() error: %v", err)
+	}
+	if env.sessionID != "attached-1" {
+		t.Fatalf("sessionID = %q, want attached-1", env.sessionID)
+	}
+}
+
+func TestAttachSession_EmptySessionID(t *testing.T) {
+	svc := newMockService()
+	env := NewNativeSandboxEnvironment(svc, DefaultConfig(), slog.Default())
+	if err := env.AttachSession(""); err == nil {
+		t.Fatal("AttachSession() with empty session id should fail")
+	}
+}
+
 func TestPause_Success(t *testing.T) {
 	svc := newMockService()
 	env := createTestEnv(t, svc, "sess-1")
@@ -561,6 +580,19 @@ func TestExecuteTool_ResponseOnly(t *testing.T) {
 	}
 	if resp.ExitCode == nil || *resp.ExitCode != 0 {
 		t.Fatalf("exit code mismatch: %v", resp.ExitCode)
+	}
+}
+
+func TestExecuteTool_RequiresSessionInitialization(t *testing.T) {
+	svc := newMockService()
+	env := NewNativeSandboxEnvironment(svc, DefaultConfig(), slog.Default())
+
+	_, err := env.ExecuteTool(context.Background(), environment.ToolRequest{
+		ToolCallID: "tc-1",
+		ToolName:   "read_file",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected missing session initialization error")
 	}
 }
 

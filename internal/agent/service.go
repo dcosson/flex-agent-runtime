@@ -29,6 +29,9 @@ type EventPublisher interface {
 
 type ServiceOption func(*AgentLoopService)
 
+// ToolCatalogFactory builds the runtime tool catalog for a session.
+type ToolCatalogFactory func(cfg agentapi.SessionConfig) ([]AgentTool, error)
+
 // WithMaxSessions sets the maximum concurrent session count.
 // Zero means unlimited.
 func WithMaxSessions(n int) ServiceOption {
@@ -49,6 +52,16 @@ func WithCloseDrainTimeout(d time.Duration) ServiceOption {
 	}
 }
 
+// WithToolCatalogFactory configures how session tools are built from
+// SessionConfig. If nil, the default noop catalog is used.
+func WithToolCatalogFactory(factory ToolCatalogFactory) ServiceOption {
+	return func(s *AgentLoopService) {
+		if factory != nil {
+			s.toolFactory = factory
+		}
+	}
+}
+
 // AgentLoopService is the in-process implementation of agentapi.AgentService.
 type AgentLoopService struct {
 	mu        sync.Mutex
@@ -58,6 +71,7 @@ type AgentLoopService struct {
 	closed    bool
 
 	driverFactory func(name string, cfg DriverConfig) (AgentDriver, error)
+	toolFactory   ToolCatalogFactory
 
 	closeDrainTimeout time.Duration
 
@@ -88,6 +102,7 @@ func NewAgentLoopService(publisher EventPublisher, opts ...ServiceOption) *Agent
 		sessions:          make(map[string]*managedSession),
 		publisher:         publisher,
 		driverFactory:     NewDriver,
+		toolFactory:       defaultToolCatalogFactory,
 		closeDrainTimeout: defaultCloseDrainTimeout,
 	}
 	for _, opt := range opts {
@@ -491,18 +506,23 @@ func (s *AgentLoopService) Close() error {
 }
 
 func (s *AgentLoopService) newManagedSessionLocked(cfg agentapi.SessionConfig, conversation []AgentMessage) (*managedSession, error) {
-	if err := validateToolEnvironment(cfg.ToolEnvironment); err != nil {
-		return nil, err
-	}
 	model, err := ai.GetModel(cfg.Provider, cfg.Model)
 	if err != nil {
+		return nil, newServiceError(CodeInvalidArgument, err.Error(), err)
+	}
+	toolCatalog, err := s.toolFactory(cfg)
+	if err != nil {
+		var svcErr *ServiceError
+		if errors.As(err, &svcErr) {
+			return nil, svcErr
+		}
 		return nil, newServiceError(CodeInvalidArgument, err.Error(), err)
 	}
 
 	driverCfg := DriverConfig{
 		Model:        model,
 		SystemPrompt: cfg.SystemPrompt,
-		Tools:        buildNoopTools(cfg.Tools),
+		Tools:        toolCatalog,
 		Metadata: map[string]any{
 			"session_id": cfg.SessionID,
 			"provider":   cfg.Provider,
@@ -677,6 +697,13 @@ func validateToolEnvironment(cfg agentapi.ToolEnvironmentConfig) error {
 	default:
 		return newServiceError(CodeInvalidArgument, fmt.Sprintf("unknown tool environment type %q", cfg.Type), nil)
 	}
+}
+
+func defaultToolCatalogFactory(cfg agentapi.SessionConfig) ([]AgentTool, error) {
+	if err := validateToolEnvironment(cfg.ToolEnvironment); err != nil {
+		return nil, err
+	}
+	return buildNoopTools(cfg.Tools), nil
 }
 
 func buildNoopTools(names []string) []AgentTool {

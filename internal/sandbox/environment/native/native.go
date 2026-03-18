@@ -34,6 +34,18 @@ func NewNativeSandboxEnvironment(service api.SandboxService, config NativeSandbo
 	return &NativeSandboxEnvironment{service: service, logger: logger, config: config}
 }
 
+// AttachSession binds this environment to an existing sandbox session.
+// This is used when the orchestrator has already provisioned the sandbox and
+// only tool execution needs to be wired into an agent session.
+func (e *NativeSandboxEnvironment) AttachSession(sessionID string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	e.sessionID = sessionID
+	e.destroyed.Store(false)
+	return nil
+}
+
 func (e *NativeSandboxEnvironment) Create(ctx context.Context, config environment.SessionConfig) error {
 	if config.SessionID == "" {
 		return fmt.Errorf("session_id is required")
@@ -57,6 +69,9 @@ func (e *NativeSandboxEnvironment) Create(ctx context.Context, config environmen
 }
 
 func (e *NativeSandboxEnvironment) Pause(ctx context.Context) error {
+	if e.sessionID == "" {
+		return fmt.Errorf("native sandbox: pause: session is not initialized")
+	}
 	_, err := e.service.PauseSession(ctx, &api.PauseSessionRequest{SessionID: e.sessionID})
 	if err != nil {
 		return fmt.Errorf("native sandbox: pause: %w", err)
@@ -65,6 +80,9 @@ func (e *NativeSandboxEnvironment) Pause(ctx context.Context) error {
 }
 
 func (e *NativeSandboxEnvironment) Resume(ctx context.Context) error {
+	if e.sessionID == "" {
+		return fmt.Errorf("native sandbox: resume: session is not initialized")
+	}
 	_, err := e.service.ResumeSession(ctx, &api.ResumeSessionRequest{SessionID: e.sessionID})
 	if err != nil {
 		return fmt.Errorf("native sandbox: resume: %w", err)
@@ -76,6 +94,9 @@ func (e *NativeSandboxEnvironment) Destroy(ctx context.Context) error {
 	if e.destroyed.Load() {
 		return nil
 	}
+	if e.sessionID == "" {
+		return fmt.Errorf("native sandbox: destroy: session is not initialized")
+	}
 	_, err := e.service.DestroySession(ctx, &api.DestroySessionRequest{SessionID: e.sessionID})
 	if err != nil {
 		return fmt.Errorf("native sandbox: destroy: %w", err)
@@ -85,6 +106,9 @@ func (e *NativeSandboxEnvironment) Destroy(ctx context.Context) error {
 }
 
 func (e *NativeSandboxEnvironment) ExecuteTool(ctx context.Context, req environment.ToolRequest, onProgress func(environment.ToolProgress)) (*environment.ToolResponse, error) {
+	if e.sessionID == "" {
+		return nil, fmt.Errorf("native sandbox: execute tool: session is not initialized")
+	}
 	rpcReq := &api.ExecuteToolRequest{
 		SessionID:  e.sessionID,
 		ToolCallID: req.ToolCallID,
@@ -171,6 +195,9 @@ func (e *NativeSandboxEnvironment) CreateSnapshot(ctx context.Context, name stri
 	if e.config.StorageBackend != StorageBackendZFS {
 		return nil, environment.ErrCapabilityNotSupported
 	}
+	if e.sessionID == "" {
+		return nil, fmt.Errorf("native sandbox: create snapshot: session is not initialized")
+	}
 	resp, err := e.service.CreateSnapshot(ctx, &api.CreateSnapshotRequest{
 		SessionID: e.sessionID,
 		Name:      name,
@@ -189,6 +216,9 @@ func (e *NativeSandboxEnvironment) CreateSnapshot(ctx context.Context, name stri
 func (e *NativeSandboxEnvironment) Rollback(ctx context.Context, snapshotID string) error {
 	if e.config.StorageBackend != StorageBackendZFS {
 		return environment.ErrCapabilityNotSupported
+	}
+	if e.sessionID == "" {
+		return fmt.Errorf("native sandbox: rollback: session is not initialized")
 	}
 	_, err := e.service.RollbackSession(ctx, &api.RollbackSessionRequest{
 		SessionID:  e.sessionID,

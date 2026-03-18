@@ -555,6 +555,115 @@ func TestDualDeliveryBothStreamsReceiveEvents(t *testing.T) {
 	}
 }
 
+func TestDV1_StructuredAndTurnStreamsIndependent(t *testing.T) {
+	stack := newServiceTestStack(t)
+	if _, err := stack.createSession(context.Background(), "dual-view"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	sub, err := stack.svc.SubscribeEvents(context.Background(), &agentapi.SubscribeEventsRequest{SessionID: "dual-view"})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	firstTurn, err := stack.svc.SendMessage(context.Background(), &agentapi.SendMessageRequest{
+		SessionID: "dual-view",
+		Message:   "hello",
+	})
+	if err != nil {
+		t.Fatalf("send first: %v", err)
+	}
+
+	if err := sub.Close(); err != nil {
+		t.Fatalf("close subscriber: %v", err)
+	}
+
+	turnEvents := collectAllEvents(t, firstTurn)
+	if len(turnEvents) == 0 {
+		t.Fatalf("expected turn events")
+	}
+	turnCompleted := false
+	for _, evt := range turnEvents {
+		if evt.Type == agentapi.EventTurnCompleted {
+			turnCompleted = true
+			break
+		}
+	}
+	if !turnCompleted {
+		t.Fatalf("expected turn completed after closing session stream")
+	}
+
+	getResp, err := stack.svc.GetSession(context.Background(), &agentapi.GetAgentSessionRequest{SessionID: "dual-view"})
+	if err != nil {
+		t.Fatalf("get session after subscriber close: %v", err)
+	}
+	if getResp.SessionID != "dual-view" {
+		t.Fatalf("session id = %q, want dual-view", getResp.SessionID)
+	}
+	independentSub, err := stack.svc.SubscribeEvents(context.Background(), &agentapi.SubscribeEventsRequest{
+		SessionID: "dual-view",
+	})
+	if err != nil {
+		t.Fatalf("resubscribe after close: %v", err)
+	}
+	defer independentSub.Close()
+	evts := collectEventsWithTimeout(t, independentSub, 100*time.Millisecond)
+	if len(evts) == 0 {
+		t.Fatalf("expected at least initial state event on resubscribe")
+	}
+	if evts[0].SessionID != "dual-view" {
+		t.Fatalf("resubscribe event session = %q, want dual-view", evts[0].SessionID)
+	}
+}
+
+func TestDV2_EventStreamSurvivesSubscriberFailure(t *testing.T) {
+	stack := newServiceTestStack(t)
+	if _, err := stack.createSession(context.Background(), "survivor"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	sub, err := stack.svc.SubscribeEvents(context.Background(), &agentapi.SubscribeEventsRequest{SessionID: "survivor"})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	_ = sub.Close()
+
+	recv, err := stack.svc.SendMessage(context.Background(), &agentapi.SendMessageRequest{
+		SessionID: "survivor",
+		Message:   "hello",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	events := collectAllEvents(t, recv)
+	if len(events) == 0 {
+		t.Fatalf("expected turn events")
+	}
+
+	pubEvents := stack.publisher.EventsForSession("survivor")
+	if len(pubEvents) == 0 {
+		t.Fatalf("expected publisher events after subscriber failure")
+	}
+}
+
+func TestGS2_ForceShutdownAfterDeadline(t *testing.T) {
+	stack := newServiceTestStack(t, WithCloseDrainTimeout(25*time.Millisecond))
+
+	// Simulate a leaked in-flight turn to force the timeout path.
+	stack.svc.wg.Add(1)
+	defer stack.svc.wg.Done()
+
+	start := time.Now()
+	err := stack.svc.Close()
+	if err == nil {
+		t.Fatalf("expected close deadline exceeded error")
+	}
+	assertRPCCode(t, err, CodeDeadlineExceeded)
+	if elapsed := time.Since(start); elapsed < 25*time.Millisecond {
+		t.Fatalf("close returned before drain deadline: %s", elapsed)
+	}
+}
+
 type serviceTestStack struct {
 	svc       *AgentLoopService
 	publisher *mockEventPublisher

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	agentapi "github.com/anthropics/flex-agent-runtime/internal/agent/api"
 	"github.com/anthropics/flex-agent-runtime/internal/ai"
 )
 
@@ -165,6 +166,149 @@ func BenchmarkB4MemoryGrowthBound(b *testing.B) {
 	runtime.ReadMemStats(&after)
 	growth := int64(after.HeapAlloc) - int64(before.HeapAlloc)
 	b.ReportMetric(float64(growth)/(1024*1024), "heap_growth_mb")
+}
+
+func BenchmarkB5CodecConversionLatency(b *testing.B) {
+	benchmarkCodecConversion(b)
+}
+
+func BenchmarkCodecConversion(b *testing.B) {
+	benchmarkCodecConversion(b)
+}
+
+func BenchmarkB6SessionLookupUnderLoad(b *testing.B) {
+	benchmarkSessionLookup(b)
+}
+
+func BenchmarkSessionLookup(b *testing.B) {
+	benchmarkSessionLookup(b)
+}
+
+func benchmarkCodecConversion(b *testing.B) {
+	msg := sampleB5AgentMessage()
+
+	b.Run("AgentMessageToRecord", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := agentapi.AgentMessageToRecord(msg); err != nil {
+				b.Fatalf("AgentMessageToRecord failed: %v", err)
+			}
+		}
+	})
+
+	record, err := agentapi.AgentMessageToRecord(msg)
+	if err != nil {
+		b.Fatalf("seed conversion failed: %v", err)
+	}
+
+	b.Run("RecordToAgentMessage", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := agentapi.RecordToAgentMessage(record); err != nil {
+				b.Fatalf("RecordToAgentMessage failed: %v", err)
+			}
+		}
+	})
+}
+
+func benchmarkSessionLookup(b *testing.B) {
+	provider, modelID := pickAnyRegisteredModelForBench(b)
+	svc := NewAgentLoopService(nil)
+	factory := newMockDriverFactory()
+	svc.SetDriverFactory(factory.Create)
+	b.Cleanup(func() {
+		_ = svc.Close()
+	})
+
+	ctx := context.Background()
+	ids := make([]string, 100)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("bench-lookup-%03d", i)
+		_, err := svc.CreateSession(ctx, &agentapi.CreateAgentSessionRequest{
+			SessionConfig: agentapi.SessionConfig{
+				SessionID: ids[i],
+				Driver:    "mock",
+				Model:     modelID,
+				Provider:  provider,
+				Tools:     []string{"bash", "read_file"},
+				ToolEnvironment: agentapi.ToolEnvironmentConfig{
+					Type: agentapi.ToolEnvLocal,
+				},
+			},
+		})
+		if err != nil {
+			b.Fatalf("create session %q failed: %v", ids[i], err)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := svc.GetSession(ctx, &agentapi.GetAgentSessionRequest{
+			SessionID: ids[i%len(ids)],
+		}); err != nil {
+			b.Fatalf("GetSession failed: %v", err)
+		}
+	}
+}
+
+func sampleB5AgentMessage() agentapi.AgentMessage {
+	return agentapi.AgentMessage{
+		Turn:      7,
+		CreatedAt: time.Unix(1_711_111_111, 0).UTC(),
+		Message: &ai.AssistantMessage{
+			Content: []ai.ContentBlock{
+				&ai.ThinkingContent{
+					Thinking:          "inspect workspace and choose next action",
+					ThinkingSignature: "sig-think",
+				},
+				&ai.TextContent{
+					Text:          "I'll collect context first.",
+					TextSignature: "sig-text",
+				},
+				&ai.ToolCall{
+					ID:               "tool-1",
+					Name:             "read_file",
+					Arguments:        map[string]any{"path": "/tmp/bench.txt", "recursive": false},
+					ThoughtSignature: "sig-tool",
+				},
+			},
+			Model:      "bench-model",
+			StopReason: ai.StopReasonToolUse,
+			Usage: ai.Usage{
+				Input:       120,
+				Output:      48,
+				CacheRead:   8,
+				CacheWrite:  2,
+				TotalTokens: 178,
+				Cost: ai.UsageCost{
+					Input:      1.2,
+					Output:     0.8,
+					CacheRead:  0.1,
+					CacheWrite: 0.02,
+					Total:      2.12,
+				},
+			},
+			Timestamp: 1_711_111_112_000,
+		},
+	}
+}
+
+func pickAnyRegisteredModelForBench(b *testing.B) (provider string, modelID string) {
+	b.Helper()
+	providers := ai.GetModelProviders()
+	if len(providers) == 0 {
+		b.Fatal("no model providers registered")
+	}
+	for _, p := range providers {
+		models := ai.GetModels(p)
+		if len(models) == 0 {
+			continue
+		}
+		return p, models[0].ID
+	}
+	b.Fatal("no models registered")
+	return "", ""
 }
 
 func measureFirstDeltaDirect(prov *scriptedProvider) time.Duration {

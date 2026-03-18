@@ -50,6 +50,7 @@ func runServeAgent(args []string) {
 		nil, // publisher — wired externally when needed
 		agent.WithMaxSessions(cfg.MaxSessions),
 		agent.WithCloseDrainTimeout(cfg.ShutdownTimeout),
+		agent.WithToolCatalogFactory(newRuntimeToolCatalogFactory(logger)),
 	)
 
 	authHook := makeAuthHook(cfg.AuthToken)

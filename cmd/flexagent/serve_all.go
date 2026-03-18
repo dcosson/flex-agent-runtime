@@ -148,6 +148,7 @@ func runServeAll(args []string) {
 		nil,
 		agent.WithMaxSessions(cfg.AgentMaxSessions),
 		agent.WithCloseDrainTimeout(cfg.ShutdownTimeout),
+		agent.WithToolCatalogFactory(newRuntimeToolCatalogFactory(logger)),
 	)
 
 	// --- Sandbox-host service ---

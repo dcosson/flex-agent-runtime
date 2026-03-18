@@ -1527,13 +1527,13 @@ Review incorporated: `18-agent-loop-rpc-seam-review.md` (automated seam review).
 
 ## Completion Signoff
 
-- **Status:** Partial
+- **Status:** Complete
 - **Date:** 2026-03-17
 - **Epic:** aiag-rmv
-- **Task:** aiag-r3z.1
+- **Task:** aiag-r3z.3
 - **Branch:** main
 - **Verified by:** coder-1-sea
-- **Code verification:** `go test ./internal/agent/... ./internal/rpc/... ./internal/sandbox/control/... ./cmd/flexagent/... ./tests/integration/agent_rpc/... ./tests/integration/scenarios/... -count=1` (PASS)
+- **Code verification:** `make check` (PASS), `make test` (PASS)
 - **Race verification:** `go test -race ./internal/agent/... ./internal/rpc/... -count=1` (PASS)
 
 ### Contract Checklist
@@ -1555,10 +1555,10 @@ Review incorporated: `18-agent-loop-rpc-seam-review.md` (automated seam review).
 
 | Deviation | Class | Status |
 |---|---|---|
-| `CreateSession` flow in section 4 specifies `ExecutionEnvironment` construction from `ToolEnvironmentConfig` and tool wiring; current `AgentLoopService` rejects `ToolEnvSandbox` and installs noop tools (`buildNoopTools`). | Contractual | Open |
+| `CreateSession` flow in section 4 specifies `ExecutionEnvironment` construction from `ToolEnvironmentConfig` and tool wiring. | Contractual | Closed (`internal/agent/service.go`, `cmd/flexagent/tool_catalog_factory.go`, `internal/rpc/client/sandbox_service_client.go`) |
 | `AgentServiceClient` constructor shape differs from plan prose (`NewAgentServiceClient(baseURL, opts...)` vs actual `NewAgentServiceClient(httpClient, baseURL, transport.ClientConfig)`). | Structural | Accepted |
 | Section 7.1 flag examples (`--addr`, `--sandbox-host`, `--root-dir`) differ from current implementation flags (`--listen`, RPC/version/auth options). | Cosmetic | Accepted |
 
 ### Summary
 
-Plan 18 core RPC/service/sandbox-control architecture is implemented and verified by test + race runs. Completion remains **partial** due one open contractual gap in `AgentLoopService` tool-environment execution wiring.
+Plan 18 core RPC/service/sandbox-control architecture is implemented and verified by checks/tests. Completion is **complete**; the prior `CreateSession` tool-environment wiring contractual gap is now closed.
