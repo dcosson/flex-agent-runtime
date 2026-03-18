@@ -152,3 +152,23 @@ func TestInstanceProfileName(t *testing.T) {
 		t.Fatalf("instanceProfileName(raw) = %q, want my-profile", got)
 	}
 }
+
+func TestServeOrchestratorConfigValidateFleetModeRejected(t *testing.T) {
+	cfg := serveOrchestratorConfig{
+		ListenAddr:           ":8080",
+		SandboxHostAddr:      "host1:8082,host2:8082",
+		ShutdownTimeout:      30 * time.Second,
+		HealthCheckInterval:  15 * time.Second,
+		CreateSessionTimeout: 2 * time.Minute,
+		RPCMaxMessageBytes:   1024,
+		APIVersion:           "v1",
+		MinAPIVersion:        "v1",
+	}
+	err := cfg.validate()
+	if err == nil {
+		t.Fatal("validate() expected error for multiple sandbox-host addresses")
+	}
+	if !strings.Contains(err.Error(), "fleet mode") {
+		t.Fatalf("validate() error = %v, want fleet mode rejection", err)
+	}
+}

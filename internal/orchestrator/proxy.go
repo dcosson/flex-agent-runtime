@@ -58,7 +58,17 @@ func (o *Orchestrator) CreateSession(ctx context.Context, req *agentapi.CreateAg
 }
 
 func (o *Orchestrator) createAgentDirectSession(ctx context.Context, entry *sessionEntry, req *agentapi.CreateAgentSessionRequest) (*agentapi.CreateAgentSessionResponse, error) {
-	sc := o.config.DirectControl
+	return o.createRemoteAgentSession(ctx, entry, req, o.config.DirectControl)
+}
+
+func (o *Orchestrator) createAgentSandboxSession(ctx context.Context, entry *sessionEntry, req *agentapi.CreateAgentSessionRequest) (*agentapi.CreateAgentSessionResponse, error) {
+	return o.createRemoteAgentSession(ctx, entry, req, o.config.NodeControl)
+}
+
+// createRemoteAgentSession implements the shared creation flow for agent-direct
+// and agent-sandbox modes. Both follow the same pattern: create sandbox, launch
+// agent process, connect agent service, create backend session.
+func (o *Orchestrator) createRemoteAgentSession(ctx context.Context, entry *sessionEntry, req *agentapi.CreateAgentSessionRequest, sc control.SandboxControl) (*agentapi.CreateAgentSessionResponse, error) {
 	sandboxResp, err := sc.CreateSandbox(ctx, control.CreateSandboxRequest{
 		Labels: metadataStringLabels(req.SessionConfig.Metadata),
 	})
@@ -92,78 +102,6 @@ func (o *Orchestrator) createAgentDirectSession(ctx context.Context, entry *sess
 		_, destroyErr := agentService.DestroySession(ctx, &agentapi.DestroyAgentSessionRequest{SessionID: req.SessionConfig.SessionID})
 		cleanupErr := joinErrors(
 			destroyErr,
-			agentService.Close(),
-			sc.KillProcess(ctx, control.KillProcessRequest{SandboxID: sandboxResp.SandboxID, ProcessID: launchResp.ProcessID}),
-			sc.DestroySandbox(ctx, sandboxResp.SandboxID),
-		)
-		return nil, joinErrors(err, cleanupErr)
-	}
-
-	remoteSessionID := createResp.SessionID
-	if strings.TrimSpace(remoteSessionID) == "" {
-		remoteSessionID = req.SessionConfig.SessionID
-	}
-
-	entry.remoteSessionID = remoteSessionID
-	entry.sandboxID = sandboxResp.SandboxID
-	entry.processID = launchResp.ProcessID
-	entry.sandboxControl = sc
-	entry.sandboxHostAddr = sandboxResp.Address
-	entry.agentService = agentService
-	entry.state = sessionActive
-	entry.lastHealth = time.Now()
-
-	if err := o.addSession(entry); err != nil {
-		_, destroyErr := agentService.DestroySession(ctx, &agentapi.DestroyAgentSessionRequest{SessionID: remoteSessionID})
-		cleanupErr := joinErrors(
-			destroyErr,
-			agentService.Close(),
-			sc.KillProcess(ctx, control.KillProcessRequest{SandboxID: sandboxResp.SandboxID, ProcessID: launchResp.ProcessID}),
-			sc.DestroySandbox(ctx, sandboxResp.SandboxID),
-		)
-		return nil, joinErrors(err, cleanupErr)
-	}
-
-	resp := *createResp
-	resp.SessionID = entry.sessionID
-	return &resp, nil
-}
-
-func (o *Orchestrator) createAgentSandboxSession(ctx context.Context, entry *sessionEntry, req *agentapi.CreateAgentSessionRequest) (*agentapi.CreateAgentSessionResponse, error) {
-	sc := o.config.NodeControl
-	sandboxResp, err := sc.CreateSandbox(ctx, control.CreateSandboxRequest{
-		Labels: metadataStringLabels(req.SessionConfig.Metadata),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	launchResp, err := sc.LaunchProcess(ctx, control.LaunchProcessRequest{
-		SandboxID:  sandboxResp.SandboxID,
-		Binary:     o.config.AgentBinary,
-		Args:       o.agentLaunchArgs(),
-		Env:        cloneStringMap(o.config.AgentEnv),
-		ExposePort: o.config.AgentPort,
-	})
-	if err != nil {
-		cleanupErr := sc.DestroySandbox(ctx, sandboxResp.SandboxID)
-		return nil, joinErrors(err, cleanupErr)
-	}
-
-	agentService, err := o.config.AgentServiceFactory(launchResp.Address)
-	if err != nil {
-		cleanupErr := joinErrors(
-			sc.KillProcess(ctx, control.KillProcessRequest{SandboxID: sandboxResp.SandboxID, ProcessID: launchResp.ProcessID}),
-			sc.DestroySandbox(ctx, sandboxResp.SandboxID),
-		)
-		return nil, joinErrors(err, cleanupErr)
-	}
-
-	createResp, err := agentService.CreateSession(ctx, req)
-	if err != nil {
-		_, destroySessionErr := agentService.DestroySession(ctx, &agentapi.DestroyAgentSessionRequest{SessionID: req.SessionConfig.SessionID})
-		cleanupErr := joinErrors(
-			destroySessionErr,
 			agentService.Close(),
 			sc.KillProcess(ctx, control.KillProcessRequest{SandboxID: sandboxResp.SandboxID, ProcessID: launchResp.ProcessID}),
 			sc.DestroySandbox(ctx, sandboxResp.SandboxID),
@@ -296,6 +234,10 @@ func (o *Orchestrator) PauseSession(ctx context.Context, sessionID string) error
 	if err != nil {
 		return err
 	}
+
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
 	if entry.state != sessionActive {
 		return rpc.NewRPCError(rpc.CodeFailedPrecondition, fmt.Sprintf("session %q is %s, not active", sessionID, entry.state), nil)
 	}
@@ -326,6 +268,10 @@ func (o *Orchestrator) ResumeSessionSandbox(ctx context.Context, sessionID strin
 	if err != nil {
 		return err
 	}
+
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
 	if entry.state != sessionPaused {
 		return rpc.NewRPCError(rpc.CodeFailedPrecondition, fmt.Sprintf("session %q is %s, not paused", sessionID, entry.state), nil)
 	}
@@ -349,15 +295,20 @@ func (o *Orchestrator) ResumeSessionSandbox(ctx context.Context, sessionID strin
 		if err != nil {
 			return fmt.Errorf("re-launch agent after resume: %w", err)
 		}
-		entry.processID = launchResp.ProcessID
 
 		agentService, err := o.config.AgentServiceFactory(launchResp.Address)
 		if err != nil {
+			// Compensate: kill the orphaned process we just launched.
+			_ = entry.sandboxControl.KillProcess(ctx, control.KillProcessRequest{
+				SandboxID: entry.sandboxID,
+				ProcessID: launchResp.ProcessID,
+			})
 			return fmt.Errorf("reconnect agent after resume: %w", err)
 		}
 		if entry.agentService != nil {
 			_ = entry.agentService.Close()
 		}
+		entry.processID = launchResp.ProcessID
 		entry.agentService = agentService
 	}
 
@@ -537,6 +488,9 @@ func (o *Orchestrator) DestroySession(ctx context.Context, req *agentapi.Destroy
 }
 
 func (o *Orchestrator) destroySessionEntry(_ context.Context, entry *sessionEntry) (*agentapi.DestroyAgentSessionResponse, error) {
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
 	stepTimeout := o.config.ShutdownTimeout
 	if stepTimeout <= 0 {
 		stepTimeout = defaultShutdownTimeout

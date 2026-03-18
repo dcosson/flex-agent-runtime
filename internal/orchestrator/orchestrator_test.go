@@ -1141,6 +1141,65 @@ func TestValidatePlacementToolsSandboxRequiresBothBackends(t *testing.T) {
 	}
 }
 
+func TestResumeSessionAgentDirectFactoryFailureKillsOrphanProcess(t *testing.T) {
+	directSC := &mockSandboxControl{
+		createResp: &control.CreateSandboxResponse{SandboxID: "direct:i-123", Address: "10.0.0.10:0"},
+		launchResp: &control.LaunchProcessResponse{ProcessID: "proc-1", Address: "10.0.0.10:8081", Status: control.ProcessRunning},
+	}
+	agentSvc := &mockAgentService{
+		createResp: &agentapi.CreateAgentSessionResponse{SessionID: "remote-1", State: "idle"},
+	}
+	var factoryCallCount int
+	orch, err := New(OrchestratorConfig{
+		DirectControl:   directSC,
+		CreateTimeout:   5 * time.Second,
+		ShutdownTimeout: 2 * time.Second,
+		AgentServiceFactory: func(_ string) (agentapi.AgentService, error) {
+			factoryCallCount++
+			if factoryCallCount > 1 {
+				return nil, errors.New("factory failed on reconnect")
+			}
+			return agentSvc, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	resp, _ := orch.CreateSession(context.Background(), &agentapi.CreateAgentSessionRequest{
+		SessionConfig: agentapi.SessionConfig{
+			Metadata: map[string]any{"placement_mode": "agent-direct"},
+		},
+	})
+	_ = orch.PauseSession(context.Background(), resp.SessionID)
+
+	directSC.launchResp = &control.LaunchProcessResponse{
+		ProcessID: "proc-orphan",
+		Address:   "10.0.0.10:8081",
+		Status:    control.ProcessRunning,
+	}
+
+	err = orch.ResumeSessionSandbox(context.Background(), resp.SessionID)
+	if err == nil {
+		t.Fatal("expected error on factory failure")
+	}
+	if !strings.Contains(err.Error(), "reconnect agent after resume") {
+		t.Fatalf("error = %v, want reconnect failure", err)
+	}
+	// Verify the orphaned process was killed.
+	if directSC.lastKillReq.ProcessID != "proc-orphan" {
+		t.Fatalf("KillProcess processID = %q, want proc-orphan", directSC.lastKillReq.ProcessID)
+	}
+	if directSC.lastKillReq.SandboxID != "direct:i-123" {
+		t.Fatalf("KillProcess sandboxID = %q, want direct:i-123", directSC.lastKillReq.SandboxID)
+	}
+	// Verify original processID is preserved (not updated to orphan).
+	entry, _ := orch.getSessionEntry(resp.SessionID)
+	if entry.processID != "proc-1" {
+		t.Fatalf("processID = %q, want proc-1 (original, not orphan)", entry.processID)
+	}
+}
+
 func TestValidatePlacementAgentSandboxRequiresNodeControl(t *testing.T) {
 	orch, err := New(OrchestratorConfig{
 		DirectControl:   &mockSandboxControl{},

@@ -114,8 +114,12 @@ func (cfg serveOrchestratorConfig) validate() error {
 	}
 
 	hasDirect := strings.TrimSpace(cfg.DirectAMIID) != ""
-	if !hasDirect && strings.TrimSpace(cfg.SandboxHostAddr) == "" {
+	hasSandboxHost := strings.TrimSpace(cfg.SandboxHostAddr) != ""
+	if !hasDirect && !hasSandboxHost {
 		errs = append(errs, fmt.Errorf("at least one backend must be configured: direct or sandbox-host"))
+	}
+	if hasSandboxHost && len(splitCommaList(cfg.SandboxHostAddr)) > 1 {
+		errs = append(errs, fmt.Errorf("fleet mode (multiple sandbox-host addresses) is not yet supported"))
 	}
 	if hasDirect {
 		if strings.TrimSpace(cfg.DirectSubnetID) == "" {

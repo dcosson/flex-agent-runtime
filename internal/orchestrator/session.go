@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"fmt"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,7 +25,11 @@ const (
 )
 
 // sessionEntry tracks an active proxied session.
+// mu protects mutable fields (state, processID, agentService, lastHealth)
+// that may be accessed concurrently by the health monitor goroutine (bead 3).
 type sessionEntry struct {
+	mu sync.Mutex
+
 	sessionID       string
 	remoteSessionID string
 	placement       PlacementMode
