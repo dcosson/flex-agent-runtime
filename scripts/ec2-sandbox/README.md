@@ -51,6 +51,17 @@ scripts/ec2-sandbox/teardown.sh
 
 ## AWS Setup
 
+### Prerequisites
+
+Install the AWS CLI and log in:
+
+```bash
+brew install awscli
+aws configure  # enter your root or admin access key, region, and output format
+```
+
+If you don't have an access key yet, log into the AWS Console → click your account name (top right) → Security credentials → Access keys → Create access key.
+
 ### 1. Create an IAM user and attach policy
 
 ```bash
