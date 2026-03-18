@@ -432,16 +432,7 @@ if [[ "$FLEX_ROLE" == "sandbox-host" ]]; then
 	BASES_DATASET="${POOL_NAME}/bases"
 	SESSIONS_DATASET="${POOL_NAME}/sessions"
 	generate_sandbox_host_userdata >"$user_data_file"
-	BLOCK_DEVICE_MAPPINGS="--block-device-mappings [
-    {
-      \"DeviceName\":\"/dev/sdf\",
-      \"Ebs\":{
-        \"VolumeType\":\"gp3\",
-        \"VolumeSize\":${VOLUME_SIZE_GB},
-        \"DeleteOnTermination\":true
-      }
-    }
-  ]"
+	BLOCK_DEVICE_MAPPINGS="--block-device-mappings [{\"DeviceName\":\"/dev/sdf\",\"Ebs\":{\"VolumeType\":\"gp3\",\"VolumeSize\":${VOLUME_SIZE_GB},\"DeleteOnTermination\":true}}]"
 else
 	generate_orchestrator_userdata >"$user_data_file"
 fi
