@@ -127,6 +127,9 @@ chmod +x /usr/local/bin/runsc
 
 mkdir -p /var/lib/runsc /var/lib/flexagent/bundles /var/lib/flexagent/bases /var/lib/flexagent/sessions
 
+# Disable systemctl pager to avoid "terminal is not fully functional" warning
+echo 'export SYSTEMD_PAGER=""' >> /etc/profile.d/no-pager.sh
+
 if [[ ! -f /sys/fs/cgroup/cgroup.controllers ]]; then
   echo "warning: cgroup v2 controllers file not found; gVisor resource controls may be degraded" >&2
 fi
@@ -213,6 +216,9 @@ apt-get update
 apt-get install -y ca-certificates curl jq unzip git
 
 mkdir -p /var/lib/flexagent
+
+# Disable systemctl pager to avoid "terminal is not fully functional" warning
+echo 'export SYSTEMD_PAGER=""' >> /etc/profile.d/no-pager.sh
 
 private_ip="\$(curl -fsSL http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
 
