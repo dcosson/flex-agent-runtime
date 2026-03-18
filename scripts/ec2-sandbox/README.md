@@ -53,7 +53,7 @@ scripts/ec2-sandbox/teardown.sh
 
 ### Prerequisites
 
-Install the AWS CLI and log in:
+Install the AWS CLI and log in with root/admin credentials:
 
 ```bash
 brew install awscli
@@ -62,7 +62,22 @@ aws configure  # enter your root or admin access key, region, and output format
 
 If you don't have an access key yet, log into the AWS Console → click your account name (top right) → Security credentials → Access keys → Create access key.
 
-### 1. Create an IAM user and attach policy
+### 1. Create an EC2 key pair for SSH
+
+Run this with your root/admin credentials (no profile flag needed — key pairs are account-level):
+
+```bash
+aws ec2 create-key-pair \
+  --key-name flexagent-ec2-key \
+  --query 'KeyMaterial' \
+  --output text > ~/.ssh/flexagent-ec2-key.pem
+
+chmod 400 ~/.ssh/flexagent-ec2-key.pem
+```
+
+### 2. Create an IAM user and attach policy
+
+Still using root/admin credentials:
 
 ```bash
 aws iam create-user --user-name flexagent-ec2
@@ -76,25 +91,18 @@ aws iam attach-user-policy \
   --policy-arn arn:aws:iam::<ACCOUNT_ID>:policy/FlexAgentEC2Provisioning
 ```
 
-### 2. Create access key and configure profile
+### 3. Create access key and configure profile
 
 ```bash
 aws iam create-access-key --user-name flexagent-ec2
 aws configure --profile flexagent-ec2
 ```
 
-### 3. Create an EC2 key pair for SSH
-
-```bash
-aws ec2 create-key-pair \
-  --key-name flexagent-ec2-key \
-  --query 'KeyMaterial' \
-  --output text > ~/.ssh/flexagent-ec2-key.pem
-
-chmod 400 ~/.ssh/flexagent-ec2-key.pem
-```
+Enter the access key ID and secret from the output above. Use the same region as your default profile.
 
 ### 4. Run scripts with the profile
+
+From here on, use the scoped-down profile:
 
 ```bash
 AWS_PROFILE=flexagent-ec2 scripts/ec2-sandbox/provision.sh \
