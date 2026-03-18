@@ -137,6 +137,7 @@ func (m *mockNodeClient) HealthCheck(ctx context.Context) (*HealthCheckResult, e
 type mockProvisioner struct {
 	launchFn    func(ctx context.Context, cfg instance.InstanceConfig) (*instance.InstanceInfo, error)
 	terminateFn func(ctx context.Context, id string) error
+	listFn      func(ctx context.Context, filter instance.InstanceFilter) ([]instance.InstanceInfo, error)
 
 	mu             sync.Mutex
 	launchCalls    []instance.InstanceConfig
@@ -179,6 +180,9 @@ func (m *mockProvisioner) DescribeInstance(ctx context.Context, id string) (*ins
 	return &instance.InstanceStatus{InstanceID: id, State: instance.CloudInstanceRunning}, nil
 }
 func (m *mockProvisioner) ListInstances(ctx context.Context, filter instance.InstanceFilter) ([]instance.InstanceInfo, error) {
+	if m.listFn != nil {
+		return m.listFn(ctx, filter)
+	}
 	return nil, nil
 }
 

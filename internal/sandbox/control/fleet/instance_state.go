@@ -107,6 +107,14 @@ type ManagedInstance struct {
 	// ProvisionStarted records when provisioning began. Used by the control
 	// loop to detect provision timeouts.
 	ProvisionStarted time.Time
+
+	// DrainStarted records when draining began. Used by the control loop
+	// to detect drain timeouts and force-terminate.
+	DrainStarted time.Time
+
+	// TerminateRetries counts consecutive TerminateInstance failures for
+	// this instance. Used to trigger an alert after MaxTerminateRetries.
+	TerminateRetries int
 }
 
 // validTransitions defines the allowed state transitions for the instance

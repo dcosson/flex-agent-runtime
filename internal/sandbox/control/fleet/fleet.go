@@ -37,6 +37,7 @@ type FleetSandboxControl struct {
 	router        *CapacityRouter
 	clientFactory SandboxClientFactory
 	logger        *slog.Logger
+	clock         Clock
 
 	// instances maps instance IDs to their managed state. Guarded by mu.
 	instances map[string]*ManagedInstance
@@ -81,6 +82,7 @@ func NewFleetSandboxControl(
 		router:        NewCapacityRouter(cfg),
 		clientFactory: clientFactory,
 		logger:        o.logger,
+		clock:         realClock{},
 		instances:     make(map[string]*ManagedInstance),
 		loopDone:      make(chan struct{}),
 		cancelLoop:    func() {},
