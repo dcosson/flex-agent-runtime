@@ -5,7 +5,7 @@
 **Depended on by:** Orchestrator application (future), multi-agent collaboration features
 **Scope:** Implement an EC2 Direct adapter (`EC2DirectSandboxControl`) that manages raw EC2 instances as agent execution environments. This is the "D2: EC2 Lightweight Sandbox" shape from the cloud-sandbox-providers shaping doc, now renamed to EC2 Direct. It provides no per-agent isolation -- multiple agents share one EC2 instance on a shared filesystem.
 **Shaping source:** docs/shaping/cloud-sandbox-providers.md (Shape D2)
-**Incorporated reviews:** docs/plans/19-ec2-direct-adapter-review-r1-a.md, docs/plans/19-ec2-direct-adapter-review-r1-b.md
+**Incorporated reviews:** docs/plans/19-ec2-direct-adapter-review-r1-a.md, docs/plans/19-ec2-direct-adapter-review-r1-b.md, docs/plans/19-ec2-direct-adapter-review-r2-a.md, docs/plans/19-ec2-direct-adapter-review-r2-b.md
 
 ---
 
@@ -113,7 +113,7 @@ sequenceDiagram
     EC2-->>SC: instanceID
     SC->>SC: Poll DescribeInstances until running
     SC->>SSM: Wait for SSM agent registration
-    SC-->>O: sandboxID=instanceID, address=ip
+    SC-->>O: sandboxID=instanceID, address=ip:0
 
     O->>SC: LaunchProcess(sandboxID, "flexagent", ["serve","agent","--listen=:8081"], env)
     SC->>SSM: SendCommand(launch script with PID file)
@@ -145,7 +145,7 @@ sequenceDiagram
 // EC2DirectSandboxControl manages raw EC2 instances as agent environments.
 // Multiple agents share one instance without isolation.
 type EC2DirectSandboxControl struct {
-    provisioner  InstanceLifecycle  // Shared EC2 lifecycle operations (see 5.1)
+    provisioner  InstanceLifecycle  // EC2 Direct-specific SDK wrapper (see 5.1)
     ssmClient    SSMAPI             // Interface wrapping AWS SSM SDK calls
     logger       *slog.Logger
     config       Config
@@ -257,9 +257,9 @@ func (c *EC2DirectSandboxControl) CreateSandbox(ctx context.Context, req control
 6. Poll SSM for instance registration via `ssmClient.DescribeInstanceInformation` with instance ID filter. Uses exponential backoff with jitter, starting at 2s, capped at 10s, within the remaining `Config.InstanceReadyTimeout`. Returns `ErrSSMUnavailable` if SSM registration never occurs.
 7. Optionally run a readiness check via SSM (e.g., `flexagent version`) to confirm the binary is available on the instance.
 8. Store instance state in `c.instances` (acquire `c.mu` only for map read/write, not during AWS API calls).
-9. Return `CreateSandboxResponse` with `SandboxID = instanceID`, `Address = selectedIP` (based on `Config.IPSelectionMode`: public IP if available and mode is "public" or "auto", otherwise private IP).
+9. Return `CreateSandboxResponse` with `SandboxID = instanceID`, `Address = selectedIP:0` (based on `Config.IPSelectionMode`: public IP if available and mode is "public" or "auto", otherwise private IP; port 0 signals no active endpoint yet -- see Address note below).
 
-**Note on Address:** `CreateSandboxResponse.Address` returns the instance IP without a port, since no process is running yet. The address becomes fully usable (host:port) only after `LaunchProcess` returns. This is a known deviation from the `host:port` contract documented in `control.go` -- for EC2 Direct, the sandbox address is an IP that the orchestrator uses as a prefix for agent process addresses.
+**Note on Address:** `CreateSandboxResponse.Address` returns `ip:0` (e.g., `10.0.1.42:0`) to satisfy the `host:port` contract documented in `control.go` line 57. Port 0 signals that no service is listening yet -- the sandbox is an EC2 instance that has been provisioned but has no agent processes running. The orchestrator should treat port 0 as "no active endpoint" and use the host portion as a prefix for agent process addresses returned by `LaunchProcess` (which returns `ip:PORT` with the actual listening port). This convention avoids breaking downstream consumers that parse `Address` as `host:port` (including Plan 20's `FleetSandboxControl` which does address rewriting).
 
 **UserData template** is a shell script that runs on first boot. A typical template:
 
@@ -449,16 +449,27 @@ func NewEC2DirectSandboxControl(provisioner InstanceLifecycle, ssmClient SSMAPI,
 
 The constructor calls `Recover()` which:
 
-1. Queries `provisioner.DescribeInstances` with tag filters: `{"ManagedBy": "flex-agent-runtime", "adapter": "ec2-direct"}` and state filter for "running" and "stopped" instances.
-2. For each discovered instance:
+1. Calls `provisioner.DescribeInstances` (the raw EC2 SDK method, NOT Plan 20's `ListInstances`) with an `ec2.DescribeInstancesInput` containing tag filters `{"ManagedBy": "flex-agent-runtime", "adapter": "ec2-direct"}` and instance state filter for "running" and "stopped" instances. The filter construction:
+   ```go
+   input := &ec2.DescribeInstancesInput{
+       Filters: []ec2types.Filter{
+           {Name: aws.String("tag:ManagedBy"), Values: []string{"flex-agent-runtime"}},
+           {Name: aws.String("tag:adapter"), Values: []string{"ec2-direct"}},
+           {Name: aws.String("instance-state-name"), Values: []string{"running", "stopped"}},
+       },
+   }
+   ```
+2. **If `DescribeInstances` fails** (AWS API error, network error, etc.), the constructor returns an error. This is fail-fast behavior: if we cannot query EC2, we cannot distinguish "no managed instances exist" from "AWS is unreachable and there may be orphaned instances billing us." The caller should retry construction or alert on this failure.
+3. **If `DescribeInstances` succeeds but returns zero instances**, this is a normal clean start. No error.
+4. For each discovered instance:
    a. Extracts `flex-sandbox-id` from tags to reconstruct the sandbox ID.
    b. Reads instance IP addresses.
    c. For running instances, probes for active agent processes by checking PID files via SSM: `ls /var/run/flex-agent-*.pid 2>/dev/null` and reading each to reconstruct process state.
    d. For each discovered PID file, verifies the process is still running via `/proc/PID/stat` and adds it to the process map.
-3. Populates `c.instances` with recovered state.
-4. Logs a summary of recovered instances and processes.
+5. Populates `c.instances` with recovered state.
+6. Logs a summary of recovered instances and processes.
 
-This recovery is best-effort. If SSM is unavailable for a running instance, the instance is tracked but its processes are assumed unknown (the orchestrator will need to re-launch agents).
+Individual instance SSM probing is best-effort. If SSM is unavailable for a running instance, the instance is tracked but its processes are assumed unknown (empty process map -- the orchestrator will need to re-launch agents). This is distinct from the initial `DescribeInstances` call which is NOT best-effort -- it must succeed for the constructor to return.
 
 ### 3.11 Close
 
@@ -520,22 +531,39 @@ This is the same architecture as running `flexagent serve agent` on a developer'
 
 ## 5. AWS Integration
 
-### 5.1 AWS SDK Interfaces and Shared EC2 Lifecycle
+### 5.1 AWS SDK Interfaces
 
-The adapter uses SSM for process management (which is EC2 Direct-specific) and delegates EC2 instance lifecycle operations to a shared `InstanceLifecycle` interface. This avoids duplicating EC2 SDK wrapping code with Plan 20's `InstanceProvisioner`.
+The adapter uses two AWS SDK interface abstractions:
 
-**Composition with Plan 20:** Plan 20 (Fleet Management) defines `InstanceProvisioner` with `EC2InstanceProvisioner` that wraps the same EC2 API calls (`RunInstances`, `TerminateInstances`, `StopInstances`, `StartInstances`, `DescribeInstances`). Rather than both plans independently wrapping the AWS EC2 SDK, EC2 Direct composes:
+- **`InstanceLifecycle`** -- A thin wrapper around the raw EC2 SDK for instance lifecycle operations. This is EC2 Direct-specific.
+- **`SSMAPI`** -- A thin wrapper around the raw SSM SDK for remote process management. Also EC2 Direct-specific.
 
-- **`InstanceLifecycle`** (shared with Plan 20) for EC2 instance lifecycle: `RunInstances`, `TerminateInstances`, `StopInstances`, `StartInstances`, `DescribeInstances`
-- **`SSMAPI`** (EC2 Direct-specific) for remote process management: `SendCommand`, `GetCommandInvocation`, `DescribeInstanceInformation`
+Both interfaces mirror the AWS SDK directly, using raw SDK input/output types. This gives EC2 Direct full control over EC2 API parameters (UserData, security groups, tag filters, etc.) which it needs because it constructs detailed `RunInstancesInput` structs itself.
 
-If Plan 20 is implemented first, `EC2DirectSandboxControl` uses `InstanceProvisioner` directly. If Plan 19 is implemented first, it defines the `InstanceLifecycle` interface which Plan 20's `InstanceProvisioner` later satisfies. The interface is identical either way:
+**Relationship to Plan 20's `InstanceProvisioner`:** Plan 20 defines a provider-agnostic `InstanceProvisioner` interface with abstracted types (`LaunchInstance(ctx, InstanceConfig) (*InstanceInfo, error)`, `ListInstances(ctx, InstanceFilter) ([]InstanceInfo, error)`, etc.). That interface serves a fundamentally different purpose -- it abstracts away the cloud provider entirely so the fleet manager can work with EC2, GCP, or Azure without knowing which one. `InstanceLifecycle` and `InstanceProvisioner` are **not interchangeable**:
+
+| | Plan 19 `InstanceLifecycle` | Plan 20 `InstanceProvisioner` |
+|---|---|---|
+| **Abstraction level** | Raw AWS EC2 SDK types | Provider-agnostic abstractions |
+| **Method names** | `RunInstances`, `DescribeInstances` | `LaunchInstance`, `ListInstances` |
+| **Parameter types** | `*ec2.RunInstancesInput` | `InstanceConfig` |
+| **Return types** | `*ec2.RunInstancesOutput` | `*InstanceInfo` |
+| **Purpose** | EC2-only adapter needs full SDK control | Fleet manager needs provider neutrality |
+
+The shared piece between Plans 19 and 20 is the underlying `*ec2.Client` instance (both can share the same AWS SDK client), not a Go interface. Plan 20's `EC2InstanceProvisioner` wraps the EC2 SDK internally at a higher abstraction level; Plan 19's `InstanceLifecycle` exposes the SDK surface directly. These are the right designs for their respective contexts.
+
+**`DescribeInstances` dual use:** `InstanceLifecycle.DescribeInstances` serves two distinct purposes in this adapter: (1) single-instance lookup by instance ID (e.g., polling for "running" state in CreateSandbox step 5), and (2) multi-instance discovery via tag filters (crash recovery, section 3.10). Both use cases work through the same raw SDK method with different `ec2.DescribeInstancesInput` filter parameters. This is idiomatic for the EC2 SDK and avoids adding a separate `ListInstances` method -- the distinction is in the filter construction, not the method.
 
 ```go
-// internal/sandbox/control/ec2direct/aws.go (or shared package)
+// internal/sandbox/control/ec2direct/aws.go
 
-// InstanceLifecycle wraps EC2 instance lifecycle operations.
-// This interface is shared with Plan 20's InstanceProvisioner.
+// InstanceLifecycle wraps EC2 instance lifecycle operations using raw SDK types.
+// This is EC2 Direct-specific and is NOT the same as Plan 20's InstanceProvisioner,
+// which operates at a provider-agnostic abstraction level. The shared piece between
+// Plans 19 and 20 is the underlying *ec2.Client, not this interface.
+//
+// DescribeInstances serves double duty: single-instance lookup (by instance ID filter)
+// and multi-instance discovery (by tag filters, used in crash recovery).
 type InstanceLifecycle interface {
     RunInstances(ctx context.Context, input *ec2.RunInstancesInput, opts ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error)
     TerminateInstances(ctx context.Context, input *ec2.TerminateInstancesInput, opts ...func(*ec2.Options)) (*ec2.TerminateInstancesOutput, error)
@@ -1059,14 +1087,14 @@ This table tracks every finding from both R1 reviews and their disposition.
 |----|---------|----------|-------------|-------|
 | A-F1 | `DeepPause` semantics misused to signal lossy pause | P1 | **Accepted** | Removed incorrect interpretation. Corrected section 3.9 to note `DeepPause` means ZFS-to-S3 cold storage. Added OQ5 for `PausePreservesProcesses` flag. Updated section 3.7 to document lossy pause as an interface gap. |
 | A-F2 | `flexagent serve agent` has no `--root-dir` flag | P1 | **Accepted** | Removed all `--root-dir` references. Updated sections 2.2, 3.4, 4, 7.1 to document that workspace directory is configured per-session via `LocalRootDir` in `CreateAgentSessionRequest` RPC. |
-| A-F3 | EC2 SDK code duplication with Plan 20 | P1 | **Accepted** | Replaced `EC2API` with shared `InstanceLifecycle` interface in section 5.1. EC2 Direct composes `InstanceLifecycle` (shared) + `SSMAPI` (EC2 Direct-specific). |
+| A-F3 | EC2 SDK code duplication with Plan 20 | P1 | **Accepted (revised in R2)** | Defined `InstanceLifecycle` as an EC2 Direct-specific thin SDK wrapper in section 5.1. This is NOT shared with Plan 20's `InstanceProvisioner` (which operates at a higher, provider-agnostic abstraction level). The shared piece is the underlying `*ec2.Client`, not the interface. See R2-A F1 / R2-B F1 dispositions. |
 | A-F4 | No crash recovery after orchestrator restart | P1 | **Accepted** | Added section 3.10 (Crash Recovery) with tag-based instance discovery, SSM process probing, and constructor-time recovery. Added mandatory tags `ManagedBy` and `adapter` to Config. |
 | A-F5 | SSM command injection vulnerability | P2 | **Accepted** | Added `shellQuote()` helper and `buildSSMCommand()` function in section 3.4. Added `ssm_command.go` and `ssm_command_test.go` to package structure. Specified shell escaping as mandatory for all interpolated values. |
 | A-F6 | Health check readiness polling underspecified | P2 | **Accepted** | Specified exponential backoff with jitter (500ms start, 5s cap) in section 3.4. Changed health check to use SSM-based `curl localhost:PORT/health` to avoid network topology issues. Referenced the specific health endpoint contract (`200 OK`, body `"ok\n"`). |
 | A-F7 | PID tracking via SSM is fragile | P2 | **Accepted** | Replaced `echo $!` stdout parsing with PID file approach (`/var/run/flex-agent-PROCESSID.pid`). Added start time tracking from `/proc/PID/stat` to guard against PID recycling. Updated sections 3.4, 3.5, 3.6. |
 | A-F8 | Missing `Close()` / shutdown method | P2 | **Accepted** | Added section 3.11 (Close) implementing `io.Closer`. Added `TerminateOnClose` config option. Default behavior leaves instances running for recovery. |
 | A-F9 | Instance type mapping table has errors | P3 | **Accepted** | Fixed table in section 6.1. Added `t3.large` for 2-4 vCPU / 8 GiB tier. Added actual specs column. Added overflow handling (`ErrResourcesExceedMaximum`). |
-| A-F10 | `CreateSandboxResponse.Address` contract unclear | P2 | **Partially accepted** | Added note in section 3.2 documenting that Address returns IP without port (deviation from `host:port` contract). Added `IPSelectionMode` config option for public/private/auto selection. |
+| A-F10 | `CreateSandboxResponse.Address` contract unclear | P2 | **Accepted (resolved in R2)** | Address now returns `ip:0` to satisfy the `host:port` contract. Port 0 signals no active endpoint. Added `IPSelectionMode` config option for public/private/auto selection. See R2-B F3 disposition. |
 | A-F11 | Capabilities comment syntax error | P3 | **Accepted** | Fixed code sample in section 3.9. Removed invalid comment syntax. |
 | A-F12 | API keys logged in SSM/CloudTrail | P2 | **Accepted** | Added security note in section 3.4 documenting the limitation and mitigation path. Added to SSM disadvantages in section 5.2. Added Future Enhancement item 8 for Secrets Manager integration. |
 | A-F13 | No error types or error classification | P2 | **Accepted** | Added section 8 (Error Handling) with sentinel errors and error classification table. Referenced specific errors throughout all method descriptions. |
@@ -1082,7 +1110,7 @@ This table tracks every finding from both R1 reviews and their disposition.
 | B-F1 | `flexagent serve agent` has no `--root-dir` flag | P0 | **Accepted** | Same as A-F2. See disposition above. |
 | B-F2 | In-memory instance/process state is not durable | P1 | **Accepted** | Same as A-F4. See disposition above (crash recovery section 3.10). |
 | B-F3 | SSM command construction vulnerable to injection | P1 | **Accepted** | Same as A-F5. See disposition above. |
-| B-F4 | Missing overlap analysis with Plan 20 InstanceProvisioner | P1 | **Accepted** | Same as A-F3. See disposition above (shared `InstanceLifecycle` interface). |
+| B-F4 | Missing overlap analysis with Plan 20 InstanceProvisioner | P1 | **Accepted (revised in R2)** | Same as A-F3. See disposition above. `InstanceLifecycle` is EC2 Direct-specific; `InstanceProvisioner` is Plan 20's provider-agnostic abstraction. They are distinct interfaces by design. |
 | B-F5 | `DeepPause` semantics confusing/inconsistent | P2 | **Accepted** | Same as A-F1. See disposition above. |
 | B-F6 | SSM readiness polling underspecified | P2 | **Accepted** | Same as A-F6. See disposition above. Also specified polling strategy for CreateSandbox instance readiness (section 3.2, step 5-6). |
 | B-F7 | SSM command output capture for PID extraction underspecified | P2 | **Accepted** | Same as A-F7. See disposition above (PID file approach). |
@@ -1094,3 +1122,20 @@ This table tracks every finding from both R1 reviews and their disposition.
 | B-F13 | UserData template security implications | P3 | **Accepted** | Added shell escaping for template variable values using `shellQuote()` helper in section 5.5. |
 | B-F14 | No graceful shutdown/drain for adapter | P3 | **Accepted** | Same as A-F8. See disposition above (section 3.11). |
 | B-F15 | No consideration of SSM Session Manager vs Run Command | P3 | **Accepted** | Added note in section 5.2 explaining why Run Command was chosen over Session Manager. |
+
+### R2-A Findings (docs/plans/19-ec2-direct-adapter-review-r2-a.md)
+
+| ID | Finding | Severity | Disposition | Notes |
+|----|---------|----------|-------------|-------|
+| R2A-F1 | `InstanceLifecycle` and `InstanceProvisioner` are incompatible interfaces but plan claims they are shared/identical | P1 | **Accepted** | Rewrote section 5.1 to clearly state these are distinct interfaces at different abstraction levels. `InstanceLifecycle` is a thin EC2 SDK wrapper; `InstanceProvisioner` is provider-agnostic. Added comparison table. Removed "the interface is identical either way" claim. The shared piece is the underlying `*ec2.Client`, not the Go interface. Updated R1 dispositions for A-F3 and B-F4 accordingly. |
+| R2A-F2 | `ListInstances` missing from `InstanceLifecycle` but crash recovery uses `DescribeInstances` as a list operation; contradicts claimed interface compatibility with Plan 20 | P2 | **Accepted** | Added clarifying note in section 5.1 that `DescribeInstances` serves dual purposes (single-instance lookup and multi-instance discovery via tag filters). Updated section 3.10 to show explicit filter construction. Since we no longer claim interface compatibility, the absence of a separate `ListInstances` method is a non-issue. |
+| R2A-F3 | Constructor calls `Recover()` but error handling for `DescribeInstances` failure is unspecified | P2 | **Accepted** | Updated section 3.10 to specify: (1) if the initial `DescribeInstances` tag query fails, the constructor returns an error (fail-fast -- cannot distinguish "no instances" from "AWS is down"); (2) zero results from a successful query is a normal clean start; (3) individual SSM probe failures remain best-effort (already specified). |
+| R2A-F4 | `DescribeInstances` used for two distinct purposes without clarifying comment | P3 | **Accepted** | Added clarifying comment on `InstanceLifecycle` interface documentation and in section 5.1 text noting the dual use of `DescribeInstances`. |
+
+### R2-B Findings (docs/plans/19-ec2-direct-adapter-review-r2-b.md)
+
+| ID | Finding | Severity | Disposition | Notes |
+|----|---------|----------|-------------|-------|
+| R2B-F1 | `InstanceLifecycle` and `InstanceProvisioner` are NOT the same interface | P1 | **Accepted** | Same as R2A-F1. See disposition above. |
+| R2B-F2 | Crash recovery calls `DescribeInstances` with tag filters vs Plan 20's `ListInstances` | P2 | **Accepted** | Same as R2A-F2. Section 3.10 now shows explicit `ec2.DescribeInstancesInput` filter construction. Since `InstanceLifecycle` is EC2 Direct-specific (not shared with Plan 20), using raw `DescribeInstances` with filters is the correct approach. |
+| R2B-F3 | `CreateSandboxResponse.Address` deviates from `host:port` contract | P2 | **Accepted** | Changed `Address` to return `ip:0` to satisfy the `host:port` format contract. Port 0 signals "no active endpoint." Updated section 3.2 step 9, the Address note, and the sequence diagram. This avoids breaking downstream consumers that parse `Address` as `host:port`. |
