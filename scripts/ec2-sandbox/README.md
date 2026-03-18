@@ -87,19 +87,19 @@ aws configure --profile flexagent-ec2
 
 ```bash
 aws ec2 create-key-pair \
-  --key-name flexagent-key \
+  --key-name flexagent-ec2-key \
   --query 'KeyMaterial' \
-  --output text > ~/.ssh/flexagent-key.pem
+  --output text > ~/.ssh/flexagent-ec2-key.pem
 
-chmod 400 ~/.ssh/flexagent-key.pem
+chmod 400 ~/.ssh/flexagent-ec2-key.pem
 ```
 
 ### 4. Run scripts with the profile
 
 ```bash
 AWS_PROFILE=flexagent-ec2 scripts/ec2-sandbox/provision.sh \
-  --key-name flexagent-key \
-  --ssh-key-path ~/.ssh/flexagent-key.pem
+  --key-name flexagent-ec2-key \
+  --ssh-key-path ~/.ssh/flexagent-ec2-key.pem
 ```
 
 See `iam-policy.json` for the full policy. For more secure setups, consider AWS SSO (`aws configure sso`) or assume-role instead of long-lived access keys.
