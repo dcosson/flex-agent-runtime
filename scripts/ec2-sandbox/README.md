@@ -36,10 +36,11 @@ The script prints instance ID, public/private IPs, and RPC endpoint. For sandbox
 ## Teardown
 
 ```bash
-scripts/ec2-sandbox/teardown.sh
+scripts/ec2-sandbox/teardown.sh --flex-role sandbox-host
+scripts/ec2-sandbox/teardown.sh --flex-role orchestrator
 ```
 
-`teardown.sh` reads `.last_provision.env` by default and cleans up those resources.
+`teardown.sh` reads `.last_provision_<role>.env` by default and cleans up those resources.
 
 ## AWS Setup
 
@@ -120,7 +121,7 @@ sudo vi /etc/default/flexagent-orchestrator
 sudo systemctl restart flexagent-orchestrator
 ```
 
-Use the sandbox-host's **private IP** if both instances are in the same VPC (avoids NAT and is faster). The private IP is printed by the provision script and saved in `.last_provision.env`.
+Use the sandbox-host's **private IP** if both instances are in the same VPC (avoids NAT and is faster). The private IP is printed by the provision script and saved in `.last_provision_<role>.env`.
 
 ## Notes
 

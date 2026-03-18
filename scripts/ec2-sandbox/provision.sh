@@ -19,7 +19,7 @@ Required:
 
 Common options (all roles):
   --region <region>             AWS region (default: aws configure get region).
-  --instance-type <type>        Instance type (default: t4g.large).
+  --instance-type <type>        Instance type (default: t4g.large for sandbox-host, t4g.small for orchestrator).
   --ssh-cidr <cidr>             CIDR allowed for SSH ingress (default: caller_ip/32).
   --rpc-cidr <cidr>             CIDR allowed for RPC ingress (default: 0.0.0.0/0).
   --rpc-port <port>             RPC port (default: 8080).
@@ -248,12 +248,12 @@ EOF
 # --- Main ---
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-STATE_FILE="$ROOT_DIR/scripts/ec2-sandbox/.last_provision.env"
+STATE_DIR="$ROOT_DIR/scripts/ec2-sandbox"
 
 REGION="$(aws configure get region 2>/dev/null || true)"
 REGION="${REGION:-us-east-1}"
 FLEX_ROLE=""
-INSTANCE_TYPE="t4g.large"
+INSTANCE_TYPE=""
 VOLUME_SIZE_GB="80"
 RPC_PORT="8080"
 SSH_CIDR=""
@@ -351,10 +351,18 @@ require_cmd curl
 [[ -n "$SSH_KEY_PATH" ]] || die "--ssh-key-path is required"
 [[ -f "$SSH_KEY_PATH" ]] || die "ssh key not found: $SSH_KEY_PATH"
 
-# Default name prefix based on role
+# Role-specific defaults
 if [[ -z "$NAME_PREFIX" ]]; then
 	NAME_PREFIX="flexagent-${FLEX_ROLE}"
 fi
+if [[ -z "$INSTANCE_TYPE" ]]; then
+	if [[ "$FLEX_ROLE" == "orchestrator" ]]; then
+		INSTANCE_TYPE="t4g.small"
+	else
+		INSTANCE_TYPE="t4g.large"
+	fi
+fi
+STATE_FILE="${STATE_DIR}/.last_provision_${FLEX_ROLE}.env"
 
 if [[ -z "$SSH_CIDR" ]]; then
 	ip="$(caller_public_ip)"
@@ -576,5 +584,5 @@ If you used --skip-binary-deploy, run:
   ssh -i ${SSH_KEY_PATH} ubuntu@${public_ip} 'sudo install -m 0755 /tmp/flexagent /usr/local/bin/flexagent && sudo systemctl daemon-reload && sudo systemctl enable --now ${SERVICE_NAME}'
 
 Teardown:
-  scripts/ec2-sandbox/teardown.sh --region ${REGION} --instance-id ${instance_id} --security-group-id ${SG_ID}
+  scripts/ec2-sandbox/teardown.sh --flex-role ${FLEX_ROLE} --region ${REGION} --instance-id ${instance_id} --security-group-id ${SG_ID}
 EOF

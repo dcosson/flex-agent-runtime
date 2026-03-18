@@ -6,13 +6,16 @@ usage() {
 Tear down EC2 resources created by scripts/ec2-sandbox/provision.sh.
 
 Usage:
-  scripts/ec2-sandbox/teardown.sh [options]
+  scripts/ec2-sandbox/teardown.sh --flex-role <sandbox-host|orchestrator> [options]
+
+Required:
+  --flex-role                    Role to tear down: "sandbox-host" or "orchestrator".
 
 Options:
   --region <region>              AWS region (default: from state file or aws config)
   --instance-id <id>             EC2 instance ID to terminate
   --security-group-id <id>       Security group ID to delete
-  --state-file <path>            State file path (default: scripts/ec2-sandbox/.last_provision.env)
+  --state-file <path>            State file path (default: .last_provision_<role>.env)
   --keep-state-file              Keep the state file after teardown
   --help                         Show this help
 EOF
@@ -39,8 +42,9 @@ state_value() {
 }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-STATE_FILE="$ROOT_DIR/scripts/ec2-sandbox/.last_provision.env"
 KEEP_STATE_FILE=0
+FLEX_ROLE=""
+STATE_FILE=""
 
 REGION=""
 INSTANCE_ID=""
@@ -48,6 +52,10 @@ SECURITY_GROUP_ID=""
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
+	--flex-role)
+		FLEX_ROLE="$2"
+		shift 2
+		;;
 	--region)
 		REGION="$2"
 		shift 2
@@ -80,6 +88,13 @@ done
 
 require_cmd aws
 
+[[ -n "$FLEX_ROLE" ]] || die "--flex-role is required (sandbox-host or orchestrator)"
+[[ "$FLEX_ROLE" == "sandbox-host" || "$FLEX_ROLE" == "orchestrator" ]] || die "--flex-role must be 'sandbox-host' or 'orchestrator'"
+
+if [[ -z "$STATE_FILE" ]]; then
+	STATE_FILE="$ROOT_DIR/scripts/ec2-sandbox/.last_provision_${FLEX_ROLE}.env"
+fi
+
 if [[ -z "$REGION" ]]; then
 	REGION="$(state_value REGION "$STATE_FILE")"
 fi
@@ -97,7 +112,7 @@ REGION="${REGION:-us-east-1}"
 
 [[ -n "$INSTANCE_ID" ]] || die "missing instance id (pass --instance-id or provide a state file)"
 
-log "terminating instance: $INSTANCE_ID (region=$REGION)"
+log "tearing down ${FLEX_ROLE}: instance=$INSTANCE_ID (region=$REGION)"
 aws ec2 terminate-instances \
 	--region "$REGION" \
 	--instance-ids "$INSTANCE_ID" \
@@ -121,4 +136,4 @@ if [[ "$KEEP_STATE_FILE" -eq 0 && -f "$STATE_FILE" ]]; then
 	log "removed state file: $STATE_FILE"
 fi
 
-log "teardown complete"
+log "teardown complete (${FLEX_ROLE})"
