@@ -5,6 +5,7 @@
 package direct
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"time"
@@ -146,9 +147,10 @@ func WithLogger(logger *slog.Logger) Option {
 }
 
 // NewDirectSandboxControl creates a DirectSandboxControl with the given
-// provisioner, SSM client, and configuration. The constructor is a stub
-// for now -- crash recovery (Recover) will be added in a later task.
-func NewDirectSandboxControl(provisioner instance.InstanceProvisioner, ssmClient SSMAPI, cfg Config, opts ...Option) *DirectSandboxControl {
+// provisioner, SSM client, and configuration. Constructor-time recovery is
+// fail-fast on ListInstances errors to avoid silently leaking orphaned
+// instances.
+func NewDirectSandboxControl(provisioner instance.InstanceProvisioner, ssmClient SSMAPI, cfg Config, opts ...Option) (*DirectSandboxControl, error) {
 	// Apply defaults for optional config fields.
 	if cfg.InstanceReadyTimeout == 0 {
 		cfg.InstanceReadyTimeout = defaultInstanceReadyTimeout
@@ -175,7 +177,13 @@ func NewDirectSandboxControl(provisioner instance.InstanceProvisioner, ssmClient
 		opt(d)
 	}
 
-	return d
+	if provisioner != nil {
+		if err := d.Recover(context.Background()); err != nil {
+			return nil, err
+		}
+	}
+
+	return d, nil
 }
 
 // Capabilities returns the sandbox provider capabilities for the Direct

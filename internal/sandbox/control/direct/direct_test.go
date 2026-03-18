@@ -7,7 +7,7 @@ import (
 )
 
 func TestCapabilities(t *testing.T) {
-	d := NewDirectSandboxControl(nil, nil, Config{
+	d := mustNewDirect(t, nil, nil, Config{
 		DefaultInstanceType: "t3.medium",
 	})
 
@@ -31,7 +31,7 @@ func TestCapabilities(t *testing.T) {
 }
 
 func TestNewDirectSandboxControl_Defaults(t *testing.T) {
-	d := NewDirectSandboxControl(nil, nil, Config{})
+	d := mustNewDirect(t, nil, nil, Config{})
 
 	if d.config.InstanceReadyTimeout != defaultInstanceReadyTimeout {
 		t.Errorf("default InstanceReadyTimeout = %v, want %v", d.config.InstanceReadyTimeout, defaultInstanceReadyTimeout)
@@ -55,7 +55,7 @@ func TestNewDirectSandboxControl_Defaults(t *testing.T) {
 
 func TestNewDirectSandboxControl_WithLogger(t *testing.T) {
 	// Verify WithLogger option does not panic with nil
-	d := NewDirectSandboxControl(nil, nil, Config{}, WithLogger(nil))
+	d := mustNewDirect(t, nil, nil, Config{}, WithLogger(nil))
 	if d.logger == nil {
 		t.Error("logger should not be nil after WithLogger(nil)")
 	}
@@ -126,7 +126,7 @@ func TestUserDataTemplateData(t *testing.T) {
 func TestDirectSandboxControl_InternalState(t *testing.T) {
 	// Verify the mutex, closing flag, and inflightWg are accessible
 	// from internal tests (used by CreateSandbox/Close in later tasks).
-	d := NewDirectSandboxControl(nil, nil, Config{})
+	d := mustNewDirect(t, nil, nil, Config{})
 
 	d.mu.Lock()
 	d.closing = true

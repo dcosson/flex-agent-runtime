@@ -22,6 +22,7 @@ type mockInstanceProvisioner struct {
 	launchResp *instance.InstanceInfo
 	launchErr  error
 	launchCfgs []instance.InstanceConfig
+	launchHook func()
 
 	describeSeq   []*instance.InstanceStatus
 	describeErr   error
@@ -30,20 +31,43 @@ type mockInstanceProvisioner struct {
 
 	terminateErr   error
 	terminateCalls []string
+
+	stopErr   error
+	stopCalls []string
+
+	startResp  *instance.InstanceInfo
+	startErr   error
+	startCalls []string
+
+	listResp   []instance.InstanceInfo
+	listErr    error
+	listFilter instance.InstanceFilter
 }
 
 func (m *mockInstanceProvisioner) LaunchInstance(_ context.Context, cfg instance.InstanceConfig) (*instance.InstanceInfo, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	hook := m.launchHook
 	m.launchCfgs = append(m.launchCfgs, cloneInstanceConfig(cfg))
 	if m.launchErr != nil {
+		m.mu.Unlock()
+		if hook != nil {
+			hook()
+		}
 		return nil, m.launchErr
 	}
 	if m.launchResp == nil {
+		m.mu.Unlock()
+		if hook != nil {
+			hook()
+		}
 		return nil, nil
 	}
 	resp := *m.launchResp
 	resp.Tags = cloneStringMap(m.launchResp.Tags)
+	m.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return &resp, nil
 }
 
@@ -54,12 +78,26 @@ func (m *mockInstanceProvisioner) TerminateInstance(_ context.Context, instanceI
 	return m.terminateErr
 }
 
-func (m *mockInstanceProvisioner) StopInstance(_ context.Context, _ string) error {
-	return nil
+func (m *mockInstanceProvisioner) StopInstance(_ context.Context, instanceID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopCalls = append(m.stopCalls, instanceID)
+	return m.stopErr
 }
 
-func (m *mockInstanceProvisioner) StartInstance(_ context.Context, _ string) (*instance.InstanceInfo, error) {
-	return nil, nil
+func (m *mockInstanceProvisioner) StartInstance(_ context.Context, instanceID string) (*instance.InstanceInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.startCalls = append(m.startCalls, instanceID)
+	if m.startErr != nil {
+		return nil, m.startErr
+	}
+	if m.startResp == nil {
+		return nil, nil
+	}
+	resp := *m.startResp
+	resp.Tags = cloneStringMap(m.startResp.Tags)
+	return &resp, nil
 }
 
 func (m *mockInstanceProvisioner) DescribeInstance(_ context.Context, instanceID string) (*instance.InstanceStatus, error) {
@@ -103,8 +141,16 @@ func (m *mockInstanceProvisioner) DescribeInstance(_ context.Context, instanceID
 	return &cp, nil
 }
 
-func (m *mockInstanceProvisioner) ListInstances(_ context.Context, _ instance.InstanceFilter) ([]instance.InstanceInfo, error) {
-	return nil, nil
+func (m *mockInstanceProvisioner) ListInstances(_ context.Context, filter instance.InstanceFilter) ([]instance.InstanceInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.listFilter = filter
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	out := make([]instance.InstanceInfo, len(m.listResp))
+	copy(out, m.listResp)
+	return out, nil
 }
 
 type mockSSMClient struct {
@@ -183,7 +229,7 @@ func TestCreateSandbox_HappyPath(t *testing.T) {
 		},
 	}
 
-	d := NewDirectSandboxControl(prov, ssmClient, Config{
+	d := mustNewDirect(t, prov, ssmClient, Config{
 		AMIID:               "ami-default",
 		DefaultInstanceType: "t3.medium",
 		RootVolumeSizeGB:    64,
@@ -272,7 +318,7 @@ func TestCreateSandbox_InstanceTypeMapping(t *testing.T) {
 			},
 		},
 	}
-	d := NewDirectSandboxControl(prov, ssmClient, Config{
+	d := mustNewDirect(t, prov, ssmClient, Config{
 		AMIID:               "ami-default",
 		DefaultInstanceType: "t3.medium",
 	})
@@ -305,7 +351,7 @@ func TestCreateSandbox_TemplateOverride(t *testing.T) {
 			},
 		},
 	}
-	d := NewDirectSandboxControl(prov, ssmClient, Config{
+	d := mustNewDirect(t, prov, ssmClient, Config{
 		AMIID:               "ami-default",
 		DefaultInstanceType: "t3.medium",
 	})
@@ -332,7 +378,7 @@ func TestCreateSandbox_InstanceReadyTimeout(t *testing.T) {
 		},
 	}
 	ssmClient := &mockSSMClient{}
-	d := NewDirectSandboxControl(prov, ssmClient, Config{
+	d := mustNewDirect(t, prov, ssmClient, Config{
 		AMIID:                "ami-default",
 		DefaultInstanceType:  "t3.medium",
 		InstanceReadyTimeout: 15 * time.Millisecond,
@@ -359,7 +405,7 @@ func TestCreateSandbox_SSMUnavailable(t *testing.T) {
 			{InstanceInformationList: nil},
 		},
 	}
-	d := NewDirectSandboxControl(prov, ssmClient, Config{
+	d := mustNewDirect(t, prov, ssmClient, Config{
 		AMIID:                "ami-default",
 		DefaultInstanceType:  "t3.medium",
 		InstanceReadyTimeout: 15 * time.Millisecond,
@@ -377,7 +423,7 @@ func TestCreateSandbox_SSMUnavailable(t *testing.T) {
 func TestCreateSandbox_ResourcesExceedMaximum(t *testing.T) {
 	prov := &mockInstanceProvisioner{}
 	ssmClient := &mockSSMClient{}
-	d := NewDirectSandboxControl(prov, ssmClient, Config{
+	d := mustNewDirect(t, prov, ssmClient, Config{
 		AMIID:               "ami-default",
 		DefaultInstanceType: "t3.medium",
 	})
@@ -408,7 +454,7 @@ func TestCreateSandbox_UserDataTemplateShellQuote(t *testing.T) {
 		},
 	}
 
-	d := NewDirectSandboxControl(prov, ssmClient, Config{
+	d := mustNewDirect(t, prov, ssmClient, Config{
 		AMIID:               "ami-default",
 		DefaultInstanceType: "t3.medium",
 		UserDataTemplate:    "echo {{shellQuote (index .Labels \"env\")}}",
@@ -430,7 +476,7 @@ func TestCreateSandbox_UserDataTemplateShellQuote(t *testing.T) {
 func TestCreateSandbox_ClosedAtEntry(t *testing.T) {
 	prov := &mockInstanceProvisioner{}
 	ssmClient := &mockSSMClient{}
-	d := NewDirectSandboxControl(prov, ssmClient, Config{
+	d := mustNewDirect(t, prov, ssmClient, Config{
 		AMIID:               "ami-default",
 		DefaultInstanceType: "t3.medium",
 	})
@@ -461,7 +507,7 @@ func TestCreateSandbox_ClosedDuringPolling(t *testing.T) {
 			},
 		},
 	}
-	d := NewDirectSandboxControl(prov, ssmClient, Config{
+	d := mustNewDirect(t, prov, ssmClient, Config{
 		AMIID:               "ami-default",
 		DefaultInstanceType: "t3.medium",
 	})
@@ -488,7 +534,7 @@ func TestCreateSandbox_ClosedDuringPolling(t *testing.T) {
 
 func TestDestroySandbox_HappyPath(t *testing.T) {
 	prov := &mockInstanceProvisioner{}
-	d := NewDirectSandboxControl(prov, &mockSSMClient{}, Config{})
+	d := mustNewDirect(t, prov, &mockSSMClient{}, Config{})
 	d.instances["direct:i-destroy"] = &instanceState{
 		instanceID: "i-destroy",
 		status:     statusRunning,
@@ -512,7 +558,7 @@ func TestDestroySandbox_HappyPath(t *testing.T) {
 
 func TestDestroySandbox_UnknownSandbox(t *testing.T) {
 	prov := &mockInstanceProvisioner{}
-	d := NewDirectSandboxControl(prov, &mockSSMClient{}, Config{})
+	d := mustNewDirect(t, prov, &mockSSMClient{}, Config{})
 
 	err := d.DestroySandbox(context.Background(), "direct:i-missing")
 	if !errors.Is(err, ErrInstanceNotFound) {

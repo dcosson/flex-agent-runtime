@@ -88,7 +88,7 @@ func (m *processMockSSM) DescribeInstanceInformation(_ context.Context, _ *ssm.D
 func setupDirectWithRunningSandbox(t *testing.T, ssmClient *processMockSSM) (*DirectSandboxControl, string) {
 	t.Helper()
 
-	d := NewDirectSandboxControl(&mockInstanceProvisioner{}, ssmClient, Config{
+	d := mustNewDirect(t, &mockInstanceProvisioner{}, ssmClient, Config{
 		IPSelectionMode:     "private",
 		ProcessReadyTimeout: 25 * time.Millisecond,
 	})
