@@ -106,7 +106,10 @@ type processState struct {
 
 // UserDataTemplateData provides typed fields for UserData template rendering.
 type UserDataTemplateData struct {
-	SandboxID    string            // the sandbox/instance ID
+	// SandboxID is a placeholder ("direct:pending"). The actual sandbox ID
+	// depends on the EC2 instance ID and is not known until after launch.
+	// Use EC2 instance metadata if the startup script needs self-identification.
+	SandboxID    string
 	Labels       map[string]string // labels from the CreateSandbox request
 	WorkspaceDir string            // workspace directory path (default "/workspace")
 }

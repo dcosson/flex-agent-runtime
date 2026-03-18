@@ -26,6 +26,7 @@ type mockInstanceProvisioner struct {
 	describeSeq   []*instance.InstanceStatus
 	describeErr   error
 	describeCalls int
+	describeHook  func()
 
 	terminateErr   error
 	terminateCalls []string
@@ -63,11 +64,16 @@ func (m *mockInstanceProvisioner) StartInstance(_ context.Context, _ string) (*i
 
 func (m *mockInstanceProvisioner) DescribeInstance(_ context.Context, instanceID string) (*instance.InstanceStatus, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	hook := m.describeHook
 	if m.describeErr != nil {
+		m.mu.Unlock()
 		return nil, m.describeErr
 	}
 	if len(m.describeSeq) == 0 {
+		m.mu.Unlock()
+		if hook != nil {
+			hook()
+		}
 		return &instance.InstanceStatus{
 			InstanceID: instanceID,
 			State:      instance.CloudInstancePending,
@@ -80,11 +86,19 @@ func (m *mockInstanceProvisioner) DescribeInstance(_ context.Context, instanceID
 	}
 	st := m.describeSeq[idx]
 	if st == nil {
+		m.mu.Unlock()
+		if hook != nil {
+			hook()
+		}
 		return nil, nil
 	}
 	cp := *st
 	if cp.InstanceID == "" {
 		cp.InstanceID = instanceID
+	}
+	m.mu.Unlock()
+	if hook != nil {
+		hook()
 	}
 	return &cp, nil
 }
@@ -100,6 +114,7 @@ type mockSSMClient struct {
 	describeErr   error
 	describeCalls int
 	describeInput *ssm.DescribeInstanceInformationInput
+	describeHook  func()
 }
 
 func (m *mockSSMClient) SendCommand(_ context.Context, _ *ssm.SendCommandInput, _ ...func(*ssm.Options)) (*ssm.SendCommandOutput, error) {
@@ -112,12 +127,17 @@ func (m *mockSSMClient) GetCommandInvocation(_ context.Context, _ *ssm.GetComman
 
 func (m *mockSSMClient) DescribeInstanceInformation(_ context.Context, input *ssm.DescribeInstanceInformationInput, _ ...func(*ssm.Options)) (*ssm.DescribeInstanceInformationOutput, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.describeInput = input
+	hook := m.describeHook
 	if m.describeErr != nil {
+		m.mu.Unlock()
 		return nil, m.describeErr
 	}
 	if len(m.describeSeq) == 0 {
+		m.mu.Unlock()
+		if hook != nil {
+			hook()
+		}
 		return &ssm.DescribeInstanceInformationOutput{}, nil
 	}
 	idx := m.describeCalls
@@ -127,7 +147,15 @@ func (m *mockSSMClient) DescribeInstanceInformation(_ context.Context, input *ss
 	}
 	out := m.describeSeq[idx]
 	if out == nil {
+		m.mu.Unlock()
+		if hook != nil {
+			hook()
+		}
 		return &ssm.DescribeInstanceInformationOutput{}, nil
+	}
+	m.mu.Unlock()
+	if hook != nil {
+		hook()
 	}
 	return out, nil
 }
@@ -362,6 +390,99 @@ func TestCreateSandbox_ResourcesExceedMaximum(t *testing.T) {
 	}
 	if len(prov.launchCfgs) != 0 {
 		t.Fatalf("LaunchInstance calls = %d, want 0", len(prov.launchCfgs))
+	}
+}
+
+func TestCreateSandbox_UserDataTemplateShellQuote(t *testing.T) {
+	prov := &mockInstanceProvisioner{
+		launchResp: &instance.InstanceInfo{InstanceID: "i-shellquote"},
+		describeSeq: []*instance.InstanceStatus{
+			{State: instance.CloudInstanceRunning, PrivateIP: "10.0.0.13"},
+		},
+	}
+	ssmClient := &mockSSMClient{
+		describeSeq: []*ssm.DescribeInstanceInformationOutput{
+			{
+				InstanceInformationList: []ssmtypes.InstanceInformation{{InstanceId: aws.String("i-shellquote")}},
+			},
+		},
+	}
+
+	d := NewDirectSandboxControl(prov, ssmClient, Config{
+		AMIID:               "ami-default",
+		DefaultInstanceType: "t3.medium",
+		UserDataTemplate:    "echo {{shellQuote (index .Labels \"env\")}}",
+	})
+
+	_, err := d.CreateSandbox(context.Background(), control.CreateSandboxRequest{
+		Labels: map[string]string{"env": "prod'value"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox() error = %v", err)
+	}
+
+	userData := prov.launchCfgs[0].UserData
+	if !strings.Contains(userData, "'prod'\\''value'") {
+		t.Fatalf("UserData = %q, want shell-escaped label value", userData)
+	}
+}
+
+func TestCreateSandbox_ClosedAtEntry(t *testing.T) {
+	prov := &mockInstanceProvisioner{}
+	ssmClient := &mockSSMClient{}
+	d := NewDirectSandboxControl(prov, ssmClient, Config{
+		AMIID:               "ami-default",
+		DefaultInstanceType: "t3.medium",
+	})
+	d.mu.Lock()
+	d.closing = true
+	d.mu.Unlock()
+
+	_, err := d.CreateSandbox(context.Background(), control.CreateSandboxRequest{})
+	if !errors.Is(err, ErrDirectClosed) {
+		t.Fatalf("CreateSandbox() error = %v, want %v", err, ErrDirectClosed)
+	}
+	if len(prov.launchCfgs) != 0 {
+		t.Fatalf("LaunchInstance calls = %d, want 0", len(prov.launchCfgs))
+	}
+}
+
+func TestCreateSandbox_ClosedDuringPolling(t *testing.T) {
+	prov := &mockInstanceProvisioner{
+		launchResp: &instance.InstanceInfo{InstanceID: "i-closing"},
+		describeSeq: []*instance.InstanceStatus{
+			{State: instance.CloudInstanceRunning, PrivateIP: "10.0.0.14"},
+		},
+	}
+	ssmClient := &mockSSMClient{
+		describeSeq: []*ssm.DescribeInstanceInformationOutput{
+			{
+				InstanceInformationList: []ssmtypes.InstanceInformation{{InstanceId: aws.String("i-closing")}},
+			},
+		},
+	}
+	d := NewDirectSandboxControl(prov, ssmClient, Config{
+		AMIID:               "ami-default",
+		DefaultInstanceType: "t3.medium",
+	})
+	ssmClient.describeHook = func() {
+		d.mu.Lock()
+		d.closing = true
+		d.mu.Unlock()
+	}
+
+	_, err := d.CreateSandbox(context.Background(), control.CreateSandboxRequest{})
+	if !errors.Is(err, ErrDirectClosed) {
+		t.Fatalf("CreateSandbox() error = %v, want %v", err, ErrDirectClosed)
+	}
+	if len(prov.terminateCalls) != 1 || prov.terminateCalls[0] != "i-closing" {
+		t.Fatalf("TerminateInstance calls = %v, want [i-closing]", prov.terminateCalls)
+	}
+	d.mu.Lock()
+	_, ok := d.instances["direct:i-closing"]
+	d.mu.Unlock()
+	if ok {
+		t.Fatalf("instance state should not be stored when closing during provisioning")
 	}
 }
 

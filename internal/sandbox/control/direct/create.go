@@ -233,7 +233,12 @@ func renderUserData(tpl string, data UserDataTemplateData) (string, error) {
 	if tpl == "" {
 		return "", nil
 	}
-	parsed, err := template.New("direct-user-data").Option("missingkey=zero").Parse(tpl)
+	parsed, err := template.New("direct-user-data").
+		Funcs(template.FuncMap{
+			"shellQuote": shellQuote,
+		}).
+		Option("missingkey=zero").
+		Parse(tpl)
 	if err != nil {
 		return "", err
 	}
