@@ -85,6 +85,46 @@ resp, err := ai.Embed(ctx, "text-embedding-3-small", ai.EmbeddingRequest{
 })
 ```
 
+## Deployment modes
+
+The orchestrator supports flexible agent deployment across four independent dimensions:
+
+### Dimensions
+
+1. **Agent Loop Placement** — where the agent loop process runs
+   - **Orchestrator** — in-process on the orchestrator host
+   - **Remote** — on a separate host
+
+2. **Tools Placement** — where tool execution happens
+   - **Co-located** — tools run wherever the agent loop is
+   - **Sandbox** — tools dispatch to a sandbox-host via RPC
+
+3. **Agent Type** — what drives the agent loop
+   - **Native** — built-in AgentLoopService (flex-agent-runtime's own loop)
+   - **Terminal coding agent** — 3rd party agent driven via terminal multiplexer (e.g. Claude Code, Codex)
+
+4. **Execution Environment** — isolation level for the host
+   - **Bare instance** — EC2/VPS with VM-level isolation only (static-host or fleet)
+   - **gVisor** — sandbox-host with gVisor containers + ZFS snapshots (static-host or fleet)
+   - *(Future: E2B, Daytona, Fly)*
+
+### Valid combinations
+
+| Agent Type + Environment | Orch + Co-located | Orch + Sandbox | Remote + Co-located | Remote + Sandbox |
+|---|:---:|:---:|:---:|:---:|
+| Native + Bare | dev/local | — | — | — |
+| Native + gVisor | — | tools-sandbox | — | — |
+| Native + E2B | — | *(future)* | — | — |
+| Native + Daytona | — | *(future)* | — | — |
+| Native + Fly | — | *(future)* | — | — |
+| Terminal Agent + Bare | — | — | agent-direct | *(future)* |
+| Terminal Agent + gVisor | — | — | agent-sandbox | *(future)* |
+| Terminal Agent + E2B | — | — | *(future)* | *(future)* |
+| Terminal Agent + Daytona | — | — | *(future)* | *(future)* |
+| Terminal Agent + Fly | — | — | *(future)* | *(future)* |
+
+A single orchestrator can serve multiple modes concurrently. Each agent session specifies its placement mode at creation time.
+
 ## Build & test
 
 ```bash
