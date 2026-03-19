@@ -1,0 +1,45 @@
+{
+  "id": "aiag-agy.4.2",
+  "title": "Wire fleet multi-host mode in serve orchestrator",
+  "description": "Fleet multi-host mode is dead wiring: config rejects multiple --sandbox-host-addr values and buildNodeOrFleetControl returns not-yet-wired error for len(addrs)\u003e1. Wire FleetSandboxControl construction with multiple sandbox-host addresses so orchestrator can distribute across hosts. FleetSandboxControl is already fully implemented — just needs construction wiring in serve_orchestrator.go and config validation update.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-agy.4",
+  "dependencies": [
+    {
+      "id": "aiag-agy.4",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implemented in commit 0beb54b. Fleet multi-host mode is now wired in cmd/flexagent/serve_orchestrator.go (config validation accepts multiple addresses; buildNodeOrFleetControl constructs FleetSandboxControl for len(addrs)\u003e1). Added tests and ran make check + make test successfully. Ready for review.",
+      "created_at": "2026-03-18T16:04:28.445083-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — 1 finding (0 P0, 0 P1, 0 P2, 1 P3), approved. See docs/reviews/aiag-agy.4.2-r1-review-reviewer-sea.md. P3 is a test cleanup nit (missing Close on FleetSandboxControl in test).",
+      "created_at": "2026-03-18T16:06:50.539282-07:00"
+    },
+    {
+      "id": 3,
+      "author": "Danny Cosson",
+      "text": "R1 P3 feedback incorporated in commit 72b5c42: added t.Cleanup close in TestBuildNodeOrFleetControlFleetMode. make check + make test PASS.",
+      "created_at": "2026-03-18T16:08:21.80809-07:00"
+    }
+  ],
+  "created_at": "2026-03-18T15:58:36.230034-07:00",
+  "updated_at": "2026-03-18T16:08:21.809851-07:00",
+  "closed_at": "2026-03-18T16:04:52.831169-07:00",
+  "close_reason": "Closed"
+}

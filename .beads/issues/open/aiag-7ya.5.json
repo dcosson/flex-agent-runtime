@@ -1,0 +1,48 @@
+{
+  "id": "aiag-7ya.5",
+  "title": "Crash Recovery, Close, Pause/Resume",
+  "description": "Package: internal/sandbox/control/direct/\nPlan references: Plan 19 sections 3.7, 3.8, 3.10, 3.11\nRequired reading: docs/plans/00-implementation-guide.md\n\nScope:\n- recover.go: Recover() method\n  - provisioner.ListInstances with tag filter (ManagedBy=flex-agent-runtime, adapter=direct)\n  - Fail-fast if ListInstances fails (constructor returns error)\n  - For each discovered instance: extract flex-sandbox-id tag, read IPs\n  - For running instances: probe PID files via SSM (ls /var/run/flex-agent-*.pid), verify processes via /proc/PID/stat, reconstruct process map\n  - Best-effort SSM probing (individual failures logged, instance tracked with empty process map)\n  - Log recovery summary\n- Wire Recover() into NewDirectSandboxControl constructor (filling in the stub from Task 2)\n- pause.go: PauseSandbox and ResumeSandbox\n  - PauseSandbox: provisioner.StopInstance, mark all processes ProcessExited, update instance state to stopped\n  - ResumeSandbox: provisioner.StartInstance, poll DescribeInstance until running (exponential backoff), update IP addresses, wait for SSM re-registration, update instance state to running, clear process map\n- direct.go updates: Full Close() implementation\n  - Set closing = true under lock\n  - inflightWg.Wait() for in-flight CreateSandbox operations\n  - If TerminateOnClose, terminate all instances\n  - If not, leave instances for crash recovery\n  - Clear internal state\n- Unit tests:\n  - Recover happy path (mock ListInstances returns tagged instances)\n  - Recover with zero instances (clean start)\n  - Recover with ListInstances failure (constructor error)\n  - Recover with SSM probe failure (best-effort, instance tracked without processes)\n  - PauseSandbox happy path (processes marked exited)\n  - ResumeSandbox happy path (IP refreshed)\n  - ResumeSandbox timeout (ErrInstanceReadyTimeout)\n  - Close with TerminateOnClose=true (all instances terminated)\n  - Close with TerminateOnClose=false (instances left running)\n  - Close waits for in-flight CreateSandbox\n  - Close then CreateSandbox returns ErrDirectClosed\n  - Concurrent operations race test (go test -race)\n\nEstimated size: ~600 lines (implementation + tests)\nDependencies: Task 4 (needs process management to test recovery of processes; pause clears process state)",
+  "status": "in_progress",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-7ya",
+  "dependencies": [
+    {
+      "id": "aiag-7ya",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-7ya.4",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-7ya.6",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=19"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implemented crash recovery, close, pause/resume for Direct adapter in commit 007cb3b. Added recover.go (ListInstances tag-filter recovery + best-effort process probe), pause.go (PauseSandbox/ResumeSandbox with state + SSM readiness), close.go (closing flag, inflight wait, optional terminate-all, state clear), constructor now calls Recover and returns error on recovery list failure. Added comprehensive tests in recover_pause_close_test.go and updated tests for constructor signature via helper. Validation: make check (passed), make test (passed), go test -race ./internal/sandbox/control/direct (passed).",
+      "created_at": "2026-03-18T13:09:29.288853-07:00"
+    },
+    {
+      "id": 2,
+      "author": "reviewer-sea",
+      "text": "R1 review complete — approved. 3 findings (0 P0, 0 P1, 0 P2, 3 P3). See docs/reviews/aiag-7ya.5-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-18T13:12:00.143096-07:00"
+    }
+  ],
+  "created_at": "2026-03-18T12:08:43.613043-07:00",
+  "updated_at": "2026-03-18T13:12:00.143533-07:00"
+}

@@ -1,0 +1,43 @@
+{
+  "id": "aiag-mac.2",
+  "title": "OpenAI Provider: Test Harness",
+  "description": "Implement the full OpenAI provider test harness.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nPlan: docs/plans/03-provider-openai-test-harness.md (all sections)\n\nKey deliverables:\n- Property tests P1-P6 (stream ordering, tool delta convergence, usage/cost, multi-tool index isolation, ModelCompat independence, error classification)\n- Stub server tests S1 + fault injection F1-F6\n- Oracle tests O1-O3 (cross-implementation, cross-provider, compat request format)\n- Deterministic simulations S1-S4 (event FSM, multi-tool interleaved, reasoning+text+tool, usage positions)\n- Benchmarks B1-B6 (SSE, allocs, tool JSON, stream overhead, message conversion, compat flag resolution)\n- Stress/soak ST1-ST3, Security SEC1-SEC3\n- Coverage \u003e= 85%\n\nDepends on: Shared Test Infrastructure (aiag-jj7.1), OpenAI Core (aiag-mac.1)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-mac",
+  "dependencies": [
+    {
+      "id": "aiag-mac",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-jj7.1",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-mac.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "batch=2",
+    "plan-doc=03-provider-openai"
+  ],
+  "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "reviewer-sea",
+      "text": "R1 review complete — Approved with revisions. 4 findings (0 P0, 0 P1, 1 P2, 3 P3). See docs/reviews/aiag-mac.2-r1-review-reviewer-sea.md. Commit 231c2e9.",
+      "created_at": "2026-03-13T11:53:31.802266-07:00"
+    }
+  ],
+  "created_at": "2026-03-13T04:17:40.326513-07:00",
+  "updated_at": "2026-03-13T12:27:41.495724-07:00",
+  "closed_at": "2026-03-13T12:27:41.495723-07:00",
+  "close_reason": "Closed"
+}

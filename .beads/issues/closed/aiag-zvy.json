@@ -1,0 +1,32 @@
+{
+  "id": "aiag-zvy",
+  "title": "Sandbox Host Service Implementation",
+  "description": "Implement internal/sandbox from plan 11-sandbox-host-service. SandboxHostService struct, session lifecycle (Create/Destroy/Pause/Resume), tool dispatch with tier routing, per-turn snapshots, rollback. Integrates ZFS + gVisor managers. Plan: docs/plans/11-sandbox-host-service.md + test harness.",
+  "status": "closed",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-zvy.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-zvy.2",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-zvy.3",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4"
+  ],
+  "created_at": "2026-03-13T17:58:41.362407-07:00",
+  "updated_at": "2026-03-17T12:28:18.349808-07:00",
+  "closed_at": "2026-03-17T12:28:18.349808-07:00",
+  "close_reason": "Auto-closed: all children completed"
+}

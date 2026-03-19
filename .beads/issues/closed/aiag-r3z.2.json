@@ -1,0 +1,25 @@
+{
+  "id": "aiag-r3z.2",
+  "title": "Signoff: LaunchProcess addendum (11-sandbox-host-service.add03)",
+  "description": "Verify docs/plans/11-sandbox-host-service.add03.md against actual implementation.\n\nCode packages to compare against:\n- internal/rpc/api/types.go (LaunchProcess/KillProcess/GetProcessStatus types)\n- internal/rpc/codec/sandbox_map.go (process management codec mappings)\n- internal/rpc/server/sandbox_server.go (process management RPC handlers)\n- internal/rpc/transport/server.go (new procedure registration)\n- internal/sandbox/service.go (ManagedProcess, process lifecycle, port proxying, PID tracking)\n\nInstructions:\n1. Read add03 thoroughly — checklist of every RPC type, handler, lifecycle state,\n   port proxy behavior, process monitoring, error handling path\n2. Compare each against actual code\n3. Classify deviations: Cosmetic, Structural, Contractual, or Missing\n4. Run: go test ./internal/sandbox/... ./internal/rpc/... -count=1\n5. Run with race detector: go test -race ./internal/sandbox/... ./internal/rpc/... -count=1\n6. Determine status per deviation severity rules\n7. Append Completion Signoff section to the doc\n8. Commit and push, report back via h2 send",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-r3z",
+  "dependencies": [
+    {
+      "id": "aiag-r3z",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "plan-doc=11-sandbox-host-service.add03"
+  ],
+  "assignee": "coder-2-sea",
+  "created_at": "2026-03-17T15:39:05.531685-07:00",
+  "updated_at": "2026-03-17T17:13:59.363067-07:00",
+  "closed_at": "2026-03-17T17:13:33.363549-07:00",
+  "close_reason": "Closed"
+}

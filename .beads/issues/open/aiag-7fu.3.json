@@ -1,0 +1,23 @@
+{
+  "id": "aiag-7fu.3",
+  "title": "Catalog format migration and Python script update",
+  "description": "Migrate catalog format and update the Python update script from docs/plans/01-ai-core.add03.md.\n\nSections: 3.8, 6.1-6.3, 4.2-4.4\n\nKey deliverables:\n- New catalog.json format: {lastUpdated, providers: {configs}, models: {provider → modelID → model}} — §3.8, §6.2\n- catalogFile Go struct with LastUpdated, Providers, Models — §3.8\n- Single init() in models.go: register provider configs first, then chat models (deriving API from provider), then embedding models — §3.8\n- loadEmbeddingCatalog() with embeddingCatalogFile envelope struct — §6.3\n- Remove old init() from embedding_models.go — §3.8\n- New embedding_catalog.json format: {lastUpdated, models: [...]} — §6.3\n- Add Cohere provider config (embedding-only) — §6.2\n- Update scripts/update-model-catalog.py to emit new format:\n  - Emit provider configs under \"providers\" key (apiClientType, baseUrl, keyEnvVars, headers, providerSpecific)\n  - Emit model data under \"models\" key\n  - Remove api/baseUrl from per-model entries\n  - Remove baseUrl from embedding entries\n  - Update validate_catalog() for new structure\n  - Maintain lastUpdated + --force freshness mechanism\n- TestCatalogNewFormat — §5.2\n- Caller migration: demo CLIs, public re-export layer (ai/ai.go) — §4.2-4.4, §7.1\n- Property tests: resolution determinism, registry isolation, deep copy integrity — §5.3\n\nReferences:\n- Plan: docs/plans/01-ai-core.add03.md §3.8, §4.2-4.4, §5.2-5.3, §6.1-6.3, §7.1\n- Depends on: Stream/Embed entry points task (new resolution path must be in place before catalog switches)",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-7fu",
+  "dependencies": [
+    {
+      "id": "aiag-7fu",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-7fu.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-03-19T15:16:58.811337-07:00",
+  "updated_at": "2026-03-19T15:16:58.811337-07:00"
+}

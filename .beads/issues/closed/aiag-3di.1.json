@@ -1,0 +1,39 @@
+{
+  "id": "aiag-3di.1",
+  "title": "Layer 1: Single-session TLA+ model",
+  "description": "Implement the single-session TLA+ spec (highest value, most feasible layer). Required reading: docs/plans/21-agent-tlaplus-spec.md. Implementation code to reference: internal/agent/agent.go, internal/agent/service.go. Spec file: specs/agent_loop.tla, Config: specs/agent_loop_mc.cfg. Deliverables: TLA+ module modeling one session with 2-3 concurrent callers (SendMessage, Continue, DestroySession, Abort), Agent FSM with exact validTransitions, running and turnDone as separate signals, all rollback paths, DestroySession/SendMessage race (section 2.8), Abort dual-emission with sync.Once (safety property 3), Close() two-phase drain (section 2.9), receiver close with hook chain, lock ordering verification, all 10 safety properties, all 4 liveness properties, TLC config with state space estimates.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-3di",
+  "dependencies": [
+    {
+      "id": "aiag-3di",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-3di.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime"
+  ],
+  "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "coder-2-sea",
+      "text": "Layer 1 TLA+ spec complete. TLC: 4,646,852 states, 1,143,481 distinct, depth 51. All safety+liveness verified.",
+      "created_at": "2026-03-17T23:16:24.73686-07:00"
+    }
+  ],
+  "created_at": "2026-03-17T22:51:54.05174-07:00",
+  "updated_at": "2026-03-17T23:16:24.747593-07:00",
+  "closed_at": "2026-03-17T23:16:24.747593-07:00",
+  "close_reason": "Closed"
+}

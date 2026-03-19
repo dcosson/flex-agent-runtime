@@ -1,0 +1,49 @@
+{
+  "id": "aiag-uek.2",
+  "title": "RLM Sub-calls + DataStore Implementations",
+  "description": "Implement RLM sub-calls and DataStore from docs/plans/07-code-interpreter.md.\n\nSections: §4.4-§4.6 (DataStore interface, SearchableDataStore, DataStore implementations), §5.2 (RLM builtins), §5.3 (Token/Cost Budget), §5.4 (RLM Implementation), §5.6 (RLM concurrent dispatch)\n\nKey deliverables:\n- llm_call builtin: single RLM sub-call with isolated context, usage tracking\n- llm_batch builtin: parallel dispatch via errgroup, budget tracking\n- Token/cost budget enforcement (token_budget_exceeded)\n- DataStore interface: Write, Read, ReadRange, List, Delete, Close\n- SearchableDataStore interface with Search method\n- MemoryDataStore: in-memory map-based, bounded by configurable memory limit (default 16MB)\n- FSDataStore: filesystem-backed, range reads, regex search\n- BlobDataStore: cloud object storage (S3/GCS), range reads, ErrNotSupported for search\n- SQLDataStore: SQL query interface, key-value table backend\n- store_* builtins: store_write, store_read, store_read_range, store_search, store_list, store_delete\n- Unit tests for all builtins + DataStore implementations\n\nRequired reading: docs/plans/00-implementation-guide.md\nSee Implementation Guide §5 (Seam: codeinterp ↔ ai.Provider for llm_call/llm_batch)\n\nReferences:\n- Plan: docs/plans/07-code-interpreter.md §4.4-§5.6\n- Test harness: docs/plans/07-code-interpreter-test-harness.md\n- Depends on: T7 (Starlark Runtime + Core Builtins)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-uek",
+  "dependencies": [
+    {
+      "id": "aiag-uek",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-uek.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-uek.3",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-g1g.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=3",
+    "plan-doc=07-code-interpreter"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — Approved. 0 findings. Test coverage additions are clean, sandbox parity fix correct. 12 tests pass with -race. See docs/reviews/aiag-uek.2-r1-review-reviewer-sea.md @ 2a08501",
+      "created_at": "2026-03-13T16:16:07.627808-07:00"
+    }
+  ],
+  "created_at": "2026-03-13T13:16:01.566218-07:00",
+  "updated_at": "2026-03-13T16:16:32.689307-07:00",
+  "closed_at": "2026-03-13T16:16:32.689306-07:00",
+  "close_reason": "Closed"
+}

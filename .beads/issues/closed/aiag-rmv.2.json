@@ -1,0 +1,36 @@
+{
+  "id": "aiag-rmv.2",
+  "title": "AgentLoopService in-process implementation",
+  "description": "Implement AgentLoopService — the in-process implementation of AgentService — with\nfull unit tests using a mock agent driver.\n\nSections: 4 (AgentLoopService), 3.2 (Turn-Scoped Event Streams), 3.4 (ResumeSession\nValidation — implementation)\n\nKey deliverables:\n- internal/agent/service.go — AgentLoopService struct, managedSession, NewAgentLoopService(),\n  all AgentService methods (CreateSession, SendMessage, Continue, Steer, FollowUp, Abort,\n  SubscribeEvents, ResumeSession, DestroySession, Close), EventPublisher interface,\n  ServiceOption/WithMaxSessions\n- internal/agent/agenttest/mock_driver.go — MockAgentDriver with TurnScript, TurnDelay,\n  BlockOnStart, PanicOnStart for testing\n- Unit tests (internal/agent/service_test.go):\n  - Session lifecycle (create, get, list, destroy)\n  - SendMessage/Continue with turn-scoped event streaming\n  - Concurrent session independence\n  - BusyError when turn already active\n  - MaxSessions limit (CodeResourceExhausted)\n  - Steer returns FailedPrecondition when idle\n  - FollowUp valid in any state\n  - DestroySession during active turn (force cancel)\n  - ResumeSession with validation (schema version, role parsing, monotonicity, tool compat)\n  - Close() graceful shutdown with drain deadline\n  - EventPublisher mock verification\n\nReferences:\n- Plan: docs/plans/18-agent-loop-rpc.md §3.2, §3.4, §4\n- Test harness: docs/plans/18-agent-loop-rpc-test-harness.md §1, §4 (U1-U6), §5 (EP1-EP5)\n- Depends on: aiag-rmv.1 (AgentService interface + types)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-rmv",
+  "dependencies": [
+    {
+      "id": "aiag-rmv",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-rmv.3",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "plan-doc=18-agent-loop-rpc",
+    "batch=plan18"
+  ],
+  "assignee": "coder-1-sea",
+  "created_at": "2026-03-17T10:15:27.010312-07:00",
+  "updated_at": "2026-03-17T10:51:39.534241-07:00",
+  "closed_at": "2026-03-17T10:51:39.534241-07:00",
+  "close_reason": "Closed"
+}

@@ -1,0 +1,56 @@
+{
+  "id": "aiag-agy.3",
+  "title": "Health monitoring + error recovery + integration tests",
+  "description": "Add health monitoring, error recovery, and integration/concurrency tests per docs/plans/21-serve-orchestrator.md §3.9-3.10, §6 Bead 3, §7.\n\nRequired reading: docs/plans/21-serve-orchestrator.md\n\nKey deliverables:\n- internal/orchestrator/health.go — health monitor goroutine, per-session health checks (HTTP /health for remote agents), sandbox-host health checks (Node: RPC HealthCheck, Fleet: control-loop health)\n- Unhealthy session state transitions and error surfacing to clients\n- Integration with GetProcessStatus for agent crash detection\n- Graceful shutdown improvements (drain active sessions before exit)\n- Event fidelity verification tests for stream proxying (non-ID fields preserved after codec roundtrip)\n- Concurrency tests: concurrent CreateSession across modes, concurrent SendMessage, DestroySession during streaming, health check concurrent with session ops, client cancel during streaming (no goroutine leaks), client cancel during slow provisioning (bounded cleanup), Close() cancels in-flight provisioning\n- Integration test skeleton: tests/integration/orchestrator/ with build tag, real CreateSession+SendMessage+DestroySession cycle\n- Race detector (make test-race) must pass clean\n\nDepends on: Bead 2 (agent-sandbox + tools-sandbox)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-agy",
+  "dependencies": [
+    {
+      "id": "aiag-agy",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-agy.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=21"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implemented health monitoring + recovery + integration skeleton in d586657. Added unhealthy gating with entry.mu snapshots, process-status crash probing, concurrency/cancellation tests, and race-safe event receiver close path. Validation: make check, make test, make test-race all pass.",
+      "created_at": "2026-03-18T15:35:03.081418-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — 4 findings (0 P0, 0 P1, 1 P2, 3 P3), approved with revisions. See docs/reviews/aiag-agy.3-r1-review-reviewer-sea.md. P2: two concurrency tests from plan §7.3 not implemented (concurrent SendMessage, goroutine-leak on cancel).",
+      "created_at": "2026-03-18T15:39:20.273451-07:00"
+    },
+    {
+      "id": 3,
+      "author": "Danny Cosson",
+      "text": "R1 P2 fixes landed in 9ac728a: added missing §7.3 concurrency tests (concurrent SendMessage across sessions, and client-canceled active stream leak-bound check). Validation rerun: make check, make test, make test-race.",
+      "created_at": "2026-03-18T15:42:32.953944-07:00"
+    },
+    {
+      "id": 4,
+      "author": "Danny Cosson",
+      "text": "R2 re-check: P2-1 resolved in 9ac728a. All findings addressed. Clean.",
+      "created_at": "2026-03-18T15:43:47.958068-07:00"
+    }
+  ],
+  "created_at": "2026-03-18T14:38:23.162884-07:00",
+  "updated_at": "2026-03-18T15:43:47.958932-07:00",
+  "closed_at": "2026-03-18T15:35:03.098301-07:00",
+  "close_reason": "Closed"
+}

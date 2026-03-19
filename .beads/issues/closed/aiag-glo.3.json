@@ -1,0 +1,35 @@
+{
+  "id": "aiag-glo.3",
+  "title": "RPC Layer: ConnectRPC transport + policy interceptors",
+  "description": "Signoff gap from docs/plans/13-rpc-layer.md and 13-rpc-layer-test-harness.md: move from in-process service interfaces to concrete ConnectRPC transport wiring, including version header enforcement, message-size limits, auth/authorization interceptor hooks, terminal streaming service integration, and transport-level integration tests.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-glo",
+  "dependencies": [
+    {
+      "id": "aiag-glo",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4",
+    "plan-doc=13-rpc-layer"
+  ],
+  "assignee": "Danny Cosson",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implemented concrete ConnectRPC transport package (internal/rpc/transport): procedure constants, JSON codec, error/code mapping, policy interceptor (api version + auth hook), max message size enforcement, unary + streaming handler registration, ExecuteTool stream bridge, AgentEvent stream bridge, and TerminalService bidi stream integration with input rate limiting and chunk splitting. Added transport-level tests for auth/version behavior and terminal stream attach; tests pass with -race.",
+      "created_at": "2026-03-14T08:19:01.330073-07:00"
+    }
+  ],
+  "created_at": "2026-03-14T08:05:45.695937-07:00",
+  "updated_at": "2026-03-17T12:28:18.246104-07:00",
+  "closed_at": "2026-03-17T12:28:18.246104-07:00",
+  "close_reason": "Closed"
+}

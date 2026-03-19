@@ -1,0 +1,31 @@
+{
+  "id": "aiag-r3z",
+  "title": "Plan 18 completion signoff",
+  "description": "Verify implemented code against plan docs for the Agent Loop RPC epic (aiag-rmv).\nThree docs to verify:\n- docs/plans/18-agent-loop-rpc.md (main plan)\n- docs/plans/18-agent-loop-rpc-test-harness.md (test harness)\n- docs/plans/11-sandbox-host-service.add03.md (LaunchProcess addendum)",
+  "status": "closed",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-r3z.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-r3z.2",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-r3z.3",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "plan-doc=18-agent-loop-rpc"
+  ],
+  "created_at": "2026-03-17T15:38:39.469029-07:00",
+  "updated_at": "2026-03-17T17:33:46.579879-07:00",
+  "closed_at": "2026-03-17T17:33:46.579879-07:00",
+  "close_reason": "Auto-closed: all children completed"
+}

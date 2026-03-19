@@ -1,0 +1,42 @@
+{
+  "id": "aiag-7ya.6",
+  "title": "E2E Unit Tests + Integration Test Skeleton",
+  "description": "Package: internal/sandbox/control/direct/\nPlan references: Plan 19 sections 11.1, 11.2, 11.3\nRequired reading: docs/plans/00-implementation-guide.md\n\nScope:\n- Full lifecycle unit test with mocks: CreateSandbox -\u003e LaunchProcess -\u003e GetProcessStatus -\u003e KillProcess -\u003e DestroySandbox\n- Multi-agent unit test: CreateSandbox -\u003e LaunchProcess x3 -\u003e GetProcessStatus x3 -\u003e KillProcess x3 -\u003e DestroySandbox\n- Pause/Resume lifecycle: CreateSandbox -\u003e LaunchProcess -\u003e PauseSandbox -\u003e ResumeSandbox -\u003e LaunchProcess -\u003e DestroySandbox\n- Crash recovery lifecycle: CreateSandbox -\u003e LaunchProcess -\u003e new adapter (with recovery) -\u003e verify state -\u003e DestroySandbox\n- Integration test skeleton (//go:build integration_ec2):\n  - Test helper for EC2 instance lifecycle (create, tag, sweep)\n  - Sweep function: terminate test-tagged instances older than 1 hour\n  - Skeleton test cases (full lifecycle, multi-agent, pause/resume, crash recovery, network connectivity)\n  - These are NOT expected to pass in CI -- they require AWS credentials and infrastructure\n\nEstimated size: ~400 lines (lifecycle tests + integration skeleton)\nDependencies: Task 5 (all functionality must be complete)",
+  "status": "in_progress",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-7ya",
+  "dependencies": [
+    {
+      "id": "aiag-7ya",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-7ya.5",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=19"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implemented Task 6 in commit 4161724. Added e2e_lifecycle_test.go with full lifecycle, multi-agent, pause/resume, and crash-recovery end-to-end unit tests using mocks. Added integration_ec2_test.go skeleton (build-tag gated) with EC2 harness helpers for test tagging and 1-hour sweep plus named skeleton scenarios (full lifecycle, multi-agent, pause/resume, crash recovery, network connectivity). Validation: go test ./internal/sandbox/control/direct (pass), go test -race ./internal/sandbox/control/direct (pass). Note: repo-wide make check/make test currently fail due concurrent fleet WIP outside this bead (undefined Clock in internal/sandbox/control/fleet).",
+      "created_at": "2026-03-18T13:14:52.368364-07:00"
+    },
+    {
+      "id": 2,
+      "author": "reviewer-sea",
+      "text": "R1 review complete — approved. 1 finding (0 P0, 0 P1, 0 P2, 1 P3). See docs/reviews/aiag-7ya.6-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-18T13:16:25.705859-07:00"
+    }
+  ],
+  "created_at": "2026-03-18T12:09:02.304774-07:00",
+  "updated_at": "2026-03-18T13:16:25.706495-07:00"
+}

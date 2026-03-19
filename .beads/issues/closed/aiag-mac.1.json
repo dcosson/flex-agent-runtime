@@ -1,0 +1,45 @@
+{
+  "id": "aiag-mac.1",
+  "title": "OpenAI Provider: Core Implementation",
+  "description": "Implement the full OpenAI Chat Completions API provider in internal/ai/provider/openai/. Follows Anthropic patterns.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nPlan: docs/plans/03-provider-openai.md (all sections)\n\nKey deliverables:\n- provider.go, request.go: Message conversion, developer role via ModelCompat, tool schema with strict mode\n- compat.go: All 12 ModelCompat flags from §6.1 matrix (store, developer role, reasoning effort, streaming usage, etc.)\n- stream.go: Stream/StreamSimple with reasoning effort mapping for o-series models\n- sse_parser.go: SSE event loop, [DONE] sentinel, per-choice processing, streaming usage\n- tool_json_parser.go: Index-based multi-tool delta parsing, deterministic finalization order (sort by index), strict parse\n- usage.go: OpenAI usage mapping, stop reason mapping\n- errors.go: Error classification for OpenAI + compat endpoints (Cerebras, Mistral)\n- types_wire.go: Wire structs\n- Unit tests (all ModelCompat flags), component tests (GPT-4o, o3, multi-tool, Groq/Mistral fixtures), integration tests\n- All tests pass with -race, make check clean\n\nImplementation guide: §1.1, §1.3, §4.6\n\nDepends on: Anthropic Core (aiag-jj7.2) — pattern leader",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-mac",
+  "dependencies": [
+    {
+      "id": "aiag-mac",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-jj7.2",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-mac.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "batch=2",
+    "plan-doc=03-provider-openai"
+  ],
+  "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — Approved with revisions. 3 findings (0 P0, 0 P1, 1 P2, 2 P3). P2: dead branching in convertMessages. See docs/reviews/aiag-mac.1-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-13T11:09:03.279792-07:00"
+    }
+  ],
+  "created_at": "2026-03-13T04:16:52.749124-07:00",
+  "updated_at": "2026-03-13T12:27:41.485701-07:00",
+  "closed_at": "2026-03-13T12:27:41.485701-07:00",
+  "close_reason": "Closed"
+}

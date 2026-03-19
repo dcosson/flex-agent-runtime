@@ -1,0 +1,32 @@
+{
+  "id": "aiag-65f.1",
+  "title": "Embedding: Types, interface, registries, catalog, BatchEmbed, entry point",
+  "description": "Implement embedding API core from docs/plans/01-ai-core.add01.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: §4 (types), §5 (interface + registries), §7 (catalog), §5.4 (BatchEmbed), §5.3 (Embed entry point), §9 (public re-exports)\n\nKey deliverables:\n- Types: EmbeddingRequest, EmbeddingResponse, Embedding, EmbeddingUsage, EmbeddingTaskType (6 constants), EmbeddingEncoding (6 constants), EmbeddingModel, EmbeddingCost, EmbedFunc\n- EmbeddingProvider interface (API() + Embed())\n- Provider registry: RegisterEmbeddingProvider, GetEmbeddingProvider, UnregisterEmbeddingProviders, ClearEmbeddingProviders (sync.RWMutex, isolated from chat registry)\n- Model registry: RegisterEmbeddingModel, GetEmbeddingModel, ListEmbeddingModels, ListEmbeddingModelsByProvider, ClearEmbeddingModels\n- embedding_catalog.json with 4 models (text-embedding-3-small, text-embedding-3-large, gemini-embedding-001, embed-v4.0), go:embed loading\n- BatchEmbed utility: batch splitting by MaxBatchSize, index ordering, progress callback, partial results on error. Uses EmbedFunc parameter (NOT provider.Embed — seam review P1 fix)\n- Embed() entry point: validate request, lookup model+provider, check dimension bounds, calculate cost, preserve ProviderError\n- Public re-export layer: ai/embedding.go\n- Unit tests for all of the above\n\nFile layout: internal/ai/embedding.go, embedding_provider.go, embedding_registry.go, embedding_models.go, embedding_batch.go, embedding_api.go, ai/embedding.go\n\nSeam notes: EmbeddingProvider uses separate struct per provider (not shared with chat Provider — API() collision fix). BatchEmbed takes EmbedFunc not provider.Embed (recursion fix).",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-65f",
+  "dependencies": [
+    {
+      "id": "aiag-65f",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-65f.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "plan-doc=01-ai-core.add01"
+  ],
+  "assignee": "coder-1-sea",
+  "created_at": "2026-03-14T11:21:17.522622-07:00",
+  "updated_at": "2026-03-14T11:31:03.149258-07:00",
+  "closed_at": "2026-03-14T11:31:03.149258-07:00",
+  "close_reason": "Closed"
+}

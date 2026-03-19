@@ -1,0 +1,33 @@
+{
+  "id": "aiag-r3z.3",
+  "title": "Fix plan 18 signoff gaps: ToolEnvSandbox wiring + missing test categories",
+  "description": "Follow-up work from plan 18 completion signoff (aiag-r3z.1 — Partial status).\n\nContractual gap:\n- AgentLoopService.CreateSession rejects ToolEnvSandbox and uses noop tools (buildNoopTools).\n  Plan §4 specifies constructing ExecutionEnvironment from ToolEnvironmentConfig:\n  ToolEnvLocal -\u003e environment.NewLocalEnvironment(rootDir)\n  ToolEnvSandbox -\u003e native.NewNativeSandboxEnvironment(sandboxClient, config)\n  Fix: implement the ToolEnvSandbox branch in CreateSession, building a real\n  NativeSandboxEnvironment and wiring actual tools.\n\nMissing test categories:\n- DV1/DV2: Dedicated termmux dual-view independence/failure tests per test harness §11\n- GS2: Force-shutdown-after-deadline assertion (GS1/GS3 exist, GS2 missing)\n- B5/B6: Benchmark functions matching test harness §14 labels\n\nAfter fixing, re-verify and upgrade both signoff sections to Complete.\n\nReferences:\n- Plan: docs/plans/18-agent-loop-rpc.md §4 (CreateSession flow steps 7-8)\n- Test harness: docs/plans/18-agent-loop-rpc-test-harness.md §11, §12, §14",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-r3z",
+  "dependencies": [
+    {
+      "id": "aiag-r3z",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "plan-doc=18-agent-loop-rpc"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implemented ToolEnvSandbox runtime tool wiring in AgentLoopService via injectable ToolCatalogFactory; added runtime catalog factory + sandbox RPC client wiring, DV1/DV2 + GS2 tests, B5/B6 benchmarks, and updated both plan-18 completion signoff sections to Complete. Verification: make check PASS, make test PASS.",
+      "created_at": "2026-03-17T17:33:46.562313-07:00"
+    }
+  ],
+  "created_at": "2026-03-17T17:14:19.445158-07:00",
+  "updated_at": "2026-03-17T17:33:46.574399-07:00",
+  "closed_at": "2026-03-17T17:33:46.574398-07:00",
+  "close_reason": "Completed"
+}

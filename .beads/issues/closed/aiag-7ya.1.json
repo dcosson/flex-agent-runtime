@@ -1,0 +1,52 @@
+{
+  "id": "aiag-7ya.1",
+  "title": "Shared Instance Provisioner Package",
+  "description": "Package: internal/sandbox/control/instance/\nPlan references: Plan 19 section 5.1, Plan 20 section 3\nRequired reading: docs/plans/00-implementation-guide.md\n\nShared InstanceProvisioner interface package used by both plan 19 (Direct) and plan 20 (Fleet). Neither adapter imports the other; both import from this shared package.\n\nScope:\n- provisioner.go: InstanceProvisioner interface with all 6 methods (LaunchInstance, TerminateInstance, StopInstance, StartInstance, DescribeInstance, ListInstances)\n- Associated types: InstanceConfig, InstanceInfo, InstanceStatus, InstanceFilter, CloudInstanceState enum constants\n- Unit tests: interface contract test helpers (reusable by any provisioner implementation), type construction/validation tests\n- doc.go: package documentation\n\nEstimated size: ~250 lines (types + interface + contract test helpers)\nDependencies: None (leaf package, stdlib only)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-7ya",
+  "dependencies": [
+    {
+      "id": "aiag-7ya",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-ktp",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-7ya.2",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-1xd.1",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-1xd.5",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=19"
+  ],
+  "assignee": "concierge-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Complete. Commit: 1ea22af. make check + make test pass.",
+      "created_at": "2026-03-18T12:28:36.181962-07:00"
+    }
+  ],
+  "created_at": "2026-03-18T12:07:37.012459-07:00",
+  "updated_at": "2026-03-18T12:28:36.182243-07:00",
+  "closed_at": "2026-03-18T12:28:31.003402-07:00",
+  "close_reason": "Closed"
+}

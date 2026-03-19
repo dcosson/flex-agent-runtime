@@ -1,0 +1,68 @@
+{
+  "id": "aiag-rmv.7",
+  "title": "Sandbox-host LaunchProcess/KillProcess/GetProcessStatus RPCs",
+  "description": "Implement the three new RPC endpoints on the sandbox-host service: LaunchProcess,\nKillProcess, and GetProcessStatus. This is the sandbox-host side that NativeSandboxControl\ndelegates to.\n\nReference doc: docs/plans/11-sandbox-host-service.add03.md (full standalone addendum)\n\nKey deliverables:\n- internal/rpc/api/types.go — New RPC API types: LaunchProcessRequest/Response,\n  KillProcessRequest/Response, GetProcessStatusRequest/Response, ProcessStatus\n- internal/rpc/codec/sandbox_map.go — Codec mappings for new process management types\n- internal/rpc/transport/server.go — Register 3 new ConnectRPC procedures under\n  /rpc.v1.SandboxService/ (LaunchProcess, KillProcess, GetProcessStatus)\n- internal/sandbox/service.go — Extend SandboxHostService with process management:\n  - ManagedProcess tracking (per-session process map)\n  - LaunchProcess: gVisor path (bind-mount ZFS at /workspace, run in container) and\n    direct execution path (no gVisor)\n  - Port proxying: TCP reverse proxy on dynamically allocated port\n  - PID tracking and background process monitoring goroutine\n  - KillProcess: send signal to tracked PID\n  - GetProcessStatus: check PID status, exit code\n- internal/rpc/server/sandbox_server.go — New RPC handlers delegating to service\n- Session destroy cleanup: kill all launched processes before ZFS/directory cleanup\n- Unit tests for all process management logic\n- Integration tests for direct execution + port proxy lifecycle\n\nReferences:\n- Plan: docs/plans/11-sandbox-host-service.add03.md (all sections)\n- Parent plan: docs/plans/18-agent-loop-rpc.md §6 (SandboxControl LaunchProcess spec)\n- Depends on: existing sandbox-host service (aiag-zvy epic)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-rmv",
+  "dependencies": [
+    {
+      "id": "aiag-rmv",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-zvy.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-rmv.6",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "plan-doc=11-sandbox-host-service.add03",
+    "batch=plan18"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implementation complete: added LaunchProcess/KillProcess/GetProcessStatus across sandbox host + RPC transport, with unit/integration coverage. make check + make test are green. Awaiting reviewer-sea R1.",
+      "created_at": "2026-03-17T12:13:57.740892-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "Pushed commit 6a0a8fb to main. Scope includes sandbox host process lifecycle + RPC wiring + transport/client + tests. Validation: make check \u0026\u0026 make test passed. Ready for reviewer-sea R1.",
+      "created_at": "2026-03-17T12:14:24.675574-07:00"
+    },
+    {
+      "id": 3,
+      "author": "reviewer-sea",
+      "text": "R1 review complete -- approved with revisions. 11 findings (0 P0, 3 P1, 4 P2, 4 P3). See docs/reviews/aiag-rmv.7-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-17T12:16:55.349673-07:00"
+    },
+    {
+      "id": 4,
+      "author": "Danny Cosson",
+      "text": "Incorporated reviewer R1 (3xP1) in commit 14f677d: fixed proxy copy goroutine join, corrected gVisor launch status lifecycle, and reordered proxy/launch cleanup to avoid done/proxy races. Validation rerun: make check \u0026\u0026 make test passed. Awaiting reviewer R2.",
+      "created_at": "2026-03-17T12:19:58.02782-07:00"
+    },
+    {
+      "id": 5,
+      "author": "reviewer-sea",
+      "text": "R2 review complete -- approved. All R1 P1 findings addressed. 0 blocking items. See docs/reviews/aiag-rmv.7-r2-review-reviewer-sea.md",
+      "created_at": "2026-03-17T12:21:06.728301-07:00"
+    }
+  ],
+  "created_at": "2026-03-17T10:16:44.06987-07:00",
+  "updated_at": "2026-03-17T12:21:19.100906-07:00",
+  "closed_at": "2026-03-17T12:14:36.131627-07:00",
+  "close_reason": "Closed"
+}

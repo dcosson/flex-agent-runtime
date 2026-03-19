@@ -1,0 +1,35 @@
+{
+  "id": "aiag-oaj.3",
+  "title": "Draft 04-provider-google",
+  "description": "Draft plan doc + test harness for Google/Gemini provider. Follows patterns from 02-provider-anthropic.",
+  "status": "in_progress",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-oaj",
+  "dependencies": [
+    {
+      "id": "aiag-oaj",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=ai-agent-go"
+  ],
+  "assignee": "Danny Cosson",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Plan draft and test harness committed at e36ae84. Ready for review.",
+      "created_at": "2026-03-12T14:51:07.703654-07:00"
+    }
+  ],
+  "created_at": "2026-03-12T14:19:54.650256-07:00",
+  "updated_at": "2026-03-12T14:51:07.70466-07:00"
+}

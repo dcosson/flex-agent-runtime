@@ -1,0 +1,30 @@
+{
+  "id": "aiag-1xd.4",
+  "title": "Fleet Control Loop",
+  "description": "Package: internal/sandbox/control/fleet/\nPlan references: Plan 20 sections 5 (Control Loop), 4.1.3 (Session Count Reconciliation), 15.1 (Metrics), 15.2 (Structured Logging)\nRequired reading: docs/plans/00-implementation-guide.md\n\nScope:\n- fleet/control_loop.go: Background goroutine, 6-phase control loop:\n  1. Health Check -- poll every instance via FleetNodeClient.HealthCheck()\n  2. Handle Unhealthy -- consecutive failure tracking, transition to Draining\n  3. Scale-Up -- warm pool check, non-blocking LaunchInstance, MaxConcurrentProvisions guard\n  4. Scale-Down -- idle cooldown check, MinInstances/WarmPoolTarget guards\n  5. Drain Completion -- terminate drained instances (state -\u003e Terminating AFTER API success), MaxTerminateRetries alert, Phase 5b stuck Terminating cleanup\n  6. Provisioning Completion -- HealthCheck polling on Provisioning instances, timeout handling\n- Session count reconciliation algorithm (section 4.1.3)\n- Draining -\u003e Ready recovery for health-drained instances\n- Crash recovery via ListInstances (tag-based rediscovery)\n- Injectable clock for deterministic time control in tests\n- Observability: metrics (gauges, counters, histograms), structured logging for state transitions\n\nUnit tests:\n- Health check failure increments counter\n- 3 consecutive failures -\u003e Draining with DrainReason \"health\"\n- Healthy response resets counter\n- Session count reconciliation: overcount, undercount, sandbox-host restart\n- Scale-up triggered when capacity \u003c WarmPoolTarget\n- Scale-up respects MaxInstances, MaxConcurrentProvisions\n- Scale-down triggered when idle \u003e IdleCooldown\n- Scale-down respects MinInstances, WarmPoolTarget\n- Drain completion terminates at 0 sessions (Terminating AFTER API success)\n- Drain completion failure leaves Draining for retry\n- Drain completion retries next iteration\n- Drain completion alerts after MaxTerminateRetries\n- Phase 5b cleans up stuck Terminating instances\n- Drain timeout force-terminates\n- Health-drained instance recovers after 3 healthy checks\n- Scale-down drained instance does NOT recover\n- Provisioning timeout terminates\n- Provisioning -\u003e Ready on first healthy HealthCheck\n- Warm pool provisions to fill gap\n- Crash recovery: ListInstances rediscovers instances\n- Crash recovery: stale orphan terminated\n\nEstimated size: ~550 lines\nDependencies: Task 3 (FleetSandboxControl struct, helpers, FleetNodeClient)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-1xd",
+  "dependencies": [
+    {
+      "id": "aiag-1xd",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-1xd.3",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=20"
+  ],
+  "assignee": "coder-2-sea",
+  "created_at": "2026-03-18T12:10:26.596209-07:00",
+  "updated_at": "2026-03-18T13:21:59.342771-07:00",
+  "closed_at": "2026-03-18T13:21:59.342771-07:00",
+  "close_reason": "Closed"
+}

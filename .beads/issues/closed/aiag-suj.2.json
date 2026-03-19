@@ -1,0 +1,51 @@
+{
+  "id": "aiag-suj.2",
+  "title": "Agent Loop: NativeDriver, Turn Execution, Steering, Follow-up",
+  "description": "Implement agent loop and NativeDriver from docs/plans/05-agent.md.\n\nSections: §5.1 (Turn Execution Algorithm), §5.2 (Steering Semantics), §5.3 (Follow-up Semantics), §5.4 (Terminal Tool), §5.5 (Snapshot Trigger Seam), §7.1 (RuntimeController Integration Contract)\n\nKey deliverables:\n- NativeDriver implementing AgentDriver (loop.go)\n- Turn execution: snapshot conversation → transform → stream → tool execution → follow-up drain\n- Provider event relay to canonical AgentEvents\n- Steering injection at external call boundaries\n- Follow-up queue with FIFO ordering\n- Terminal tool short-circuit (no extra LLM continuation)\n- Snapshot trigger seam: turn_completed + state_change(idle) events\n- Public API: Prompt, Continue, Steer, FollowUp, Abort, Subscribe, Session (agent.go)\n- Component tests with mock provider and fake tools\n- Integration test with real provider (credential-gated)\n\nRequired reading: docs/plans/00-implementation-guide.md\nSee Implementation Guide §1.4 (AgentDriver), §2.1 (Lifecycle Ordering), §3.1 (Snapshot Trigger), §4 (Common Pitfalls), §5 (Seam: ai.Provider ↔ agent NativeDriver)\n\nReferences:\n- Plan: docs/plans/05-agent.md §5, §7.1\n- Test harness: docs/plans/05-agent-test-harness.md\n- Depends on: T1 (Agent Core Types)",
+  "status": "in_progress",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-suj",
+  "dependencies": [
+    {
+      "id": "aiag-suj",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-suj.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-suj.3",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-uek.1",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-g1g.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=3",
+    "plan-doc=05-agent"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Starting implementation on branch batch3/agent-loop after T1 merge to main (1461e90).",
+      "created_at": "2026-03-13T13:56:52.749235-07:00"
+    }
+  ],
+  "created_at": "2026-03-13T13:14:35.374834-07:00",
+  "updated_at": "2026-03-13T13:56:52.749471-07:00"
+}

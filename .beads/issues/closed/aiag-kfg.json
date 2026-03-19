@@ -1,0 +1,26 @@
+{
+  "id": "aiag-kfg",
+  "title": "Update provider plan docs to match core error types",
+  "description": "Plan docs 02-provider-anthropic, 03-provider-openai, and 04-provider-google reference error codes and stop reasons that do not exist in internal/ai core types:\n\n- ErrBadRequest (used in 03, 04 error classification tables) — core only has ErrContextOverflow, ErrRateLimit, ErrAuth, ErrServerError, ErrUnknown\n- ErrContentFilter / StopReasonContentFilter (used in 03, 04 for safety/content filter blocks) — core only has StopReasonError\n- TopP field on chatRequest/generationConfig (03, 04) — StreamOptions does not include TopP\n\nAll three providers correctly use the available core types. The plan doc text just needs updating to match reality. Also update the error classification tables (§7 in each plan) and any references to these non-existent constants.\n\nDiscovered during Batch 2 completion signoff (cbfd1f0).",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=ai-agent-go"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — Approved. 1 P3 (stale thinkingLevel gap in Google signoff — cosmetic). See docs/reviews/aiag-kfg-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-13T12:51:16.645459-07:00"
+    }
+  ],
+  "created_at": "2026-03-13T12:27:36.308973-07:00",
+  "updated_at": "2026-03-13T12:51:40.526341-07:00",
+  "closed_at": "2026-03-13T12:51:40.52634-07:00",
+  "close_reason": "Closed"
+}

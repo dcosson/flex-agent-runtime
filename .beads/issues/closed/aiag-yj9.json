@@ -1,0 +1,18 @@
+{
+  "id": "aiag-yj9",
+  "title": "Fix flaky property tests P3/P6 session ID collision",
+  "description": "TestP3_ResumeSessionValidationProperty and TestP6_CrossAgentResumeRoundTripProperty fail with 'session already exists' errors due to session ID collisions in rapid property tests. Discovered during make test run for aiag-rmv.5.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=agent-loop"
+  ],
+  "assignee": "coder-2-sea",
+  "created_at": "2026-03-17T11:31:36.259341-07:00",
+  "updated_at": "2026-03-17T11:51:19.808751-07:00",
+  "closed_at": "2026-03-17T11:51:19.808751-07:00",
+  "close_reason": "Closed"
+}

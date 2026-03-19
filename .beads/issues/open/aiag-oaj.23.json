@@ -1,0 +1,23 @@
+{
+  "id": "aiag-oaj.23",
+  "title": "R2 Review: Batch B (rotated)",
+  "description": "R2 batch review: 07-code-interpreter, 08-agent-tools-e2e, 09-sandbox-zfs, 09-h2-termmux-port, 10-sandbox-gvisor. Rotated from R1.",
+  "status": "in_progress",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-oaj",
+  "dependencies": [
+    {
+      "id": "aiag-oaj",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=ai-agent-go"
+  ],
+  "assignee": "reviewer-sea",
+  "created_at": "2026-03-12T15:39:45.767395-07:00",
+  "updated_at": "2026-03-12T15:48:26.461033-07:00"
+}

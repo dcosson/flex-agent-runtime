@@ -1,0 +1,59 @@
+{
+  "id": "aiag-73q.1",
+  "title": "Stubserver library + standalone binary + Docker infra",
+  "description": "Implement stubserver infrastructure from docs/plans/17-external-testing.md Section 12.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nKey deliverables:\n- Add NewHandler(opts ...Option) http.Handler to internal/ai/testutil/stubserver/ (same capture-wrapping handler as New() but without starting httptest.Server)\n- Create cmd/stubserver/main.go standalone binary with fixture loading, /health endpoint, X-Fixture header routing\n- Create e2etests/external/docker/Dockerfile.stubserver (multi-stage: builder + alpine)\n- Add stubserver service to e2etests/external/docker/docker-compose.e2e.yaml (all profiles)\n- Create initial SSE fixture files in testdata/fixtures/ (anthropic-simple-response.sse, anthropic-tool-call.sse, anthropic-multi-turn.sse at minimum)\n- Unit tests for NewHandler, standalone binary smoke test\n- make test passes\n\nAC: NewHandler returns working http.Handler, standalone binary serves fixtures and responds to /health, Docker image builds, fixtures load correctly.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-73q",
+  "dependencies": [
+    {
+      "id": "aiag-73q",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-73q.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4b",
+    "plan-doc=17-external-testing"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implementation complete locally: added stubserver.NewHandler + unit tests, new cmd/stubserver binary with fixture loading and /health, Dockerfile.stubserver, compose service across minimal/gvisor/full profiles, and initial anthropic fixtures under testdata/fixtures. make test passes. Preparing commit/push and handoff for R1 review.",
+      "created_at": "2026-03-15T18:53:32.196589-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R1 review complete: approved with revisions. 2 findings (1 P2, 1 P3). See docs/reviews/aiag-73q.1-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-15T18:56:51.848287-07:00"
+    },
+    {
+      "id": 3,
+      "author": "Danny Cosson",
+      "text": "Incorporated R1 findings from docs/reviews/aiag-73q.1-r1-review-reviewer-sea.md: (P2) NewHandler no longer wraps capture (capture retained only for New()), eliminating unbounded request retention in standalone mode. (P3) Updated anthropic-tool-call fixture to multi-chunk input_json_delta events for incremental JSON accumulation coverage. make test passes.",
+      "created_at": "2026-03-15T20:34:36.032824-07:00"
+    },
+    {
+      "id": 4,
+      "author": "Danny Cosson",
+      "text": "R2 review complete: approved. Both R1 findings fixed. See docs/reviews/aiag-73q.1-r2-review-reviewer-sea.md",
+      "created_at": "2026-03-15T20:35:42.213352-07:00"
+    }
+  ],
+  "created_at": "2026-03-15T18:49:55.495761-07:00",
+  "updated_at": "2026-03-15T20:35:59.625636-07:00",
+  "closed_at": "2026-03-15T20:35:59.625636-07:00",
+  "close_reason": "Closed"
+}

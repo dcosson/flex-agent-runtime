@@ -1,0 +1,37 @@
+{
+  "id": "aiag-3di.2",
+  "title": "Layer 2: Service-level TLA+ model",
+  "description": "Implement the service-level TLA+ spec. Required reading: docs/plans/21-agent-tlaplus-spec.md (section 5.1 Layer 2). Spec file: specs/agent_loop_service.tla or extend specs/agent_loop.tla. Model 2-3 sessions as abstracted state variables (idle/active/destroyed), not full FSMs. Verify: Close() drain including two-phase, capacity limits (maxSess), session registry invariants, wg consistency (safety property 7). Sessions modeled with turn starts/completions as atomic actions. Depends on Layer 1 establishing the single-session model.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-3di",
+  "dependencies": [
+    {
+      "id": "aiag-3di",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-3di.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime"
+  ],
+  "assignee": "Danny Cosson",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Layer 2 implemented in commit 8fad3fa. Added specs/agent_loop_service.tla and specs/agent_loop_service_mc.cfg (2-session abstract model with bounded operation counts). TLC run against committed cfg succeeded with no errors: 4,984 states generated, 2,307 distinct, depth 19, 3 temporal branches checked (CloseTermination, LateStartDrain, CloseReturnsWithZeroWG). make check and make test both passed.",
+      "created_at": "2026-03-18T07:25:51.032095-07:00"
+    }
+  ],
+  "created_at": "2026-03-17T22:52:01.650207-07:00",
+  "updated_at": "2026-03-18T07:26:38.122739-07:00",
+  "closed_at": "2026-03-18T07:26:38.122735-07:00",
+  "close_reason": "Closed"
+}

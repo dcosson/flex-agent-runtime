@@ -1,0 +1,37 @@
+{
+  "id": "aiag-0bh.3",
+  "title": "Terminal Mux: Remote streaming addendum + test harness",
+  "description": "Implement remote terminal streaming addendum + full test harness from docs/plans/09-h2-termmux-port.add01.md and docs/plans/09-h2-termmux-port-test-harness.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: Addendum (TerminalSubscription, StreamTerminal RPC, xterm.js compatibility, bandwidth management), test harness (P1-P5, F1-F5, S1-S4, B1-B4, ST1-ST3, SEC1-SEC3)\n\nKey deliverables:\n- TerminalSubscription: subscribe to terminal output stream, backpressure handling, client disconnect cleanup\n- StreamTerminal RPC: server-streaming endpoint for remote terminal access\n- xterm.js compatibility: escape sequence passthrough, resize events, UTF-8 handling\n- Bandwidth management: output throttling, buffer limits, slow client detection\n- Test harness: property tests (session lifecycle, event ordering), fault injection (PTY crash, driver hang, client disconnect), stress tests (many concurrent sessions, rapid attach/detach), benchmarks (event throughput, PTY latency), security (escape injection, resource exhaustion)\n- Integration tests for remote streaming end-to-end\n\nDepends on: Terminal Mux drivers task for AgentMonitor, TermmuxDriverAdapter, driver implementations.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-0bh",
+  "dependencies": [
+    {
+      "id": "aiag-0bh",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-0bh.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4",
+    "plan-doc=09-h2-termmux-port"
+  ],
+  "assignee": "reviewer-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implementation complete. Remote terminal streaming + test harness pushed to batch4/termmux-core @ 8989834. Ready for review.",
+      "created_at": "2026-03-13T20:43:18.917367-07:00"
+    }
+  ],
+  "created_at": "2026-03-13T18:00:10.471533-07:00",
+  "updated_at": "2026-03-13T20:43:18.918551-07:00"
+}

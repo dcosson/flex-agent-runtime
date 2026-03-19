@@ -1,0 +1,23 @@
+{
+  "id": "aiag-vaq",
+  "title": "Plan completion signoff",
+  "description": "Verify implemented plan docs match their actual code for serve orchestrator (plan 21).",
+  "status": "closed",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-vaq.1",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime"
+  ],
+  "created_at": "2026-03-18T15:38:43.461349-07:00",
+  "updated_at": "2026-03-18T15:43:28.543174-07:00",
+  "closed_at": "2026-03-18T15:42:51.65567-07:00",
+  "close_reason": "Auto-closed: all children completed"
+}

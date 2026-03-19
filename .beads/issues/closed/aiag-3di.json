@@ -1,0 +1,31 @@
+{
+  "id": "aiag-3di",
+  "title": "Agent Loop TLA+ Formal Verification",
+  "description": "Implement TLA+ formal specifications for the agent loop state machine per docs/plans/21-agent-tlaplus-spec.md. Three layers: single-session model, service-level model, and fork independence proof.",
+  "status": "closed",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-3di.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-3di.2",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-3di.3",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime"
+  ],
+  "created_at": "2026-03-17T22:51:30.207062-07:00",
+  "updated_at": "2026-03-18T07:26:38.147574-07:00",
+  "closed_at": "2026-03-18T07:26:38.147574-07:00",
+  "close_reason": "Auto-closed: all children completed"
+}

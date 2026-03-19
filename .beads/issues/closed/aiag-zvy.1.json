@@ -1,0 +1,57 @@
+{
+  "id": "aiag-zvy.1",
+  "title": "Sandbox Host: Session lifecycle, tier routing, tool dispatch, snapshots",
+  "description": "Implement SandboxHostService from docs/plans/11-sandbox-host-service.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: §3 (SandboxHostService struct + ServiceConfig), §4 (session lifecycle), §5 (tool dispatch + tier routing), §6 (snapshot management), §7 (cmd/sandbox-host binary)\n\nKey deliverables:\n- SandboxHostService struct with NewSandboxHostService(cfg, ZFSManager, GVisorManager, logger)\n- Session management: CreateSession (mutex for TOCTOU), DestroySession, PauseSession, ResumeSession\n- Session state machine: Creating → Active → Paused → Active → Destroying → [destroyed], plus Failed\n- Tool dispatch: ExecuteTool with tier classification — Tier 1 (local, fast) vs Tier 2 (gVisor container)\n- Tier routing: ClassifyTool determines execution path, Tier 2 creates container with ZFS bind-mount\n- Per-turn snapshots: TurnComplete using prospectiveTurn pattern\n- Per-tool snapshots: opt-in via config.PerToolSnapshots, named tool-{toolCallID}-{timestamp}\n- Snapshot management: CreateSnapshot, RollbackSession, ListSnapshots\n- cmd/sandbox-host binary skeleton with graceful shutdown\n- Unit tests for session lifecycle, state machine transitions, tier routing, snapshot management\n\nSee Implementation Guide §1.10: CreateSession uses mutex for atomic capacity-check + store (P1 finding). TurnComplete uses prospectiveTurn pattern. ZFS rollback is synchronous (\u003c100ms), no RollingBack state.\nSee Implementation Guide §1.6: ToolBackend contract — SandboxBackend must accept and propagate onProgress. SnapshotID propagation chain.\n\nDepends on: ZFS Manager (aiag-8o6) and gVisor Manager (aiag-xmq) epics — both must complete before this task starts.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-zvy",
+  "dependencies": [
+    {
+      "id": "aiag-zvy",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-8o6.2",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-xmq.2",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-zvy.2",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-glo.1",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-rmv.7",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4",
+    "plan-doc=11-sandbox-host-service"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Verified already implemented: SandboxHostService lifecycle/tier routing/tool dispatch/snapshots plus cmd/sandbox-host skeleton are present; go test ./internal/sandbox ./cmd/sandbox-host passes. Closing as complete.",
+      "created_at": "2026-03-17T11:57:43.319683-07:00"
+    }
+  ],
+  "created_at": "2026-03-13T17:59:38.196255-07:00",
+  "updated_at": "2026-03-17T11:57:43.332625-07:00",
+  "closed_at": "2026-03-17T11:57:43.332625-07:00",
+  "close_reason": "Closed"
+}

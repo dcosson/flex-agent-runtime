@@ -1,0 +1,58 @@
+{
+  "id": "aiag-rmv.8",
+  "title": "End-to-end test: orchestrator -\u003e flexagent serve agent -\u003e sandbox-host",
+  "description": "Implement the full end-to-end test validating the complete agent loop RPC flow:\norchestrator creates sandbox, launches agent process, sends messages, tools execute\nin sandbox, results stream back.\n\nSections: 14.2 (Integration Scenarios), step 14 of implementation order\n\nKey deliverables:\n- tests/integration/agent_rpc/ — E2E test suite:\n  - Create sandbox via SandboxControl\n  - Launch flexagent serve agent inside sandbox via LaunchProcess\n  - Create agent session on remote agent-server\n  - Send message, observe tool execution in sandbox, verify results\n  - Session forking: fork conversation into multiple sessions with different prompts\n  - Cross-agent resume: native loop conversation -\u003e Claude Code session.jsonl -\u003e verify\n  - Connection drop recovery: kill agent process, ResumeSession on new instance\n  - Graceful shutdown: SIGTERM -\u003e drain -\u003e verify clean exit\n- SandboxControl + AgentService combined scenarios\n- Event stream fidelity verification across the full stack\n\nReferences:\n- Plan: docs/plans/18-agent-loop-rpc.md §14.2\n- Test harness: docs/plans/18-agent-loop-rpc-test-harness.md §19 (exit criteria)\n- Depends on: aiag-rmv.4, aiag-rmv.5, aiag-rmv.6, aiag-rmv.7 (all prior tasks)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-rmv",
+  "dependencies": [
+    {
+      "id": "aiag-rmv",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.4",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-rmv.5",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-rmv.6",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "plan-doc=18-agent-loop-rpc",
+    "batch=plan18"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implemented tests/integration/agent_rpc E2E suite covering sandbox creation, LaunchProcess agent helper process, remote AgentService flows, fork/resume, cross-agent session log conversion, process drop recovery, and graceful shutdown. make check + make test passed. Ready for reviewer pass.",
+      "created_at": "2026-03-17T12:27:47.657001-07:00"
+    },
+    {
+      "id": 2,
+      "author": "reviewer-sea",
+      "text": "R1 review complete -- approved with revisions. 7 findings (0 P0, 1 P1, 3 P2, 3 P3). See docs/reviews/aiag-rmv.8-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-17T12:29:43.847372-07:00"
+    },
+    {
+      "id": 3,
+      "author": "reviewer-sea",
+      "text": "R2 review complete -- approved. All R1 findings addressed. 0 blocking items. See docs/reviews/aiag-rmv.8-r2-review-reviewer-sea.md",
+      "created_at": "2026-03-17T12:33:19.226357-07:00"
+    }
+  ],
+  "created_at": "2026-03-17T10:16:56.133678-07:00",
+  "updated_at": "2026-03-17T12:33:19.226873-07:00",
+  "closed_at": "2026-03-17T12:28:20.662066-07:00",
+  "close_reason": "Closed"
+}

@@ -1,0 +1,55 @@
+{
+  "id": "aiag-rmv",
+  "title": "Agent Loop RPC Implementation",
+  "description": "Implement the Agent Loop RPC Service from docs/plans/18-agent-loop-rpc.md, its\ntest harness (docs/plans/18-agent-loop-rpc-test-harness.md), and the sandbox-host\nLaunchProcess addendum (docs/plans/11-sandbox-host-service.add03.md).\n\nWraps the existing agent loop with a ConnectRPC interface so it can run as a\nstandalone service. Adds SandboxControl abstraction for unified sandbox lifecycle\nmanagement. Introduces the unified flexagent binary with serve subcommands.",
+  "status": "closed",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-rmv.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.2",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.3",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.4",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.5",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.6",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.7",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.8",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.9",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "plan-doc=18-agent-loop-rpc"
+  ],
+  "created_at": "2026-03-17T10:14:58.098965-07:00",
+  "updated_at": "2026-03-17T12:28:20.671412-07:00",
+  "closed_at": "2026-03-17T12:28:20.671412-07:00",
+  "close_reason": "Auto-closed: all children completed"
+}

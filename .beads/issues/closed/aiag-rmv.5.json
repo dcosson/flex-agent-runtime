@@ -1,0 +1,36 @@
+{
+  "id": "aiag-rmv.5",
+  "title": "Unified flexagent binary with serve subcommands",
+  "description": "Implement the unified flexagent binary with serve subcommands, migrating the existing\ncmd/sandbox-host into it.\n\nSections: 7 (Deployment Modes), 7.1-7.4 (Binary, In-Process, Sandbox-Launched, Shutdown),\n13 (Package Structure — cmd/flexagent), 17 Q1 (binary decision)\n\nKey deliverables:\n- cmd/flexagent/main.go — Unified binary entry point with subcommand routing\n- cmd/flexagent/serve_agent.go — 'flexagent serve agent' subcommand: starts AgentLoopService,\n  registers with transport.Server, listens on configured port, graceful shutdown with\n  signal handling (SIGTERM/SIGINT), drain period with configurable deadline\n- cmd/flexagent/serve_sandbox_host.go — 'flexagent serve sandbox-host' subcommand: migrates\n  existing cmd/sandbox-host/main.go logic\n- cmd/flexagent/serve_all.go — 'flexagent serve all' subcommand: runs agent loop +\n  sandbox-host in-process (local dev experience)\n- cmd/flexagent/serve_orchestrator.go — Placeholder/stub for future orchestrator subcommand\n- Update Makefile to build cmd/flexagent instead of (or in addition to) cmd/sandbox-host\n- Remove or redirect cmd/sandbox-host to flexagent (deprecation path)\n- Unit tests for CLI argument parsing, graceful shutdown behavior\n\nReferences:\n- Plan: docs/plans/18-agent-loop-rpc.md §7, §7.1-§7.4, §13, §17\n- Test harness: docs/plans/18-agent-loop-rpc-test-harness.md §12 (GS1-GS3)\n- Depends on: aiag-rmv.3 (RPC transport — needs refactored transport.Server)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-rmv",
+  "dependencies": [
+    {
+      "id": "aiag-rmv",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.3",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-rmv.8",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "plan-doc=18-agent-loop-rpc",
+    "batch=plan18"
+  ],
+  "assignee": "coder-2-sea",
+  "created_at": "2026-03-17T10:16:15.794965-07:00",
+  "updated_at": "2026-03-17T11:32:07.820901-07:00",
+  "closed_at": "2026-03-17T11:30:54.007962-07:00",
+  "close_reason": "Closed"
+}

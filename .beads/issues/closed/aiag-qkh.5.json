@@ -1,0 +1,47 @@
+{
+  "id": "aiag-qkh.5",
+  "title": "Comparison Oracle Test Suite",
+  "description": "Implement the cross-language comparison oracle test suite from docs/plans/01-ai-core-test-harness.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: Test harness §2 (Comparison Oracle Tests O1-O3)\n\nKey deliverables:\n- Node.js test harness: imports @mariozechner/pi-ai, exposes transformMessages/calculateCost/isContextOverflow via stdin/stdout JSON protocol\n- Test corpus generation script: produces 100+ diverse conversations covering simple text, tool calls, multiple tool calls per turn, cross-model switches (Anthropic→OpenAI), thinking blocks (regular, redacted, empty), error/aborted messages, orphaned tool calls, mixed multi-turn\n- O1: TransformMessages comparison — run Go and TS implementations on identical corpus, compare serialized output (ignoring Timestamp on synthetic ToolResultMessages)\n- O2: CalculateCost comparison — run Go and TS on identical model/usage pairs, verify identical results\n- O3: IsContextOverflow comparison — test identical error strings against both implementations, verify same boolean result\n- runTSTransform helper: subprocess execution of Node.js harness with JSON marshaling/unmarshaling\n- loadTestCorpus helper: loads test corpus from testdata/transform_corpus.json\n- Tests skip with testing.Short() (Node.js dependency)\n- CI tier: T2 Thorough (PR merge, nightly)\n\nReferences:\n- Plan: docs/plans/01-ai-core-test-harness.md §2\n- Depends on: Provider Infrastructure (aiag-qkh.2), JSON Schema Validation (aiag-qkh.3), Message Transformation (aiag-qkh.4) — oracle tests compare all three functional areas",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-qkh",
+  "dependencies": [
+    {
+      "id": "aiag-qkh",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-qkh.2",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-qkh.3",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-qkh.4",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "batch=1",
+    "plan-doc=01-ai-core-test-harness"
+  ],
+  "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — approved. 3 findings (0 P0, 0 P1, 0 P2, 3 P3). See docs/reviews/aiag-qkh.5-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-12T20:32:27.674537-07:00"
+    }
+  ],
+  "created_at": "2026-03-12T18:18:53.794172-07:00",
+  "updated_at": "2026-03-12T20:32:53.235485-07:00",
+  "closed_at": "2026-03-12T20:32:53.235485-07:00",
+  "close_reason": "Closed"
+}

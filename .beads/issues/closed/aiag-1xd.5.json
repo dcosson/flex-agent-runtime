@@ -1,0 +1,30 @@
+{
+  "id": "aiag-1xd.5",
+  "title": "EC2InstanceProvisioner + Contract Tests",
+  "description": "Package: internal/sandbox/control/fleet/ec2/\nPlan references: Plan 20 sections 3.1 (EC2InstanceProvisioner), 3.3 (Contract Tests)\nRequired reading: docs/plans/00-implementation-guide.md\n\nThis task is independent of Tasks 2-4 (fleet core). It only depends on the shared instance/ package (plan 19 task 1). Can be worked in parallel with fleet core tasks.\n\nScope:\n- fleet/ec2/ec2_provisioner.go: EC2InstanceProvisioner struct, EC2LaunchConfig struct, NewEC2InstanceProvisioner() constructor\n  - LaunchInstance -\u003e RunInstances (non-blocking, returns after instance ID assigned)\n  - TerminateInstance -\u003e TerminateInstances (idempotent)\n  - StopInstance -\u003e StopInstances\n  - StartInstance -\u003e StartInstances + DescribeInstances (wait for running)\n  - DescribeInstance -\u003e DescribeInstances with state mapping\n  - ListInstances -\u003e DescribeInstances with tag filters\n  - EC2 state -\u003e CloudInstanceState mapping\n  - Tags always include ManagedBy: flex-agent-runtime, fleet-id\n- fleet/provisioner_contract_test.go: Shared contract test suite verifiable by any InstanceProvisioner implementation:\n  - LaunchInstance returns valid InstanceInfo\n  - DescribeInstance on launched instance returns consistent state\n  - TerminateInstance succeeds, subsequent Describe returns Terminated\n  - ListInstances with matching tags returns launched instances\n  - ListInstances with non-matching tags returns empty\n  - LaunchInstance with invalid config returns error\n  - TerminateInstance on terminated instance is idempotent\n  - (Contract tests run against the mock provisioner; integration tests run against real EC2)\n\nUnit tests (mock EC2 API client):\n  - LaunchInstance calls RunInstances with correct params including EC2LaunchConfig fields\n  - LaunchInstance applies tags\n  - LaunchInstance returns immediately\n  - TerminateInstance calls TerminateInstances\n  - TerminateInstance idempotent on terminated\n  - StopInstance calls StopInstances\n  - StartInstance calls StartInstances and waits\n  - DescribeInstance maps EC2 states to CloudInstanceState\n  - ListInstances with tag filters\n  - ListInstances with state filter maps states\n  - ListInstances with no matches returns empty\n\nEstimated size: ~450 lines\nDependencies: Plan 19 task 1 only (InstanceProvisioner interface, InstanceConfig, etc.)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-1xd",
+  "dependencies": [
+    {
+      "id": "aiag-1xd",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-7ya.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=20"
+  ],
+  "assignee": "coder-2-sea",
+  "created_at": "2026-03-18T12:10:47.228541-07:00",
+  "updated_at": "2026-03-18T13:22:36.374545-07:00",
+  "closed_at": "2026-03-18T13:22:36.374545-07:00",
+  "close_reason": "Closed"
+}

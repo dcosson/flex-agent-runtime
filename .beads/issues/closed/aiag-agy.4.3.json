@@ -1,0 +1,25 @@
+{
+  "id": "aiag-agy.4.3",
+  "title": "Add --direct-host-addr flag to provision.sh orchestrator",
+  "description": "Add --direct-host-addr flag to provision.sh when provisioning an orchestrator instance. Instead of the orchestrator provisioning new EC2 instances for agent-direct mode, allow pointing at an existing instance address. This lets users test agent-direct placement mode with a pre-existing host. Update the systemd unit to pass the flag through to serve orchestrator.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-agy.4",
+  "dependencies": [
+    {
+      "id": "aiag-agy.4",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime"
+  ],
+  "assignee": "coder-2-sea",
+  "created_at": "2026-03-18T16:05:05.983305-07:00",
+  "updated_at": "2026-03-18T16:11:50.727569-07:00",
+  "closed_at": "2026-03-18T16:11:50.727568-07:00",
+  "close_reason": "Closed"
+}

@@ -1,0 +1,121 @@
+{
+  "id": "aiag-oaj",
+  "title": "Planning: flex-agent-runtime",
+  "description": "Full planning lifecycle for flex-agent-runtime. 16 sub-plans across 5 batches. Batch 1 (01-ai-core, 01-ai-core-test-harness) already reviewed. 13 plans to draft, 1 (09-h2-termmux-port) already drafted. Review cycles until convergence, seam review, then implementation guide.",
+  "status": "open",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-oaj.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.2",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.3",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.4",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.5",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.6",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.7",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.8",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.9",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.10",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.11",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.12",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.13",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.14",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.15",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.16",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.17",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.18",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.19",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.20",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.21",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.22",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.23",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.24",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.25",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-oaj.26",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=ai-agent-go"
+  ],
+  "created_at": "2026-03-12T14:19:40.234991-07:00",
+  "updated_at": "2026-03-12T14:19:40.234991-07:00"
+}

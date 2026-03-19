@@ -1,0 +1,28 @@
+{
+  "id": "aiag-q7c",
+  "title": "Configurable Backends + External Testing",
+  "description": "Implement configurable infrastructure backends (add02) and external testing infrastructure (plan 17). Add02 makes NativeSandboxEnvironment work with/without ZFS and gVisor via explicit config. Plan 17 sets up Docker-based E2E testing.",
+  "status": "closed",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-q7c.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-q7c.2",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4b"
+  ],
+  "created_at": "2026-03-15T16:42:31.740168-07:00",
+  "updated_at": "2026-03-15T17:31:10.905705-07:00",
+  "closed_at": "2026-03-15T17:31:10.905705-07:00",
+  "close_reason": "Auto-closed: all children completed"
+}

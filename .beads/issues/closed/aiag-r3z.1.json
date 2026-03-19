@@ -1,0 +1,33 @@
+{
+  "id": "aiag-r3z.1",
+  "title": "Signoff: Agent Loop RPC plan + test harness",
+  "description": "Verify docs/plans/18-agent-loop-rpc.md and docs/plans/18-agent-loop-rpc-test-harness.md\nagainst actual implementation.\n\nCode packages to compare against:\n- internal/agent/api/ (AgentService interface, types, codec)\n- internal/agent/service.go (AgentLoopService)\n- internal/agent/agenttest/ (mock driver, test stack)\n- internal/rpc/server/agent_server.go (AgentRPCServer)\n- internal/rpc/client/agent_client.go (AgentServiceClient)\n- internal/rpc/codec/agent_map.go (wire codec)\n- internal/rpc/transport/server.go (refactored transport.Server)\n- internal/rpc/errors.go (error mapping)\n- internal/sandbox/control/ (SandboxControl interface)\n- internal/sandbox/control/native/ (NativeSandboxControl)\n- internal/sandbox/control/cloud/ (CloudSandboxControl stub)\n- cmd/flexagent/ (unified binary)\n- tests/integration/agent_rpc/ (E2E tests)\n- tests/integration/scenarios/agent_rpc_*.go (fork + resume tests)\n\nInstructions:\n1. Read the plan doc thoroughly — build checklist of every type, interface, method, \n   algorithm, config option, error path, and cross-component contract\n2. Compare each checklist item against the actual code\n3. Classify deviations: Cosmetic, Structural, Contractual, or Missing\n4. For test harness doc: verify each test category has corresponding test files/functions,\n   counts match, CI integration works\n5. Run: go test ./internal/agent/... ./internal/rpc/... ./internal/sandbox/control/... \n   ./cmd/flexagent/... ./tests/integration/agent_rpc/... ./tests/integration/scenarios/... -count=1\n6. Run with race detector on concurrent code:\n   go test -race ./internal/agent/... ./internal/rpc/... -count=1\n7. Determine status per deviation severity rules\n8. Append Completion Signoff section to each doc\n9. Commit and push, report back via h2 send",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-r3z",
+  "dependencies": [
+    {
+      "id": "aiag-r3z",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "plan-doc=18-agent-loop-rpc"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Completion signoff appended to docs/plans/18-agent-loop-rpc.md and docs/plans/18-agent-loop-rpc-test-harness.md. Validation passed: go test target package set, go test -race internal/agent+internal/rpc, make check, make test. Signoff status is Partial with documented contractual/harness gaps in both docs.",
+      "created_at": "2026-03-17T15:47:28.891155-07:00"
+    }
+  ],
+  "created_at": "2026-03-17T15:38:55.76159-07:00",
+  "updated_at": "2026-03-17T17:34:31.404673-07:00",
+  "closed_at": "2026-03-17T15:47:14.490639-07:00",
+  "close_reason": "Closed"
+}

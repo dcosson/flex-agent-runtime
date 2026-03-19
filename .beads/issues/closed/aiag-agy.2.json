@@ -1,0 +1,56 @@
+{
+  "id": "aiag-agy.2",
+  "title": "agent-sandbox + tools-sandbox modes",
+  "description": "Add agent-sandbox and tools-sandbox placement modes per docs/plans/21-serve-orchestrator.md §2.4-2.5, §3.5, §6 Bead 2.\n\nRequired reading: docs/plans/21-serve-orchestrator.md\n\nKey deliverables:\n- agent-sandbox creation flow (reuses proxy logic from Bead 1, just different SandboxControl — NodeSandboxControl or FleetSandboxControl)\n- tools-sandbox creation flow: in-process AgentLoopService with SandboxBackend ToolEnvironment, including:\n  - resolveToolsSandboxHostAddr() — Node uses configured --sandbox-host-addr, Fleet uses CreateSandboxResponse.Address\n  - extractHostLocalSessionID() — strips fleet: prefix for host-local session ID\n  - Export fleet.ParseSandboxID() from internal/sandbox/control/fleet/\n  - Dual ID tracking: sandboxID (full prefixed) + toolSessionID (host-local)\n  - Compensation cleanup: destroy sandbox on AgentLoopService.CreateSession failure\n- Pause/resume logic for all three modes, including lossy-pause handling for agent-direct\n- Config validation for sandbox-host connectivity\n- Explicit Node(1 host)/Fleet(N hosts) selection in buildNodeOrFleetControl()\n- Unit tests for agent-sandbox and tools-sandbox flows\n- Unit tests for Fleet sandbox ID extraction (host-local vs fleet-prefixed)\n- Unit tests for Node vs Fleet host address resolution\n- Unit tests for pause/resume with mock SandboxControl\n\nDepends on: Bead 1 (core orchestrator + agent-direct)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-agy",
+  "dependencies": [
+    {
+      "id": "aiag-agy",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-agy.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-agy.3",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=21"
+  ],
+  "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "coder-2-sea",
+      "text": "Implementation complete in commit d9bb23d. All agent-sandbox, tools-sandbox flows, pause/resume, Fleet ID extraction, compensation cleanup, and 17 new unit tests. make check + make test + race detector all clean. Pending code review.",
+      "created_at": "2026-03-18T15:07:05.653584-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — approved with revisions. 4 findings (0 P0, 0 P1, 1 P2, 3 P3). See docs/reviews/aiag-agy.2-r1-review-reviewer-sea.md. P2-1: PauseSession/ResumeSessionSandbox mutate sessionEntry without per-entry lock — must be resolved before bead 3 (health monitoring). R1 findings from aiag-agy.1 were all addressed in this commit.",
+      "created_at": "2026-03-18T15:11:09.888157-07:00"
+    },
+    {
+      "id": 3,
+      "author": "Danny Cosson",
+      "text": "R1 re-check complete — all 4 findings resolved in e407509. No further issues. Ready to close.",
+      "created_at": "2026-03-18T15:16:06.31822-07:00"
+    }
+  ],
+  "created_at": "2026-03-18T14:38:11.39463-07:00",
+  "updated_at": "2026-03-18T15:16:17.134868-07:00",
+  "closed_at": "2026-03-18T15:07:05.614018-07:00",
+  "close_reason": "Closed"
+}

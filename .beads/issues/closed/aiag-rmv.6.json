@@ -1,0 +1,40 @@
+{
+  "id": "aiag-rmv.6",
+  "title": "SandboxControl interface and NativeSandboxControl",
+  "description": "Implement the SandboxControl interface and NativeSandboxControl (wrapping sandbox-host RPCs).\n\nSections: 6 (SandboxControl Interface), 6.1 (Native Implementation), 6.2 (Cloud placeholder)\n\nKey deliverables:\n- internal/sandbox/control/control.go — SandboxControl interface, all request/response types\n  (CreateSandboxRequest/Response, LaunchProcessRequest/Response, KillProcessRequest,\n  GetProcessStatusRequest/Response, ProcessStatus, SandboxCapabilities, ResourceSpec),\n  AddressToURL() helper\n- internal/sandbox/control/native/native.go — NativeSandboxControl wrapping sandboxClient:\n  - CreateSandbox -\u003e CreateSession (field mapping: Template-\u003eBaseSnapshot, Labels-\u003eLabels,\n    Resources-\u003elogged, Quota-\u003eWithDefaultQuota)\n  - DestroySandbox -\u003e DestroySession\n  - PauseSandbox -\u003e PauseSession\n  - ResumeSandbox -\u003e ResumeSession\n  - LaunchProcess -\u003e new LaunchProcess RPC (depends on add03 implementation)\n  - KillProcess -\u003e KillProcess RPC\n  - GetProcessStatus -\u003e GetProcessStatus RPC\n  - Capabilities() returns SandboxCapabilities with native sandbox flags\n- internal/sandbox/control/cloud/ — CloudSandboxControl placeholder (interface + stub)\n- Unit tests with mock sandbox-host for all SandboxControl methods\n- Note: LaunchProcess/KillProcess/GetProcessStatus depend on sandbox-host add03 (aiag-rmv.7).\n  CreateSandbox/DestroySandbox/PauseSandbox/ResumeSandbox can proceed immediately.\n\nReferences:\n- Plan: docs/plans/18-agent-loop-rpc.md §6, §6.1, §6.2\n- Test harness: docs/plans/18-agent-loop-rpc-test-harness.md §10 (SC1-SC4)\n- Depends on: aiag-rmv.3 (RPC transport), aiag-rmv.7 (sandbox-host LaunchProcess RPCs)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-rmv",
+  "dependencies": [
+    {
+      "id": "aiag-rmv",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.3",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-rmv.7",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-rmv.8",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "plan-doc=18-agent-loop-rpc",
+    "batch=plan18"
+  ],
+  "assignee": "coder-2-sea",
+  "created_at": "2026-03-17T10:16:28.775876-07:00",
+  "updated_at": "2026-03-17T12:20:31.879158-07:00",
+  "closed_at": "2026-03-17T12:20:05.252943-07:00",
+  "close_reason": "Closed"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "aiag-glo.2",
+  "title": "RPC: Test harness",
+  "description": "Implement RPC layer test harness from docs/plans/13-rpc-layer-test-harness.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: Full test harness doc — P1-P5 (protocol), F1-F5 (fault injection), O1-O3 (observability), S1-S3 (stress), B1-B4 (benchmarks), ST1-ST3 (soak), SEC1-SEC4 (security)\n\nKey deliverables:\n- Protocol tests: round-trip correctness for all RPC methods, streaming message ordering, error code mapping, SnapshotID propagation end-to-end\n- Fault injection: network partition simulation, server crash during stream, client disconnect mid-call, timeout propagation across RPC boundary\n- Observability: metric emission verification, trace context propagation, log correlation\n- Stress tests: concurrent RPC calls, rapid connect/disconnect, large payload handling\n- Benchmarks: RPC latency per method, streaming throughput, connection setup time\n- Soak tests: long-running stream stability, memory growth under sustained load\n- Security tests: auth token validation, TLS enforcement, request size limits, injection prevention\n- Integration tests using real ConnectRPC client/server with mock SandboxHostService\n\nDepends on: RPC layer core implementation task.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-glo",
+  "dependencies": [
+    {
+      "id": "aiag-glo",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-glo.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4",
+    "plan-doc=13-rpc-layer"
+  ],
+  "assignee": "coder-2-sea",
+  "created_at": "2026-03-13T18:00:32.2222-07:00",
+  "updated_at": "2026-03-17T12:26:38.971998-07:00",
+  "closed_at": "2026-03-17T12:26:38.971998-07:00",
+  "close_reason": "Closed"
+}

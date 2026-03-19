@@ -1,0 +1,40 @@
+{
+  "id": "aiag-agy.1",
+  "title": "Core orchestrator struct + agent-direct mode",
+  "description": "Implement core orchestrator package and agent-direct placement mode per docs/plans/21-serve-orchestrator.md §3.1-3.6, §6 Bead 1.\n\nRequired reading: docs/plans/21-serve-orchestrator.md\n\nKey deliverables:\n- internal/orchestrator/orchestrator.go — Orchestrator struct, constructor, Close/Shutdown, lifecycle context\n- internal/orchestrator/session.go — sessionEntry, PlacementMode types, session registry (add/get/remove/list)\n- internal/orchestrator/proxy.go — Full AgentService implementation: CreateSession with agent-direct routing, all proxy methods (SendMessage, Continue, Steer, FollowUp, Abort, SubscribeEvents, DestroySession, GetSession, ListSessions, ResumeSession), sessionIDRewritingReceiver for stream proxying\n- internal/orchestrator/config.go — OrchestratorConfig, validation, placementFromMetadata()\n- cmd/flexagent/serve_orchestrator.go — Replace placeholder with full CLI wiring (flags, config construction, HTTP server, signal handling)\n- Unit tests with mock SandboxControl and mock AgentService covering: placement routing, session ID translation, response rewrite, proxy delegation, stream event fidelity, destroy ordering, compensation cleanup, max sessions, close semantics\n\nWhy agent-direct first: simplest mode (no sandbox-host, no in-process loop), exercises full CreateSession -\u003e proxy -\u003e DestroySession lifecycle.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-agy",
+  "dependencies": [
+    {
+      "id": "aiag-agy",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-agy.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=21"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — approved with revisions. 6 findings (0 P0, 0 P1, 2 P2, 4 P3). See docs/reviews/aiag-agy.1-r1-review-reviewer-sea.md. P2-1: auth token leaked as CLI arg (remove --auth-token from agentLaunchArgs, keep env var). P2-2: missing compensation cleanup tests for factory and backend CreateSession failure steps.",
+      "created_at": "2026-03-18T15:01:52.559831-07:00"
+    }
+  ],
+  "created_at": "2026-03-18T14:37:59.546292-07:00",
+  "updated_at": "2026-03-18T15:43:38.242802-07:00",
+  "closed_at": "2026-03-18T15:43:38.242802-07:00",
+  "close_reason": "Closed"
+}

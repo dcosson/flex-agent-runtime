@@ -1,0 +1,28 @@
+{
+  "id": "aiag-8o6",
+  "title": "ZFS Manager Implementation",
+  "description": "Implement internal/sandbox/zfs from plan 09-sandbox-zfs. ZFSManager interface (18 methods), CLIManager (CLI-based), MockManager, validation, error classification. Plan: docs/plans/09-sandbox-zfs.md + test harness.",
+  "status": "closed",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-8o6.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-8o6.2",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4"
+  ],
+  "created_at": "2026-03-13T17:58:35.145785-07:00",
+  "updated_at": "2026-03-17T11:56:29.824729-07:00",
+  "closed_at": "2026-03-17T11:56:29.824729-07:00",
+  "close_reason": "Auto-closed: all children completed"
+}

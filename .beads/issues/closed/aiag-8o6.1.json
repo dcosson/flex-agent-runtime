@@ -1,0 +1,41 @@
+{
+  "id": "aiag-8o6.1",
+  "title": "ZFS: Core types, validation, dataset ops, MockManager",
+  "description": "Implement ZFS manager foundation from docs/plans/09-sandbox-zfs.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nSections: §3 (ZFSManager interface), §4.1 (types + validation), §4.2 (error classification), §4.3 (dataset operations), §4.6 (MockManager)\n\nKey deliverables:\n- ZFSManager interface (18 methods) in internal/sandbox/zfs/zfs.go\n- Core types: DatasetInfo, SnapshotInfo, PoolStatus, PoolSpace, DatasetOptions, DestroyOptions, RollbackOptions, SendOptions\n- ValidateName() input sanitizer — defense against injection via dataset/snapshot names\n- Error classification: ErrNotFound, ErrAlreadyExists, ErrBusy, ErrPermission, ErrInvalidName, ErrPoolFull, ErrNoSpace\n- Dataset operations on CLIManager: CreateDataset, CloneFromSnapshot, DestroyDataset, GetMountpoint, SetMountpoint, GetDatasetInfo, ListDatasets, DatasetExists\n- MockManager with configurable error injection for all interface methods\n- Unit tests for all types, validation, dataset ops, and MockManager behavior\n\nSee Implementation Guide §1.11: ZFSManager is a pure ZFS abstraction — no agents, sessions, or tools. CLI-based (no CGo). All methods concurrent-safe.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-8o6",
+  "dependencies": [
+    {
+      "id": "aiag-8o6",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-8o6.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=4",
+    "plan-doc=09-sandbox-zfs"
+  ],
+  "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Verified implemented in-tree (interface/types/validation/errors/dataset ops/mock + tests); go test ./internal/sandbox/zfs passes. Closing as complete.",
+      "created_at": "2026-03-17T11:56:29.805272-07:00"
+    }
+  ],
+  "created_at": "2026-03-13T17:58:57.925876-07:00",
+  "updated_at": "2026-03-17T11:56:29.819359-07:00",
+  "closed_at": "2026-03-17T11:56:29.819359-07:00",
+  "close_reason": "Closed"
+}

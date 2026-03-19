@@ -1,0 +1,51 @@
+{
+  "id": "aiag-knj.3",
+  "title": "Built-in Tools Test Harness",
+  "description": "Implement test harness suites from docs/plans/06-built-in-tools-test-harness.md.\n\nSections: All sections (§1-§10)\n\nKey deliverables:\n- Property tests P1-P5: path safety, edit correctness, backend parity, grep determinism, tier classifier stability\n- Fault injection F1-F5: mid-write crash, bash kill races, sandbox RPC failures, massive-output truncation, concurrent tool calls\n- Comparison/oracle O1-O3: golden output corpus, differential grep oracle (vs rg), edit operation oracle\n- Deterministic simulations S1-S3: tier routing, callback event ordering, snapshot metadata\n- Benchmarks B1-B5: read \u003e=500MB/s, edit p95 \u003c5ms, grep \u003e=100MB/s literal / \u003e=40MB/s regex, glob 100k paths p95 \u003c200ms, bash overhead \u003c3%\n- Stress/soak ST1-ST3: 12h mixed-tool soak, high-fanout grep stress, git command stress\n- Security SEC1-SEC4: path traversal+symlink escape, command injection boundary, secret redaction, resource exhaustion guards\n- CI tier matrix with Makefile targets\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nReferences:\n- Plan: docs/plans/06-built-in-tools.md\n- Test harness: docs/plans/06-built-in-tools-test-harness.md §1-§10\n- Depends on: T4 (Tool Framework) + T5 (Search/Bash/Git)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-knj",
+  "dependencies": [
+    {
+      "id": "aiag-knj",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-knj.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=3",
+    "plan-doc=06-built-in-tools"
+  ],
+  "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "coder-2-sea",
+      "text": "Implementation complete on batch3/tools-test-harness (fb7715d). All 23 harness tests + 5 benchmarks pass with -race. Requesting review.",
+      "created_at": "2026-03-13T16:16:33.983588-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R2 review complete — Approved. Both R1 findings addressed. 25 harness tests pass with -race. See docs/reviews/aiag-knj.3-r2-review-reviewer-sea.md @ 4564b26",
+      "created_at": "2026-03-13T16:22:33.955273-07:00"
+    },
+    {
+      "id": 3,
+      "author": "coder-2-sea",
+      "text": "R2 approved, merged to main at 143d269.",
+      "created_at": "2026-03-13T16:23:12.722307-07:00"
+    }
+  ],
+  "created_at": "2026-03-13T13:15:30.545882-07:00",
+  "updated_at": "2026-03-13T16:23:12.723665-07:00",
+  "closed_at": "2026-03-13T16:22:52.081623-07:00",
+  "close_reason": "Closed"
+}

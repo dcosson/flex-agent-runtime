@@ -1,0 +1,36 @@
+{
+  "id": "aiag-7ya.2",
+  "title": "Direct Adapter Foundation -- Types, Errors, Helpers",
+  "description": "Package: internal/sandbox/control/direct/\nPlan references: Plan 19 sections 3.1, 5.1, 8, 10\nRequired reading: docs/plans/00-implementation-guide.md\n\nScope:\n- errors.go: All sentinel errors (ErrInstanceNotFound, ErrProcessNotFound, ErrInstanceNotReady, ErrInstanceReadyTimeout, ErrProcessReadyTimeout, ErrSSMUnavailable, ErrSSMTimeout, ErrProcessLaunchFailed, ErrResourcesExceedMaximum, ErrDirectClosed)\n- aws.go: SSMAPI interface definition (3 methods wrapping SSM SDK)\n- ssm_command.go + ssm_command_test.go: shellQuote() helper, buildSSMCommand() function with comprehensive edge case tests (single quotes, double quotes, newlines, dollar signs, backticks, empty strings)\n- sandbox_id.go + sandbox_id_test.go: parseSandboxID(), encodeSandboxID() with direct: prefix handling, round-trip tests, wrong-prefix error tests\n- instance_type.go + instance_type_test.go: Resource-to-instance-type mapping function, ErrResourcesExceedMaximum for oversized requests, mapping table tests\n- direct.go: Config struct, instanceState, processState, instanceStatus typed constants, UserDataTemplateData struct, NewDirectSandboxControl constructor signature (constructor body is a stub that will be filled in Task 5 when crash recovery is added), functional option types\n- capabilities.go: Capabilities() method returning fixed capability set\n\nEstimated size: ~500 lines (types + helpers + tests)\nDependencies: Task 1 (imports instance.InstanceProvisioner)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-7ya",
+  "dependencies": [
+    {
+      "id": "aiag-7ya",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-7ya.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-7ya.3",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=19",
+    "assignee=concierge-sea"
+  ],
+  "created_at": "2026-03-18T12:07:52.943771-07:00",
+  "updated_at": "2026-03-18T12:44:25.000833-07:00",
+  "closed_at": "2026-03-18T12:44:25.000833-07:00",
+  "close_reason": "Closed"
+}

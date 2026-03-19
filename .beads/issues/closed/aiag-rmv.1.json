@@ -1,0 +1,32 @@
+{
+  "id": "aiag-rmv.1",
+  "title": "AgentService interface, types, and codec",
+  "description": "Implement the AgentService interface, request/response types, and AgentMessageRecord codec\nfrom docs/plans/18-agent-loop-rpc.md.\n\nSections: 3 (AgentService Interface), 3.1 (Request/Response Types), 3.3 (AgentMessageRecord\nSerialization Format), 3.4 (ResumeSession Validation rules — types only, not implementation),\n5.5 first half (internal/agent/api/codec.go)\n\nKey deliverables:\n- internal/agent/api/agent.go — AgentService interface, EventReceiver interface\n- internal/agent/api/agent_types.go — All request/response types, SessionConfig, ToolEnvironmentConfig,\n  AgentMessageRecord, AgentSessionSummary\n- internal/agent/api/codec.go — AgentMessageToRecord(), RecordToAgentMessage() with JSON schema\n  per role (user, assistant, tool_result)\n- Unit tests for codec round-trip fidelity (all roles, edge cases: empty content, multi-block,\n  image blocks, tool_use blocks)\n\nReferences:\n- Plan: docs/plans/18-agent-loop-rpc.md §3, §3.1, §3.3, §5.5\n- Test harness: docs/plans/18-agent-loop-rpc-test-harness.md §3 (P2: codec round-trip)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-rmv",
+  "dependencies": [
+    {
+      "id": "aiag-rmv",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-rmv.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "plan-doc=18-agent-loop-rpc",
+    "batch=plan18"
+  ],
+  "assignee": "coder-1-sea",
+  "created_at": "2026-03-17T10:15:10.441936-07:00",
+  "updated_at": "2026-03-17T10:27:47.701936-07:00",
+  "closed_at": "2026-03-17T10:27:47.701936-07:00",
+  "close_reason": "Closed"
+}

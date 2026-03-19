@@ -1,0 +1,51 @@
+{
+  "id": "aiag-91v.2",
+  "title": "Mode 2: Test harness (P/F/O/S/B/ST/SEC suites)",
+  "description": "Implement Mode 2 test harness from docs/plans/15-mode2-e2e-test-harness.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nKey deliverables:\n- Property tests P1-P5: session lifecycle FSM, event normalization consistency, config path stability, idle snapshot trigger invariant, attach/detach safety\n- Fault injection F1-F5: PTY timeout/hung child, event-source partial failure (disable OTEL/hooks/log), credential injection failure, pause/resume race under burst, driver crash mid-turn\n- Oracle O1-O3: source-fusion vs ground-truth, Claude vs Codex parity, Mode 1/Native reference\n- Simulations S1-S3: session-log replay, lifecycle command simulation, config-dir migration\n- Benchmarks B1-B4: normalization p95\u003c200ms, PTY throughput, attach p95\u003c150ms, idle snapshot trigger p95\u003c500ms\n- Stress ST1-ST3: 12h driver soak, multi-session stress, burst lifecycle stress\n- Security SEC1-SEC4: credential isolation, config-dir perms, session-log sanitization, PTY input hardening\n- CI tier mapping: PR-fast ~20s, PR-standard ~60s, Nightly ~3h\n\nDepends on: Mode 2 E2E core task.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-91v",
+  "dependencies": [
+    {
+      "id": "aiag-91v",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-91v.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=5",
+    "plan-doc=15-mode2-e2e"
+  ],
+  "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implementation complete @ 9513762. All suites: P1-P5 property tests (rapid), F1-F5 fault injection, O1-O3 oracle, S1-S3 simulation, B1-B4 benchmarks (all targets met), ST1-ST3 stress (30s soak, multi-session, burst), SEC1-SEC4 security. 50+ tests, all passing. Sending for review.",
+      "created_at": "2026-03-14T15:03:31.618762-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R1 review fixes incorporated and pushed @ 0c727db. All 5 findings addressed: SEC4 real PTY+replay, O2/O3 structurally different scripts, P5 real attach/detach, B2 goroutine leak fix, ST1 tier-gating. All tests pass, vet+staticcheck clean. Awaiting reviewer sign-off.",
+      "created_at": "2026-03-14T15:17:20.490836-07:00"
+    },
+    {
+      "id": 3,
+      "author": "Danny Cosson",
+      "text": "R1 review signed off by reviewer-sea. All 5 findings verified. Bead closed.",
+      "created_at": "2026-03-14T15:20:56.357818-07:00"
+    }
+  ],
+  "created_at": "2026-03-14T14:16:12.571398-07:00",
+  "updated_at": "2026-03-14T15:20:56.358024-07:00",
+  "closed_at": "2026-03-14T15:20:46.881048-07:00",
+  "close_reason": "Closed"
+}

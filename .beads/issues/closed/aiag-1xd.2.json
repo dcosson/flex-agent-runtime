@@ -1,0 +1,44 @@
+{
+  "id": "aiag-1xd.2",
+  "title": "Capacity-Aware Routing",
+  "description": "Package: internal/sandbox/control/fleet/\nPlan references: Plan 20 section 6 (Capacity-Aware Routing)\nRequired reading: docs/plans/00-implementation-guide.md\n\nScope:\n- fleet/routing.go: CapacityRouter struct, SelectInstance() with spread strategy, headroom scoring, CapacityHeadroom threshold filtering, two-level tiebreaker (IdleSince then atomic round-robin counter)\n- Router configuration from FleetConfig\n\nUnit tests:\n- routing_test.go: Returns instance with most headroom, breaks ties using IdleSince, breaks ties with round-robin when equal IdleSince, distributes evenly over many calls, skips Draining/Terminating/Provisioning instances, skips instances above CapacityHeadroom, returns ErrNoCapacity when all full, single available instance returned correctly\n\nEstimated size: ~250 lines\nDependencies: Task 1 (uses ManagedInstance, InstanceState, FleetConfig)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-1xd",
+  "dependencies": [
+    {
+      "id": "aiag-1xd",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-1xd.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-1xd.3",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=20"
+  ],
+  "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "coder-2-sea",
+      "text": "Completed: routing.go with CapacityRouter, NewCapacityRouter, SelectInstance. 15 tests in routing_test.go. make check \u0026\u0026 make test clean.",
+      "created_at": "2026-03-18T12:58:38.846002-07:00"
+    }
+  ],
+  "created_at": "2026-03-18T12:09:34.987226-07:00",
+  "updated_at": "2026-03-18T12:58:38.846122-07:00",
+  "closed_at": "2026-03-18T12:58:38.830862-07:00",
+  "close_reason": "Closed"
+}

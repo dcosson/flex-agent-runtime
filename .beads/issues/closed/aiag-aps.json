@@ -1,0 +1,27 @@
+{
+  "id": "aiag-aps",
+  "title": "Google: wire up thinkingLevel mapping + missing finish reasons",
+  "description": "Two small Google provider gaps: (1) Gemini thinkingLevel mapping is not implemented — the wire type is ready but the mapping from StreamOptions thinking budget to the Gemini thinkingLevel field is absent. (2) 4 image-related finish reasons (BLOCKLIST, PROHIBITED_CONTENT, SPII, IMAGE_SAFETY) are missing from the Google provider's stop reason mapping and P3 completeness test.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=2-followup"
+  ],
+  "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — Approved. 1 P3 finding (cosmetic: empty string default for unrecognized thinking levels). No changes needed. See docs/reviews/aiag-aps-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-13T12:45:46.368317-07:00"
+    }
+  ],
+  "created_at": "2026-03-13T12:30:48.192677-07:00",
+  "updated_at": "2026-03-13T12:46:50.376488-07:00",
+  "closed_at": "2026-03-13T12:46:24.293885-07:00",
+  "close_reason": "Closed"
+}

@@ -1,0 +1,44 @@
+{
+  "id": "aiag-rmv.3",
+  "title": "RPC transport layer (server, client, codec, error mapping)",
+  "description": "Implement the full RPC transport layer for AgentService: error mapping, wire-format\ncodec, AgentRPCServer, transport.Server refactoring, and AgentServiceClient.\n\nSections: 5 (RPC Transport), 5.1 (ConnectRPC Procedures), 5.2 (AgentRPCServer),\n5.3 (AgentServiceClient), 5.4 (Error Mapping), 5.5 second half (wire-format codec)\n\nKey deliverables:\n- internal/rpc/errors.go — Extend MapError() with agent error -\u003e ConnectRPC code mappings\n  (BusyError, StoppedError, InvalidStateError, ErrQueueFull, session not found, etc.)\n- internal/rpc/codec/agent_map.go — Wire-format codec: SessionMetrics serialization,\n  EventReceiver -\u003e AgentEventReceiver adaptation, ResourceSpec mapping, request/response\n  serialization + unit tests (agent_map_test.go)\n- internal/rpc/server/agent_server.go — AgentRPCServer with handlers for all 11 procedures\n  (8 unary + 3 server-stream). Follows SandboxServer delegation pattern.\n- internal/rpc/transport/server.go — REFACTOR to functional options (WithSandboxService,\n  WithAgentEventService, WithSessionManager, WithAgentService). Handler() conditionally\n  registers procedures. Update existing sandbox-host callers. This is a change to plan 13.\n- internal/rpc/client/agent_client.go — AgentServiceClient implementing AgentService over\n  ConnectRPC. Server stream methods return EventReceiver wrapping ConnectRPC stream.\n- Unit tests for error mapping, codec round-trips, server handler delegation, client construction\n\nReferences:\n- Plan: docs/plans/18-agent-loop-rpc.md §5, §5.1-§5.5\n- Test harness: docs/plans/18-agent-loop-rpc-test-harness.md §6 (RT1-RT3)\n- Depends on: aiag-rmv.2 (AgentLoopService)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-rmv",
+  "dependencies": [
+    {
+      "id": "aiag-rmv",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-rmv.2",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-rmv.4",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-rmv.5",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-rmv.6",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "plan-doc=18-agent-loop-rpc",
+    "batch=plan18"
+  ],
+  "assignee": "coder-1-sea",
+  "created_at": "2026-03-17T10:15:44.746464-07:00",
+  "updated_at": "2026-03-17T11:09:48.396599-07:00",
+  "closed_at": "2026-03-17T11:09:48.396599-07:00",
+  "close_reason": "Closed"
+}

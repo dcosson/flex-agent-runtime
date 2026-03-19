@@ -1,0 +1,32 @@
+{
+  "id": "aiag-ktp",
+  "title": "Rename NativeSandboxControl to NodeSandboxControl",
+  "description": "Rename the NativeSandboxControl package from internal/sandbox/control/native/ to internal/sandbox/control/node/ and update the type name from NativeSandboxControl to NodeSandboxControl. Update all references across the codebase.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nThis is a prerequisite for both plan 19 (Direct Adapter) and plan 20 (Fleet Management) which reference the new name.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "dependents": [
+    {
+      "id": "aiag-7ya.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "assignee=concierge-sea"
+  ],
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Complete. Commit: e21faa5. make check + make test pass.",
+      "created_at": "2026-03-18T12:23:41.375055-07:00"
+    }
+  ],
+  "created_at": "2026-03-18T12:07:13.222852-07:00",
+  "updated_at": "2026-03-18T12:23:41.375272-07:00",
+  "closed_at": "2026-03-18T12:23:33.632268-07:00",
+  "close_reason": "Closed"
+}

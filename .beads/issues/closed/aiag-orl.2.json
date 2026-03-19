@@ -1,0 +1,31 @@
+{
+  "id": "aiag-orl.2",
+  "title": "Mode 3: Test harness (P/F/O/S/B/ST/SEC suites)",
+  "description": "Implement Mode 3 test harness from docs/plans/14-mode3-e2e-test-harness.md.\n\nRequired reading: docs/plans/00-implementation-guide.md\n\nKey deliverables:\n- Property tests P1-P5: lifecycle FSM, snapshot monotonicity, rollback consistency, dispatch integrity, event/RPC correlation\n- Fault injection F1-F8: RPC transient failure, host restart, rollback race, pause/resume race, event stream interruption, TCP reset, TLS cert rotation, network partition\n- Oracle O1-O3: Mode 1 vs Mode 3 parity, snapshot oracle, lifecycle trace replay\n- Simulations S1-S3: distributed timeline, rollback branching, session recovery\n- Benchmarks B1-B4: tool dispatch p95\u003c=10ms, lifecycle p95\u003c=100ms, rollback p95\u003c=500ms, events\u003e=5k/min\n- Stress ST1-ST3: multi-session stress, 12h soak, burst recovery\n- Security SEC1-SEC4: session isolation, snapshot auth, transport hardening, metadata redaction\n- CI tier mapping: PR-fast ~15s, PR-standard ~45s, Nightly ~2h\n\nDepends on: Mode 3 E2E core task.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-orl",
+  "dependencies": [
+    {
+      "id": "aiag-orl",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-orl.1",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=aiag",
+    "batch=5",
+    "plan-doc=14-mode3-e2e"
+  ],
+  "assignee": "coder-1-sea",
+  "created_at": "2026-03-14T14:15:46.256285-07:00",
+  "updated_at": "2026-03-14T14:58:39.373933-07:00",
+  "closed_at": "2026-03-14T14:58:39.373933-07:00",
+  "close_reason": "Closed"
+}

@@ -1,0 +1,52 @@
+{
+  "id": "aiag-1xd.3",
+  "title": "FleetSandboxControl Core -- CreateSandbox, Delegation, Close",
+  "description": "Package: internal/sandbox/control/fleet/\nPlan references: Plan 20 sections 4.1 (constructor, claim-slot, lock ordering), 4.2 (CreateSandbox), 4.3 (delegation methods), 4.4 (Close), 4.5 (Capabilities), 15.4 (error classification)\nRequired reading: docs/plans/00-implementation-guide.md\n\nThis is the largest task -- the core FleetSandboxControl struct and all SandboxControl method implementations.\n\nScope:\n- fleet/fleet.go: FleetSandboxControl struct, constructor NewFleetSandboxControl(), FleetNodeClient interface, SandboxClientFactory type\n- CreateSandbox with atomic claim-slot protocol (section 4.1.1), address rewriting (section 4.2)\n- DestroySandbox with decrement-before-RPC + rollback-on-failure pattern\n- LaunchProcess, KillProcess, GetProcessStatus, PauseSandbox, ResumeSandbox -- all with SandboxID parsing and request struct rewriting to session-local ID\n- Capabilities() returning ConcurrentSandboxes = MaxInstances * MaxSessionsPerInstance\n- Close() implementing io.Closer: cancel control loop, drain instances, terminate or leave running\n- Singleflight provision coordination (provisionGroup, pendingLaunches)\n- getInstanceClient(), incrementSessionCount(), decrementSessionCount() helpers\n- FleetStatus() method\n\nUnit tests (extensive):\n- CreateSandbox routes to least-loaded instance and returns fleet-prefixed SandboxID\n- CreateSandbox with no capacity waits on singleflight provision\n- CreateSandbox concurrent callers share single provision (no overshoot)\n- CreateSandbox at MaxInstances with all full returns error\n- CreateSandbox claim-slot rolls back on RPC failure\n- CreateSandbox racing with drain transition handled by claim-slot\n- DestroySandbox parses SandboxID, delegates, decrements count\n- DestroySandbox failed RPC re-increments count\n- DestroySandbox invalid SandboxID returns error\n- LaunchProcess / KillProcess / GetProcessStatus route correctly\n- PauseSandbox / ResumeSandbox route correctly\n- CreateSandbox overrides Address with routable host:port\n- LaunchProcess rewrites request SandboxID to session-local ID\n- KillProcess / GetProcessStatus rewrite SandboxID\n- Capabilities returns correct ConcurrentSandboxes\n- Concurrent CreateSandbox serialized correctly\n- Close stops loop, drains, terminates\n- Close with LeaveInstancesOnClose leaves instances running\n- Close rejects new CreateSandbox with ErrFleetClosed\n\nTest doubles:\n- MockInstanceProvisioner (records calls, returns configured responses)\n- Mock SandboxClientFactory returning mock FleetNodeClient\n\nEstimated size: ~600 lines\nDependencies: Task 1 (SandboxID, ManagedInstance, InstanceState), Task 2 (CapacityRouter)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-1xd",
+  "dependencies": [
+    {
+      "id": "aiag-1xd",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-1xd.1",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-1xd.2",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-1xd.4",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-1xd.6",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=20"
+  ],
+  "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "coder-2-sea",
+      "text": "Completed: fleet.go with full FleetSandboxControl (460 lines), fleet_test.go with mock doubles and 24 tests. Implements SandboxControl + io.Closer. Race-free under -race. make check \u0026\u0026 make test clean.",
+      "created_at": "2026-03-18T13:10:48.092142-07:00"
+    }
+  ],
+  "created_at": "2026-03-18T12:09:57.546673-07:00",
+  "updated_at": "2026-03-18T13:10:48.092265-07:00",
+  "closed_at": "2026-03-18T13:10:48.078777-07:00",
+  "close_reason": "Closed"
+}
