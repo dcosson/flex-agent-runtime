@@ -391,18 +391,18 @@ embedding_models = [
 def main():
     catalog = OrderedDict()
     catalog["anthropic"] = anthropic_models
-    catalog["openai"] = openai_models
     catalog["google"] = google_models
+    catalog["openai"] = openai_models
     catalog["openrouter"] = openrouter_models
 
     with open(CATALOG_PATH, "w") as f:
-        json.dump(catalog, f, indent=2)
+        json.dump(catalog, f, indent=2, sort_keys=True)
         f.write("\n")
     print(f"Wrote {CATALOG_PATH}")
     print(f"  {sum(len(v) for v in catalog.values())} chat models across {len(catalog)} providers")
 
     with open(EMBEDDING_CATALOG_PATH, "w") as f:
-        json.dump(embedding_models, f, indent=2)
+        json.dump(embedding_models, f, indent=2, sort_keys=True)
         f.write("\n")
     print(f"Wrote {EMBEDDING_CATALOG_PATH}")
     print(f"  {len(embedding_models)} embedding models")
