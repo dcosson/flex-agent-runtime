@@ -5,7 +5,7 @@
 **Depends on:** 01-ai-core (core types, registries), [01-ai-core.add01](./01-ai-core.add01.md) (embedding types)
 **Depended on by:** Future provider plans, agent runtime configuration
 **Implements:** API client type / provider separation, provider registry refactor, fallback/custom provider mechanism, catalog restructuring
-**Reviews incorporated:** R1A (Reviewer A), R1B (Reviewer B), R2 -- see disposition tables at end
+**Reviews incorporated:** R1A (Reviewer A), R1B (Reviewer B), R2, SR (Seam Review) -- see disposition tables at end
 
 ---
 
@@ -547,6 +547,8 @@ Changes from current:
 - `PricingKnown` field added: `true` for catalog-loaded models (pricing is known and accurate), `false` for custom models by default (can be set via `CustomModelOpts`). This disambiguates "genuinely free" (PricingKnown=true, Cost all zeros) from "unknown pricing" (PricingKnown=false)
 - `Headers` field changed from `map[string]string` to `map[string][]string` for multi-valued header support
 
+**Note on deep copy:** `deepCopyModel` must be updated to handle the `Headers map[string][]string` field. Inner slices must be cloned independently, matching the pattern used in `deepCopyProviderConfig` (Section 3.4).
+
 ### 3.7 Stream Entry Points Changes
 
 The top-level `Stream()` / `Complete()` functions change their resolution logic:
@@ -732,11 +734,16 @@ func init() {
         }
     }
 
-    // Phase 3: Register embedding models (from embedding catalog)
-    // ... embedding catalog loading follows the same pattern,
-    // validating that each model's Provider matches a registered provider config.
+    // Phase 3: Register embedding models (from embedding catalog).
+    // The //go:embed directive for embedding_catalog.json stays in
+    // embedding_models.go (same package, so the var is accessible here).
+    // embedding_models.go exports a package-level loadEmbeddingCatalog()
+    // function that is called here. The separate init() in embedding_models.go
+    // is removed -- all initialization flows through this single init().
+    // Each model's Provider is validated against registered provider configs.
     // EmbeddingModel.API is derived from ProviderConfig.EmbeddingAPIClientType
     // when present, or retained from the embedding catalog's own "api" field.
+    loadEmbeddingCatalog(catalog.Providers)
 }
 ```
 
@@ -786,6 +793,13 @@ func RegisterCustomProvider(cfg CustomProviderConfig) error {
         return fmt.Errorf("custom provider %q: baseURL is required", cfg.Name)
     }
 
+    // Register the provider config first to maintain consistent lock ordering:
+    // providerConfigMu → directAPIKeysMu (same order as UnregisterProviderConfig
+    // and ClearProviderConfigs). Storing the direct key before RegisterProviderConfig
+    // would reverse this ordering and create an ABBA deadlock risk under concurrent
+    // registration and unregistration.
+    RegisterProviderConfig(cfg.ProviderConfig)
+
     // If a direct API key was provided, store it in the module-level map.
     // ResolveEndpoint checks this map as step 2 in key resolution.
     if cfg.APIKey != "" {
@@ -794,7 +808,6 @@ func RegisterCustomProvider(cfg CustomProviderConfig) error {
         directAPIKeysMu.Unlock()
     }
 
-    RegisterProviderConfig(cfg.ProviderConfig)
     return nil
 }
 ```
@@ -1055,6 +1068,14 @@ func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*Embeddin
 }
 ```
 
+**EmbedFunc type signature:** `EmbedFunc` is updated to include `ProviderEndpoint` as its second parameter, matching the `EmbeddingAPIClient.Embed()` signature:
+
+```go
+type EmbedFunc func(ctx context.Context, endpoint ProviderEndpoint, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error)
+```
+
+`BatchEmbed` passes the endpoint through to each batch call. All three embedding provider implementations (openai, google, cohere) that use `BatchEmbed` must update their `embedSingle` methods to accept `ProviderEndpoint` and pass it through.
+
 **Per-call embedding overrides:** Per-call API key or header overrides for embeddings are out of scope for now. Custom providers that supply keys via `RegisterCustomProvider` work for embeddings since the key is on the provider config. This may be revisited in the future if per-call embedding overrides are needed.
 
 ### 3.12 Backwards Compatibility Shim
@@ -1078,6 +1099,9 @@ Each provider package (`openai`, `anthropic`, `google`) must:
 5. Remove stored `baseURL` and `apiKey` fields -- use `endpoint.BaseURL` and `endpoint.APIKey` instead.
 6. Move provider-specific defaults (Anthropic version, Google API version) to `ProviderSpecific` in catalog config.
 7. Change `Register()` to register an `APIClient` (not the old `Provider`) and separately ensure provider configs are registered via catalog or explicit calls.
+8. Update all `StreamSimple` implementations to remove the `apiKey` argument from `BuildBaseOptions` calls. All three providers (openai, anthropic, google) currently call `ai.BuildBaseOptions(model, &opts, p.apiKey)` -- the `apiKey` parameter is removed since key resolution now happens in `ResolveEndpoint`.
+
+9. Update error event helpers (e.g., `sendErrorEvent`) to use `endpoint.ProviderName` instead of hardcoded provider name strings (e.g., the current `Provider: "openai"` in `openai/stream.go`). The `sendErrorEvent` function signature must accept `ProviderEndpoint` (or at minimum the provider name string) to support this.
 
 Each embedding provider package (`openai`, `google`, `cohere`) must additionally:
 
@@ -1129,6 +1153,8 @@ ai.RegisterCustomProvider(ai.CustomProviderConfig{
 })
 ```
 
+**StreamOptions.Headers callers:** All callers constructing `StreamOptions` with `Headers` must update from `map[string]string` to `map[string][]string`. Use `grep -rn 'Headers:.*map\[string\]string'` or `grep -rn 'Headers.*map\[string\]string'` across the codebase to catch all call sites that need updating.
+
 **sourceID cleanup migration:** Tests that currently use sourceID-based bulk cleanup:
 ```go
 // Old pattern:
@@ -1165,6 +1191,7 @@ Each embedding provider implementation must:
 3. Replace `model.BaseURL` usage with `endpoint.BaseURL`.
 4. Register via `ai.RegisterEmbeddingAPIClient()` instead of the old embedding provider registration.
 5. Use `endpoint.APIKey` instead of stored API key fields.
+6. Delete `resolveBaseURL` helper methods (present in OpenAI and Cohere embedding providers) -- base URL now comes exclusively from `endpoint.BaseURL`.
 
 ---
 
@@ -1381,9 +1408,8 @@ internal/ai/
                                 #           Headers changed to map[string][]string)
     embedding_api.go            # CHANGED: Embed() uses provider config for endpoint,
                                 #           resolves embedding client type from provider or model.
-                                #           EmbedFunc type signature needs updating to include
-                                #           ProviderEndpoint, or removed if superseded by
-                                #           EmbeddingAPIClient interface
+                                #           EmbedFunc updated to include ProviderEndpoint as
+                                #           second parameter. BatchEmbed passes endpoint through.
 
 internal/ai/provider/openai/
     client.go                   # CHANGED: renamed from provider.go, implements APIClient
@@ -1499,6 +1525,23 @@ Review incorporated: `docs/reviews/01-ai-core.add03-r2-review.md` (R2 Reviewer).
 | R2-4 | P2 | deepCopyEmbeddingModel not updated for map[string][]string Headers | Incorporate. Noted that `deepCopyEmbeddingModel` must handle `map[string][]string` Headers field. | 3.11 |
 | R2-5 | P3 | Embed() passes empty StreamOptions for key resolution | Not Incorporate. Works correctly; acknowledged as minor smell, not worth changing now. | -- |
 | R2-6 | P3 | Embedding catalog api field redundancy | Incorporate. Clarified that `api` field in embedding catalog JSON is optional when provider has `EmbeddingAPIClientType` set; if present it overrides. | 6.3 |
+
+---
+
+## 10a. Seam Review Disposition
+
+Review incorporated: `docs/reviews/01-ai-core.add03-seam-review.md` (seam-review agent). Review file deleted after incorporation.
+
+| ID | Sev | Title | Disposition | Section(s) Updated |
+|----|-----|-------|-------------|-------------------|
+| SR-1 | P1 | StreamOptions.Headers callers not enumerated | Incorporate. Added note to Section 4.2 that all callers constructing StreamOptions with Headers must update from `map[string]string` to `map[string][]string`. Included grep pattern to catch call sites. | 4.2 |
+| SR-2 | P2 | BuildBaseOptions apiKey removal implicit in migration | Incorporate. Added explicit step 8 to Section 4.1 noting all three providers' StreamSimple implementations must update their `BuildBaseOptions` calls to remove the apiKey argument. | 4.1 |
+| SR-3 | P2 | sendErrorEvent hardcodes provider name | Incorporate. Added step 9 to Section 4.1 noting error event helpers must use `endpoint.ProviderName` instead of hardcoded strings. | 4.1 |
+| SR-4 | P1 | EmbedFunc type signature undecided | Incorporate. Made definitive decision: update `EmbedFunc` to include `ProviderEndpoint` as second parameter. `BatchEmbed` passes endpoint through. Updated Section 3.11 with new signature and Section 7 to reflect the decision. | 3.11, 7 |
+| SR-5 | P1 | resolveBaseURL helper deletion not mentioned | Incorporate. Added step 6 to Section 4.6: delete `resolveBaseURL` helper methods -- base URL now comes exclusively from `endpoint.BaseURL`. | 4.6 |
+| SR-6 | P1 | ABBA deadlock in RegisterCustomProvider vs UnregisterProviderConfig | Incorporate. Fixed Section 3.9: `RegisterCustomProvider` now calls `RegisterProviderConfig` BEFORE storing the direct API key, ensuring consistent lock ordering (providerConfigMu -> directAPIKeysMu) across all code paths. | 3.9 |
+| SR-7 | P2 | Embedding catalog init() consolidation unclear | Incorporate. Clarified in Section 3.8 that `//go:embed` for `embedding_catalog.json` stays in `embedding_models.go`, but `init()` is removed. `models.go` `init()` calls a package-level `loadEmbeddingCatalog()` function from `embedding_models.go`. | 3.8 |
+| SR-8 | P2 | deepCopyModel not updated for map[string][]string Headers | Incorporate. Added note to Section 3.6 that `deepCopyModel` must be updated to handle `map[string][]string` Headers (clone inner slices), matching the pattern in `deepCopyProviderConfig`. | 3.6 |
 
 ---
 
