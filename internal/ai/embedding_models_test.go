@@ -31,20 +31,20 @@ func TestEmbeddingModelRegistryMutationIsolation(t *testing.T) {
 		ID:       "m1",
 		Provider: "openai",
 		API:      "openai-embeddings",
-		Headers:  map[string]string{"X-Test": "orig"},
+		Headers:  map[string][]string{"X-Test": {"orig"}},
 	})
 	m, ok := GetEmbeddingModel("m1")
 	if !ok {
 		t.Fatal("missing registered model")
 	}
-	m.Headers["X-Test"] = "mutated"
-	m.Headers["X-New"] = "injected"
+	m.Headers["X-Test"] = []string{"mutated"}
+	m.Headers["X-New"] = []string{"injected"}
 	m2, ok := GetEmbeddingModel("m1")
 	if !ok {
 		t.Fatal("missing registered model")
 	}
-	if got := m2.Headers["X-Test"]; got != "orig" {
-		t.Fatalf("header mutated in registry: %q", got)
+	if len(m2.Headers["X-Test"]) != 1 || m2.Headers["X-Test"][0] != "orig" {
+		t.Fatalf("header mutated in registry: %v", m2.Headers["X-Test"])
 	}
 	if _, ok := m2.Headers["X-New"]; ok {
 		t.Fatalf("unexpected injected header")

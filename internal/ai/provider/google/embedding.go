@@ -69,10 +69,15 @@ func RegisterEmbedding(cfg Config, sourceID string) *EmbeddingProvider {
 
 // Embed dispatches embedding requests with shared batch-splitting behavior.
 func (p *EmbeddingProvider) Embed(ctx context.Context, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
-	return ai.BatchEmbed(ctx, p.embedSingle, model, req)
+	endpoint := ai.ProviderEndpoint{
+		ProviderName: model.Provider,
+		BaseURL:      p.baseURL,
+		APIKey:       p.apiKey,
+	}
+	return ai.BatchEmbed(ctx, p.embedSingle, endpoint, model, req)
 }
 
-func (p *EmbeddingProvider) embedSingle(ctx context.Context, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
+func (p *EmbeddingProvider) embedSingle(ctx context.Context, _ ai.ProviderEndpoint, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
 	// Build per-text embedding requests for batchEmbedContents
 	requests := make([]embedContentRequest, len(req.Texts))
 	for i, text := range req.Texts {
@@ -98,7 +103,7 @@ func (p *EmbeddingProvider) embedSingle(ctx context.Context, model ai.EmbeddingM
 		return nil, fmt.Errorf("marshal embedding request: %w", err)
 	}
 
-	base := p.resolveBaseURL(model)
+	base := p.baseURL
 	endpoint := fmt.Sprintf("%s/%s/models/%s:batchEmbedContents", strings.TrimRight(base, "/"), p.version, model.ID)
 	if p.apiKey != "" {
 		endpoint += "?key=" + p.apiKey
@@ -148,11 +153,4 @@ func (p *EmbeddingProvider) embedSingle(ctx context.Context, model ai.EmbeddingM
 		Model:      model.ID,
 		Usage:      ai.EmbeddingUsage{Tokens: estimatedTokens},
 	}, nil
-}
-
-func (p *EmbeddingProvider) resolveBaseURL(model ai.EmbeddingModel) string {
-	if b := strings.TrimSpace(model.BaseURL); b != "" {
-		return b
-	}
-	return p.baseURL
 }

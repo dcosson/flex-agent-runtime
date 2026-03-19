@@ -14,7 +14,7 @@ func TestModelRegistryMutationIsolation(t *testing.T) {
 		ID:       "test-model",
 		Provider: "test",
 		API:      "openai-completions",
-		Headers:  map[string]string{"X-Key": "original"},
+		Headers:  map[string][]string{"X-Key": {"original"}},
 		Input:    []string{"text"},
 		Compat:   &ModelCompat{ReasoningEffortMap: map[string]string{"high": "h"}},
 	})
@@ -23,8 +23,8 @@ func TestModelRegistryMutationIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetModel err: %v", err)
 	}
-	m.Headers["X-Key"] = "mutated"
-	m.Headers["X-New"] = "injected"
+	m.Headers["X-Key"] = []string{"mutated"}
+	m.Headers["X-New"] = []string{"injected"}
 	m.Input[0] = "corrupted"
 	m.Compat.ReasoningEffortMap["high"] = "corrupted"
 
@@ -32,7 +32,7 @@ func TestModelRegistryMutationIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetModel err: %v", err)
 	}
-	if m2.Headers["X-Key"] != "original" {
+	if len(m2.Headers["X-Key"]) != 1 || m2.Headers["X-Key"][0] != "original" {
 		t.Fatalf("headers mutated in registry")
 	}
 	if _, ok := m2.Headers["X-New"]; ok {
@@ -86,12 +86,9 @@ func TestModelUtilities(t *testing.T) {
 
 func TestOptionsHelpers(t *testing.T) {
 	model := Model{MaxTokens: 50000}
-	s := BuildBaseOptions(model, nil, "k")
+	s := BuildBaseOptions(model, nil)
 	if s.MaxTokens == nil || *s.MaxTokens != 32000 {
 		t.Fatalf("default max tokens mismatch")
-	}
-	if s.APIKey != "k" {
-		t.Fatalf("apikey mismatch")
 	}
 
 	if ClampReasoning(ThinkingXHigh) != ThinkingHigh {

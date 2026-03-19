@@ -53,10 +53,15 @@ func RegisterEmbedding(cfg Config, sourceID string) *EmbeddingProvider {
 
 // Embed dispatches embedding requests with shared batch-splitting behavior.
 func (p *EmbeddingProvider) Embed(ctx context.Context, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
-	return ai.BatchEmbed(ctx, p.embedSingle, model, req)
+	endpoint := ai.ProviderEndpoint{
+		ProviderName: model.Provider,
+		BaseURL:      p.baseURL,
+		APIKey:       p.apiKey,
+	}
+	return ai.BatchEmbed(ctx, p.embedSingle, endpoint, model, req)
 }
 
-func (p *EmbeddingProvider) embedSingle(ctx context.Context, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
+func (p *EmbeddingProvider) embedSingle(ctx context.Context, _ ai.ProviderEndpoint, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
 	wireReq := embeddingRequestWire{
 		Model: model.ID,
 		Input: append([]string(nil), req.Texts...),
@@ -74,7 +79,7 @@ func (p *EmbeddingProvider) embedSingle(ctx context.Context, model ai.EmbeddingM
 		return nil, fmt.Errorf("marshal embedding request: %w", err)
 	}
 
-	endpoint := strings.TrimRight(p.resolveBaseURL(model), "/") + "/embeddings"
+	endpoint := strings.TrimRight(p.baseURL, "/") + "/embeddings"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("build embedding request: %w", err)
@@ -126,11 +131,4 @@ func (p *EmbeddingProvider) embedSingle(ctx context.Context, model ai.EmbeddingM
 			Tokens: wireResp.Usage.TotalTokens,
 		},
 	}, nil
-}
-
-func (p *EmbeddingProvider) resolveBaseURL(model ai.EmbeddingModel) string {
-	if b := strings.TrimSpace(model.BaseURL); b != "" {
-		return b
-	}
-	return p.baseURL
 }

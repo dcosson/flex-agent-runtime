@@ -20,7 +20,7 @@ func (p *Provider) Stream(ctx context.Context, model ai.Model, llmCtx ai.Context
 }
 
 func (p *Provider) StreamSimple(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.SimpleStreamOptions) *ai.EventStream {
-	base := ai.BuildBaseOptions(model, &opts, p.apiKey)
+	base := ai.BuildBaseOptions(model, &opts)
 	if base.MaxTokens == nil {
 		maxTok := model.MaxTokens
 		base.MaxTokens = &maxTok
@@ -110,11 +110,15 @@ func applyHeaders(req *http.Request, p *Provider, model ai.Model, opts ai.Stream
 			req.Header.Add("anthropic-beta", beta)
 		}
 	}
-	for k, v := range model.Headers {
-		req.Header.Set(k, v)
+	for k, vs := range model.Headers {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
 	}
-	for k, v := range opts.Headers {
-		req.Header.Set(k, v)
+	for k, vs := range opts.Headers {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
 	}
 }
 

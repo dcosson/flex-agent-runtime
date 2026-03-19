@@ -21,7 +21,7 @@ import (
 // deterministicEmbedFn returns an EmbedFunc that returns deterministic vectors.
 // Each embedding has Values of length dims, with values derived from the text index.
 func deterministicEmbedFn(dims int) EmbedFunc {
-	return func(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	return func(ctx context.Context, _ ProviderEndpoint, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		embs := make([]Embedding, len(req.Texts))
 		for i := range req.Texts {
 			vals := make([]float32, dims)
@@ -40,9 +40,9 @@ func deterministicEmbedFn(dims int) EmbedFunc {
 
 // countingEmbedFn wraps an EmbedFunc and counts calls.
 func countingEmbedFn(fn EmbedFunc, count *int64) EmbedFunc {
-	return func(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	return func(ctx context.Context, ep ProviderEndpoint, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		atomic.AddInt64(count, 1)
-		return fn(ctx, model, req)
+		return fn(ctx, ep, model, req)
 	}
 }
 
@@ -64,7 +64,7 @@ func TestP1_BatchSplittingPreservesOrdering(t *testing.T) {
 		fn := countingEmbedFn(deterministicEmbedFn(4), &calls)
 		model := EmbeddingModel{ID: "test", MaxBatchSize: batchSize}
 
-		resp, err := BatchEmbed(context.Background(), fn, model, EmbeddingRequest{Texts: texts})
+		resp, err := BatchEmbed(context.Background(), fn, ProviderEndpoint{}, model, EmbeddingRequest{Texts: texts})
 		if err != nil {
 			t.Fatalf("BatchEmbed: %v", err)
 		}
@@ -108,7 +108,7 @@ func TestP2_DimensionBound(t *testing.T) {
 			MaxBatchSize:    100,
 		}
 
-		fn := func(ctx context.Context, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+		fn := func(ctx context.Context, _ ProviderEndpoint, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 			d := m.DefaultDims
 			if req.Dimensions > 0 {
 				d = req.Dimensions
@@ -336,7 +336,7 @@ func TestF1_ProviderAPIErrorHandling(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ClearEmbeddingProviders()
-			RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f1", fn: func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+			RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f1", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
 				return nil, tc.err
 			}}, "src")
 
@@ -372,7 +372,7 @@ func TestF2_PartialBatchFailure(t *testing.T) {
 
 	batchErr := &ProviderError{Code: ErrServerError, StatusCode: 500, Provider: "mock", Message: "batch 2 fail"}
 	callNum := 0
-	fn := func(ctx context.Context, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	fn := func(ctx context.Context, _ ProviderEndpoint, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		callNum++
 		if callNum == 2 {
 			return nil, batchErr
@@ -384,7 +384,7 @@ func TestF2_PartialBatchFailure(t *testing.T) {
 		return &EmbeddingResponse{Embeddings: embs, Usage: EmbeddingUsage{Tokens: len(req.Texts)}}, nil
 	}
 
-	resp, err := BatchEmbed(context.Background(), fn, model, EmbeddingRequest{Texts: texts})
+	resp, err := BatchEmbed(context.Background(), fn, ProviderEndpoint{}, model, EmbeddingRequest{Texts: texts})
 	if err == nil {
 		t.Fatal("expected error from batch 2")
 	}
@@ -417,7 +417,7 @@ func TestF3_MalformedResponseHandling(t *testing.T) {
 
 	t.Run("nil_response", func(t *testing.T) {
 		ClearEmbeddingProviders()
-		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
 			return nil, nil
 		}}, "src")
 
@@ -433,7 +433,7 @@ func TestF3_MalformedResponseHandling(t *testing.T) {
 
 	t.Run("nan_values", func(t *testing.T) {
 		ClearEmbeddingProviders()
-		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
 			return &EmbeddingResponse{
 				Embeddings: []Embedding{{Index: 0, Values: []float32{float32(math.NaN()), 1.0, float32(math.Inf(1))}}},
 			}, nil
@@ -460,7 +460,7 @@ func TestF3_MalformedResponseHandling(t *testing.T) {
 
 	t.Run("negative_index", func(t *testing.T) {
 		ClearEmbeddingProviders()
-		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
 			return &EmbeddingResponse{
 				Embeddings: []Embedding{{Index: -1, Values: []float32{1.0}}},
 			}, nil
@@ -500,7 +500,7 @@ func TestF4_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var callCount int64
 
-	fn := func(ctx context.Context, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	fn := func(ctx context.Context, _ ProviderEndpoint, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		n := atomic.AddInt64(&callCount, 1)
 		if n >= 5 {
 			cancel()
@@ -512,7 +512,7 @@ func TestF4_ContextCancellation(t *testing.T) {
 		return &EmbeddingResponse{Embeddings: embs, Usage: EmbeddingUsage{Tokens: len(req.Texts)}}, nil
 	}
 
-	_, err := BatchEmbed(ctx, fn, model, EmbeddingRequest{Texts: texts})
+	_, err := BatchEmbed(ctx, fn, ProviderEndpoint{}, model, EmbeddingRequest{Texts: texts})
 	if err == nil {
 		t.Fatal("expected context cancellation error")
 	}
@@ -549,7 +549,7 @@ func TestO3_EmbedEntryPointContract(t *testing.T) {
 
 	var capturedModel EmbeddingModel
 	var capturedReq EmbeddingRequest
-	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-oracle", fn: func(ctx context.Context, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-oracle", fn: func(ctx context.Context, _ ProviderEndpoint, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		capturedModel = m
 		capturedReq = req
 		return &EmbeddingResponse{
@@ -655,7 +655,7 @@ func BenchmarkB2_BatchSplittingOverhead(b *testing.B) {
 		texts[i] = "text"
 	}
 	// No-op embed function to isolate splitting overhead.
-	fn := func(ctx context.Context, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	fn := func(ctx context.Context, _ ProviderEndpoint, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		embs := make([]Embedding, len(req.Texts))
 		for i := range embs {
 			embs[i] = Embedding{Index: i, Values: []float32{1.0}}
@@ -665,7 +665,7 @@ func BenchmarkB2_BatchSplittingOverhead(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := BatchEmbed(context.Background(), fn, model, EmbeddingRequest{Texts: texts})
+		_, err := BatchEmbed(context.Background(), fn, ProviderEndpoint{}, model, EmbeddingRequest{Texts: texts})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -791,7 +791,7 @@ func TestST2_LargeBatchEmbedding(t *testing.T) {
 		texts[i] = fmt.Sprintf("text-%d", i)
 	}
 
-	fn := func(ctx context.Context, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	fn := func(ctx context.Context, _ ProviderEndpoint, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		embs := make([]Embedding, len(req.Texts))
 		for i := range embs {
 			embs[i] = Embedding{Index: i, Values: []float32{float32(i)}}
@@ -800,7 +800,7 @@ func TestST2_LargeBatchEmbedding(t *testing.T) {
 	}
 
 	start := time.Now()
-	resp, err := BatchEmbed(context.Background(), fn, model, EmbeddingRequest{Texts: texts})
+	resp, err := BatchEmbed(context.Background(), fn, ProviderEndpoint{}, model, EmbeddingRequest{Texts: texts})
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -846,7 +846,7 @@ func TestST3_ConcurrentEmbedCalls(t *testing.T) {
 		Cost:         EmbeddingCost{PerMTok: 0.1},
 	}
 	RegisterEmbeddingModel(model)
-	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-st3", fn: func(ctx context.Context, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-st3", fn: func(ctx context.Context, _ ProviderEndpoint, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		embs := make([]Embedding, len(req.Texts))
 		for i := range embs {
 			embs[i] = Embedding{Index: i, Values: []float32{float32(i), float32(len(req.Texts))}}
@@ -1003,7 +1003,7 @@ func TestSEC2_APIKeyHandling(t *testing.T) {
 	// Simulate a provider that returns an auth error — verify the error
 	// message does not contain the API key.
 	apiKey := "sk-secret-test-key-12345"
-	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-sec2", fn: func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-sec2", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
 		return nil, &ProviderError{
 			Code:     ErrAuth,
 			Provider: "mock",

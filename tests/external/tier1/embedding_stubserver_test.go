@@ -37,7 +37,7 @@ func TestEmbedding_OpenAI_Success(t *testing.T) {
 		BaseURL: srv.URL,
 		APIKey:  "test-key-openai-embed",
 	})
-	model := ai.EmbeddingModel{ID: "text-embedding-3-small", BaseURL: srv.URL, MaxBatchSize: 100}
+	model := ai.EmbeddingModel{ID: "text-embedding-3-small", MaxBatchSize: 100}
 
 	resp, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
 		Texts: []string{"hello", "world"},
@@ -74,7 +74,7 @@ func TestEmbedding_OpenAI_Throttle429(t *testing.T) {
 	defer srv.Close()
 
 	p := openai.NewEmbedding(openai.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}})
 	if err == nil {
@@ -97,7 +97,7 @@ func TestEmbedding_OpenAI_ServerError500(t *testing.T) {
 	defer srv.Close()
 
 	p := openai.NewEmbedding(openai.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}})
 	if err == nil {
@@ -121,7 +121,7 @@ func TestEmbedding_OpenAI_MalformedJSON(t *testing.T) {
 	defer srv.Close()
 
 	p := openai.NewEmbedding(openai.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}})
 	if err == nil {
@@ -138,7 +138,7 @@ func TestEmbedding_OpenAI_TCPReset(t *testing.T) {
 	defer srv.Close()
 
 	p := openai.NewEmbedding(openai.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}})
 	if err == nil {
@@ -155,7 +155,7 @@ func TestEmbedding_OpenAI_Backpressure(t *testing.T) {
 	defer srv.Close()
 
 	p := openai.NewEmbedding(openai.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	start := time.Now()
 	resp, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}})
@@ -183,7 +183,7 @@ func TestEmbedding_Google_Success(t *testing.T) {
 		BaseURL: srv.URL,
 		APIKey:  "test-key-google-embed",
 	})
-	model := ai.EmbeddingModel{ID: "gemini-embedding-001", BaseURL: srv.URL, MaxBatchSize: 100}
+	model := ai.EmbeddingModel{ID: "gemini-embedding-001", MaxBatchSize: 100}
 
 	resp, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
 		Texts: []string{"hello", "world"},
@@ -214,7 +214,7 @@ func TestEmbedding_Google_Throttle429(t *testing.T) {
 	defer srv.Close()
 
 	p := google.NewEmbedding(google.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}})
 	if err == nil {
@@ -237,7 +237,7 @@ func TestEmbedding_Google_ServerError500(t *testing.T) {
 	defer srv.Close()
 
 	p := google.NewEmbedding(google.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}})
 	if err == nil {
@@ -261,7 +261,7 @@ func TestEmbedding_Google_MalformedJSON(t *testing.T) {
 	defer srv.Close()
 
 	p := google.NewEmbedding(google.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}})
 	if err == nil {
@@ -278,7 +278,7 @@ func TestEmbedding_Google_TCPReset(t *testing.T) {
 	defer srv.Close()
 
 	p := google.NewEmbedding(google.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}})
 	if err == nil {
@@ -295,7 +295,7 @@ func TestEmbedding_Google_Backpressure(t *testing.T) {
 	defer srv.Close()
 
 	p := google.NewEmbedding(google.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	start := time.Now()
 	resp, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}})
@@ -323,7 +323,7 @@ func TestEmbedding_Cohere_Success(t *testing.T) {
 		BaseURL: srv.URL,
 		APIKey:  "test-key-cohere-embed",
 	})
-	model := ai.EmbeddingModel{ID: "embed-v3.5", BaseURL: srv.URL, MaxBatchSize: 96}
+	model := ai.EmbeddingModel{ID: "embed-v3.5", MaxBatchSize: 96}
 
 	resp, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
 		Texts:    []string{"hello", "world"},
@@ -360,7 +360,7 @@ func TestEmbedding_Cohere_Throttle429(t *testing.T) {
 	defer srv.Close()
 
 	p := cohere.NewEmbedding(cohere.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
 		Texts:    []string{"x"},
@@ -386,7 +386,7 @@ func TestEmbedding_Cohere_ServerError500(t *testing.T) {
 	defer srv.Close()
 
 	p := cohere.NewEmbedding(cohere.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
 		Texts:    []string{"x"},
@@ -413,7 +413,7 @@ func TestEmbedding_Cohere_MalformedJSON(t *testing.T) {
 	defer srv.Close()
 
 	p := cohere.NewEmbedding(cohere.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
 		Texts:    []string{"x"},
@@ -433,7 +433,7 @@ func TestEmbedding_Cohere_TCPReset(t *testing.T) {
 	defer srv.Close()
 
 	p := cohere.NewEmbedding(cohere.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
 		Texts:    []string{"x"},
@@ -453,7 +453,7 @@ func TestEmbedding_Cohere_Backpressure(t *testing.T) {
 	defer srv.Close()
 
 	p := cohere.NewEmbedding(cohere.Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 
 	start := time.Now()
 	resp, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
@@ -487,8 +487,8 @@ func TestEmbedding_AuthHeaderPropagation(t *testing.T) {
 		{
 			name: "openai_bearer",
 			setupEmbed: func(srvURL string) (ai.EmbeddingProvider, ai.EmbeddingModel) {
-				p := openai.NewEmbedding(openai.Config{BaseURL: srvURL, APIKey: "sk-openai-test"})
-				return p, ai.EmbeddingModel{ID: "m", BaseURL: srvURL, MaxBatchSize: 10}
+				p := openai.NewEmbedding(openai.Config{APIKey: "sk-openai-test", BaseURL: srvURL})
+				return p, ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 			},
 			wantHeader: "Authorization",
 			wantValue:  "Bearer sk-openai-test",
@@ -496,8 +496,8 @@ func TestEmbedding_AuthHeaderPropagation(t *testing.T) {
 		{
 			name: "cohere_bearer",
 			setupEmbed: func(srvURL string) (ai.EmbeddingProvider, ai.EmbeddingModel) {
-				p := cohere.NewEmbedding(cohere.Config{BaseURL: srvURL, APIKey: "co-test-key"})
-				return p, ai.EmbeddingModel{ID: "m", BaseURL: srvURL, MaxBatchSize: 10}
+				p := cohere.NewEmbedding(cohere.Config{APIKey: "co-test-key", BaseURL: srvURL})
+				return p, ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 			},
 			wantHeader: "Authorization",
 			wantValue:  "Bearer co-test-key",

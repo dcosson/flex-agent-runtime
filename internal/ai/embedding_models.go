@@ -80,9 +80,11 @@ func ClearEmbeddingModels() {
 
 func deepCopyEmbeddingModel(m EmbeddingModel) EmbeddingModel {
 	if m.Headers != nil {
-		h := make(map[string]string, len(m.Headers))
+		h := make(map[string][]string, len(m.Headers))
 		for k, v := range m.Headers {
-			h[k] = v
+			vc := make([]string, len(v))
+			copy(vc, v)
+			h[k] = vc
 		}
 		m.Headers = h
 	}

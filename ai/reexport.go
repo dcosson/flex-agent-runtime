@@ -34,6 +34,11 @@ type (
 	ProviderError         = internal.ProviderError
 	ProviderErrorCode     = internal.ProviderErrorCode
 	ToolCallIDNormalizer  = internal.ToolCallIDNormalizer
+	APIClient             = internal.APIClient
+	ProviderConfig        = internal.ProviderConfig
+	ProviderEndpoint      = internal.ProviderEndpoint
+	CustomProviderConfig  = internal.CustomProviderConfig
+	CustomModelOpts       = internal.CustomModelOpts
 )
 
 const (
@@ -110,6 +115,17 @@ var (
 	MillisToTime                 = internal.MillisToTime
 	UnmarshalArguments           = internal.UnmarshalArguments
 	UnmarshalArgumentsFromReader = internal.UnmarshalArgumentsFromReader
+	RegisterAPIClient            = internal.RegisterAPIClient
+	GetAPIClient                 = internal.GetAPIClient
+	ClearAPIClients              = internal.ClearAPIClients
+	RegisterProviderConfig       = internal.RegisterProviderConfig
+	GetProviderConfig            = internal.GetProviderConfig
+	ListProviderConfigs          = internal.ListProviderConfigs
+	UnregisterProviderConfig     = internal.UnregisterProviderConfig
+	ClearProviderConfigs         = internal.ClearProviderConfigs
+	ResolveEndpoint              = internal.ResolveEndpoint
+	RegisterCustomProvider       = internal.RegisterCustomProvider
+	RegisterCustomModel          = internal.RegisterCustomModel
 )
 
 const LargeArgumentThreshold = internal.LargeArgumentThreshold

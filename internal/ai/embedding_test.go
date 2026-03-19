@@ -9,14 +9,14 @@ import (
 
 type mockEmbeddingProvider struct {
 	api string
-	fn  func(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error)
+	fn  EmbedFunc
 }
 
 func (m *mockEmbeddingProvider) API() string { return m.api }
 
 func (m *mockEmbeddingProvider) Embed(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 	if m.fn != nil {
-		return m.fn(ctx, model, req)
+		return m.fn(ctx, ProviderEndpoint{}, model, req)
 	}
 	out := make([]Embedding, len(req.Texts))
 	for i := range req.Texts {

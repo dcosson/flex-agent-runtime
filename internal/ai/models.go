@@ -19,18 +19,18 @@ var (
 
 // Model defines a provider model configuration.
 type Model struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	API           string            `json:"api"`
-	Provider      string            `json:"provider"`
-	BaseURL       string            `json:"baseUrl"`
-	Reasoning     bool              `json:"reasoning"`
-	Input         []string          `json:"input"`
-	Cost          ModelCost         `json:"cost"`
-	ContextWindow int               `json:"contextWindow"`
-	MaxTokens     int               `json:"maxTokens"`
-	Headers       map[string]string `json:"headers,omitempty"`
-	Compat        *ModelCompat      `json:"compat,omitempty"`
+	ID            string              `json:"id"`
+	Name          string              `json:"name"`
+	API           string              `json:"api"`
+	Provider      string              `json:"provider"`
+	Reasoning     bool                `json:"reasoning"`
+	Input         []string            `json:"input"`
+	Cost          ModelCost           `json:"cost"`
+	PricingKnown  bool                `json:"pricingKnown"`
+	ContextWindow int                 `json:"contextWindow"`
+	MaxTokens     int                 `json:"maxTokens"`
+	Headers       map[string][]string `json:"headers,omitempty"`
+	Compat        *ModelCompat        `json:"compat,omitempty"`
 }
 
 type ModelCost struct {
@@ -130,9 +130,11 @@ func ClearModels() {
 
 func deepCopyModel(m Model) Model {
 	if m.Headers != nil {
-		h := make(map[string]string, len(m.Headers))
+		h := make(map[string][]string, len(m.Headers))
 		for k, v := range m.Headers {
-			h[k] = v
+			vc := make([]string, len(v))
+			copy(vc, v)
+			h[k] = vc
 		}
 		m.Headers = h
 	}

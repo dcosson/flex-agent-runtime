@@ -3,16 +3,17 @@ package ai
 import internal "github.com/dcosson/flex-agent-runtime/internal/ai"
 
 type (
-	EmbeddingRequest  = internal.EmbeddingRequest
-	EmbeddingResponse = internal.EmbeddingResponse
-	Embedding         = internal.Embedding
-	EmbeddingUsage    = internal.EmbeddingUsage
-	EmbeddingTaskType = internal.EmbeddingTaskType
-	EmbeddingEncoding = internal.EmbeddingEncoding
-	EmbeddingProvider = internal.EmbeddingProvider
-	EmbeddingModel    = internal.EmbeddingModel
-	EmbeddingCost     = internal.EmbeddingCost
-	EmbedFunc         = internal.EmbedFunc
+	EmbeddingRequest   = internal.EmbeddingRequest
+	EmbeddingResponse  = internal.EmbeddingResponse
+	Embedding          = internal.Embedding
+	EmbeddingUsage     = internal.EmbeddingUsage
+	EmbeddingTaskType  = internal.EmbeddingTaskType
+	EmbeddingEncoding  = internal.EmbeddingEncoding
+	EmbeddingProvider  = internal.EmbeddingProvider
+	EmbeddingModel     = internal.EmbeddingModel
+	EmbeddingCost      = internal.EmbeddingCost
+	EmbedFunc          = internal.EmbedFunc
+	EmbeddingAPIClient = internal.EmbeddingAPIClient
 )
 
 const (
@@ -43,4 +44,7 @@ var (
 	ListEmbeddingModels           = internal.ListEmbeddingModels
 	ListEmbeddingModelsByProvider = internal.ListEmbeddingModelsByProvider
 	ClearEmbeddingModels          = internal.ClearEmbeddingModels
+	RegisterEmbeddingAPIClient    = internal.RegisterEmbeddingAPIClient
+	GetEmbeddingAPIClient         = internal.GetEmbeddingAPIClient
+	ClearEmbeddingAPIClients      = internal.ClearEmbeddingAPIClients
 )

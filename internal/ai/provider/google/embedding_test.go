@@ -51,8 +51,8 @@ func TestEmbeddingProvider_EmbedSingleSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := NewEmbedding(Config{BaseURL: srv.URL, APIKey: "secret"})
-	model := ai.EmbeddingModel{ID: "gemini-embedding-001", BaseURL: srv.URL, MaxBatchSize: 100}
+	p := NewEmbedding(Config{APIKey: "secret", BaseURL: srv.URL})
+	model := ai.EmbeddingModel{ID: "gemini-embedding-001", MaxBatchSize: 100}
 	resp, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
 		Texts:      []string{"hello", "world"},
 		Dimensions: 256,
@@ -122,7 +122,7 @@ func TestEmbeddingProvider_TaskTypeMapping(t *testing.T) {
 			defer srv.Close()
 
 			p := NewEmbedding(Config{BaseURL: srv.URL})
-			model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+			model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 			_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
 				Texts:    []string{"x"},
 				TaskType: tc.taskType,
@@ -137,7 +137,7 @@ func TestEmbeddingProvider_TaskTypeMapping(t *testing.T) {
 	}
 }
 
-func TestEmbeddingProvider_ModelBaseURLOverride(t *testing.T) {
+func TestEmbeddingProvider_ProviderBaseURL(t *testing.T) {
 	hit := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hit = true
@@ -147,13 +147,13 @@ func TestEmbeddingProvider_ModelBaseURLOverride(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := NewEmbedding(Config{BaseURL: "http://127.0.0.1:1"}) // invalid unless model override is used
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	p := NewEmbedding(Config{BaseURL: srv.URL})
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 	if _, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}}); err != nil {
 		t.Fatalf("Embed err: %v", err)
 	}
 	if !hit {
-		t.Fatal("expected model baseURL override to be used")
+		t.Fatal("expected provider baseURL to be used")
 	}
 }
 
@@ -178,7 +178,7 @@ func TestEmbeddingProvider_HTTPErrorClassification(t *testing.T) {
 			defer srv.Close()
 
 			p := NewEmbedding(Config{BaseURL: srv.URL})
-			_, err := p.Embed(context.Background(), ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}, ai.EmbeddingRequest{Texts: []string{"x"}})
+			_, err := p.Embed(context.Background(), ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}, ai.EmbeddingRequest{Texts: []string{"x"}})
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -211,7 +211,7 @@ func TestEmbeddingProvider_BatchSplitAndProgress(t *testing.T) {
 
 	progress := make([][2]int, 0)
 	p := NewEmbedding(Config{BaseURL: srv.URL})
-	resp, err := p.Embed(context.Background(), ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 2}, ai.EmbeddingRequest{
+	resp, err := p.Embed(context.Background(), ai.EmbeddingModel{ID: "m", MaxBatchSize: 2}, ai.EmbeddingRequest{
 		Texts: []string{"a", "b", "c", "d", "e"},
 		OnProgress: func(done, total int) {
 			progress = append(progress, [2]int{done, total})
@@ -248,7 +248,7 @@ func TestEmbeddingProvider_NoDimensionsWhenZero(t *testing.T) {
 	defer srv.Close()
 
 	p := NewEmbedding(Config{BaseURL: srv.URL})
-	model := ai.EmbeddingModel{ID: "m", BaseURL: srv.URL, MaxBatchSize: 10}
+	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
 	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}})
 	if err != nil {
 		t.Fatalf("Embed err: %v", err)

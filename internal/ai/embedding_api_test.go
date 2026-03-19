@@ -53,7 +53,7 @@ func TestEmbedCalculatesCostAndPreservesProviderError(t *testing.T) {
 	withIsolatedEmbeddingModels(t)
 
 	RegisterEmbeddingModel(EmbeddingModel{ID: "m", API: "mock", Provider: "mock", Cost: EmbeddingCost{PerMTok: 0.5}})
-	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock", fn: func(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock", fn: func(ctx context.Context, _ ProviderEndpoint, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		return &EmbeddingResponse{
 			Embeddings: []Embedding{{Index: 0, Values: []float32{1, 2}}},
 			Usage:      EmbeddingUsage{Tokens: 2000},
@@ -73,7 +73,7 @@ func TestEmbedCalculatesCostAndPreservesProviderError(t *testing.T) {
 
 	pErr := &ProviderError{Code: ErrRateLimit, Provider: "mock", Message: "retry"}
 	ClearEmbeddingProviders()
-	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock", fn: func(context.Context, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
 		return nil, pErr
 	}}, "src")
 	_, err = Embed(context.Background(), "m", EmbeddingRequest{Texts: []string{"hello"}})
@@ -90,7 +90,7 @@ func TestEmbedReturnsProviderResponse(t *testing.T) {
 	withIsolatedEmbeddingModels(t)
 
 	RegisterEmbeddingModel(EmbeddingModel{ID: "m", API: "mock", Provider: "mock"})
-	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock", fn: func(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock", fn: func(ctx context.Context, _ ProviderEndpoint, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		return &EmbeddingResponse{
 			Model:      model.ID,
 			Embeddings: []Embedding{{Index: 0, Values: []float32{3.14}}},
