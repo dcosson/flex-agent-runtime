@@ -134,7 +134,6 @@ sequenceDiagram
 │    "openai"      → baseURL, keyEnvVars, models...   │
 │    "anthropic"   → baseURL, keyEnvVars, models...   │
 │    "openrouter"  → baseURL, keyEnvVars, models...   │
-│    "my-vllm"     → baseURL, keyEnvVars, models...   │
 ├─────────────────────────────────────────────────────┤
 │  API Client Registry (keyed by client type name)    │
 │    "openai-completions"  → protocol impl            │
@@ -236,7 +235,7 @@ This is the declarative configuration for a provider, as stored in the catalog o
 // and how to authenticate. Stored in the provider registry.
 type ProviderConfig struct {
     // Name is the unique provider identifier.
-    // Examples: "openai", "anthropic", "openrouter", "my-vllm".
+    // Examples: "openai", "anthropic", "openrouter".
     Name string `json:"name"`
 
     // APIClientType is the protocol to use for this provider.
@@ -293,7 +292,7 @@ type ProviderEndpoint struct {
 
 ### 3.4 Provider Registry
 
-The provider registry is now keyed by **provider name** (e.g., `"openai"`, `"openrouter"`, `"my-vllm"`) instead of API type name.
+The provider registry is now keyed by **provider name** (e.g., `"openai"`, `"openrouter"`) instead of API type name.
 
 ```go
 // provider_registry.go (in internal/ai)
