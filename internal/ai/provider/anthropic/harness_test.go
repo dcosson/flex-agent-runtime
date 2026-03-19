@@ -95,8 +95,8 @@ func TestP1_StreamEventOrderingAndTerminalUniqueness(t *testing.T) {
 
 		srv := stubserver.New(stubserver.WithFixture(fixture))
 		defer srv.Close()
-		p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-		es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}}}, ai.StreamOptions{})
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		es := p.Stream(context.Background(), ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}}}, ai.StreamOptions{})
 
 		var terminal int
 		lastType := ai.EventStart
@@ -143,8 +143,8 @@ func TestP2_ToolJSONDeltaConvergence(t *testing.T) {
 		srv := stubserver.New(stubserver.WithFixture(fixture))
 		defer srv.Close()
 
-		prov := New(Config{BaseURL: srv.URL, APIKey: "k"})
-		es := prov.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}}}, ai.StreamOptions{})
+		prov, provEP := testClientAndEndpoint(srv.URL, "k")
+		es := prov.Stream(context.Background(), provEP, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}}}, ai.StreamOptions{})
 		msg, err := es.Drain()
 		if err != nil {
 			t.Fatalf("stream err: %v", err)
@@ -209,8 +209,8 @@ func TestP4_ErrorClassificationStability(t *testing.T) {
 func TestS1_StubServerReplay(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(textFixture("a", "b", "c")))
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 	msg, err := es.Drain()
 	if err != nil {
 		t.Fatalf("stream err: %v", err)
@@ -224,8 +224,8 @@ func TestS1_StubServerReplay(t *testing.T) {
 func TestF1_TCPReset(t *testing.T) {
 	srv := stubserver.NewTCPResetServer(textFixture("a", "b", "c", "d", "e"), 3)
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 	if _, err := es.Drain(); err == nil {
 		t.Fatalf("expected tcp reset error")
 	}
@@ -235,8 +235,8 @@ func TestF1_TCPReset(t *testing.T) {
 func TestF2_MalformedSSE(t *testing.T) {
 	srv := stubserver.NewMalformedServer(textFixture("a", "b"), 1, "data: {{{INVALID\n\n")
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 	if _, err := es.Drain(); err == nil {
 		t.Fatalf("expected malformed SSE error")
 	}
@@ -246,8 +246,8 @@ func TestF2_MalformedSSE(t *testing.T) {
 func TestF3_Throttle(t *testing.T) {
 	srv := stubserver.NewThrottleServer("1")
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 	if _, err := es.Drain(); err == nil {
 		t.Fatalf("expected throttle error")
 	}
@@ -259,8 +259,8 @@ func TestF4_BackpressureTimeout(t *testing.T) {
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(ctx, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(ctx, ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 	if _, err := es.Drain(); err == nil {
 		t.Fatalf("expected timeout/cancel error")
 	}
@@ -270,10 +270,10 @@ func TestF4_BackpressureTimeout(t *testing.T) {
 func TestF5_ContextCancellationRace(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFault(textFixture("a", "b", "c", "d", "e"), stubserver.Fault{Mode: stubserver.Backpressure, EventDelay: 20 * time.Millisecond}))
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
 	for i := 0; i < 10; i++ {
 		ctx, cancel := context.WithCancel(context.Background())
-		es := p.Stream(ctx, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+		es := p.Stream(ctx, ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 		time.AfterFunc(time.Duration(i+1)*5*time.Millisecond, cancel)
 		_, _ = es.Drain()
 	}
@@ -285,8 +285,8 @@ func TestDS1_EventFSMIllegalTrace(t *testing.T) {
 		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\"}}\n\n"
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 	if _, err := es.Drain(); err == nil {
 		t.Fatalf("expected deterministic failure for illegal trace")
 	}
@@ -314,8 +314,8 @@ func TestDS2_MultiToolIsolation(t *testing.T) {
 		"data: {\"type\":\"message_stop\"}\n\n"
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 	msg, err := es.Drain()
 	if err != nil {
 		t.Fatalf("stream err: %v", err)
@@ -347,8 +347,8 @@ func TestDS3_ThinkingToolInterleave(t *testing.T) {
 		"data: {\"type\":\"message_stop\"}\n\n"
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 	msg, err := es.Drain()
 	if err != nil {
 		t.Fatalf("stream err: %v", err)
@@ -396,8 +396,8 @@ func TestSEC1_ToolJSONInjection(t *testing.T) {
 		// Route through the full streaming pipeline (SSE -> provider -> tool parser).
 		chunks := splitIntoChunks(string(raw), []int{len(raw) / 3, 2 * len(raw) / 3})
 		srv := stubserver.New(stubserver.WithFixture(buildToolCallFixture("call_sec", "sec_tool", chunks)))
-		p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-		es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		es := p.Stream(context.Background(), ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 		msg, err := es.Drain()
 		srv.Close()
 		if err != nil {
@@ -427,8 +427,8 @@ func TestSEC2_NoAPIKeyLeakInErrors(t *testing.T) {
 		_, _ = w.Write([]byte(`{"type":"error","error":{"message":"unauthorized"}}`))
 	}))
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: secret})
-	es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+	p, ep := testClientAndEndpoint(srv.URL, secret)
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 	_, err := es.Drain()
 	if err == nil {
 		t.Fatalf("expected error")
@@ -449,8 +449,8 @@ func TestSEC3_OversizedPayload(t *testing.T) {
 		fmt.Sprintf("data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":%q}}\n\n", tooLong)
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 	if _, err := es.Drain(); err == nil {
 		t.Fatalf("expected oversized payload failure")
 	}
@@ -463,7 +463,7 @@ func TestST2_ConcurrentStreams(t *testing.T) {
 	}
 	srv := stubserver.New(stubserver.WithFixture(textFixture("a", "b", "c")))
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
 	// Plan target is 500; we run 200 in regular CI to keep runtime bounded while
 	// preserving meaningful contention coverage.
 	const n = 200
@@ -474,7 +474,7 @@ func TestST2_ConcurrentStreams(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			es := p.Stream(context.Background(), testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
+			es := p.Stream(context.Background(), ep, testModel(), ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}, ai.StreamOptions{})
 			if _, err := es.Drain(); err != nil {
 				failures.Add(1)
 				return
@@ -506,7 +506,7 @@ func TestST1_LongSoak(t *testing.T) {
 		return fixtures[i%int32(len(fixtures))]
 	}))
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
 
 	runtime.GC()
 	startG := runtime.NumGoroutine()
@@ -515,7 +515,7 @@ func TestST1_LongSoak(t *testing.T) {
 
 	const iterations = 5000
 	for i := 0; i < iterations; i++ {
-		es := p.Stream(context.Background(), testModel(), ai.Context{
+		es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 			Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: fmt.Sprintf("turn-%d", i)}}}},
 		}, ai.StreamOptions{})
 		if _, err := es.Drain(); err != nil {
@@ -563,7 +563,7 @@ func TestST3_BurstToolStress(t *testing.T) {
 	fixture := buildToolCallFixture("call_stress", "stress_tool", chunks)
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
 
 	const streams = 50
 	var wg sync.WaitGroup
@@ -572,7 +572,7 @@ func TestST3_BurstToolStress(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			es := p.Stream(context.Background(), testModel(), ai.Context{
+			es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 				Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "burst"}}}},
 			}, ai.StreamOptions{})
 			msg, err := es.Drain()

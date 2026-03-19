@@ -141,12 +141,12 @@ func buildGeminiSafetyBlockSSE(partialText string) string {
 	return buf.String()
 }
 
-func streamAndCollect(p *Provider, model ai.Model, ctxOpt ...context.Context) ([]ai.AssistantMessageEvent, ai.AssistantMessage, error) {
+func streamAndCollect(p *Client, ep ai.ProviderEndpoint, model ai.Model, ctxOpt ...context.Context) ([]ai.AssistantMessageEvent, ai.AssistantMessage, error) {
 	ctx := context.Background()
 	if len(ctxOpt) > 0 {
 		ctx = ctxOpt[0]
 	}
-	es := p.Stream(ctx, model, ai.Context{
+	es := p.Stream(ctx, ep, model, ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 
@@ -371,8 +371,8 @@ func TestF1_TruncatedSSEStream(t *testing.T) {
 			srv := stubserver.NewTCPResetServer(fixture, cutAfter)
 			defer srv.Close()
 
-			p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-			_, _, err := streamAndCollect(p, testModel())
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			_, _, err := streamAndCollect(p, ep, testModel())
 			if err == nil {
 				t.Fatal("expected error after TCP reset")
 			}
@@ -399,9 +399,9 @@ func TestF2_MalformedJSONChunk(t *testing.T) {
 			srv := stubserver.NewMalformedServer(fixture, 0, tc.data)
 			defer srv.Close()
 
-			p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
+			p, ep := testClientAndEndpoint(srv.URL, "k")
 			// Must not panic
-			events, _, _ := streamAndCollect(p, testModel())
+			events, _, _ := streamAndCollect(p, ep, testModel())
 			_ = events
 		})
 	}
@@ -426,8 +426,8 @@ func TestF3_HTTPErrorHandling(t *testing.T) {
 			srv := stubserver.NewStatusCodeServer(tc.status, tc.body)
 			defer srv.Close()
 
-			p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-			_, _, err := streamAndCollect(p, testModel())
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			_, _, err := streamAndCollect(p, ep, testModel())
 			if err == nil {
 				t.Fatalf("expected error for status %d", tc.status)
 			}
@@ -450,8 +450,8 @@ func TestF4_ContextCancellationRaces(t *testing.T) {
 			defer srv.Close()
 
 			ctx, cancel := context.WithCancel(context.Background())
-			p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-			es := p.Stream(ctx, testModel(), ai.Context{
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			es := p.Stream(ctx, ep, testModel(), ai.Context{
 				Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 			}, ai.StreamOptions{})
 
@@ -484,8 +484,8 @@ func TestF5_PromptLevelBlock(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-	_, _, err := streamAndCollect(p, testModel())
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	_, _, err := streamAndCollect(p, ep, testModel())
 	if err == nil {
 		t.Fatal("expected error for prompt block")
 	}
@@ -511,8 +511,8 @@ func TestS1_StreamEventOrdering(t *testing.T) {
 		srv := stubserver.New(stubserver.WithFixture(fixture))
 		defer srv.Close()
 
-		p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-		events, _, err := streamAndCollect(p, testModel())
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		events, _, err := streamAndCollect(p, ep, testModel())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -555,8 +555,8 @@ func TestS2_ConcurrentStreams(t *testing.T) {
 			srv := stubserver.New(stubserver.WithFixture(fixture))
 			defer srv.Close()
 
-			p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-			_, msg, err := streamAndCollect(p, testModel())
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			_, msg, err := streamAndCollect(p, ep, testModel())
 			if err != nil {
 				t.Fatalf("stream error: %v", err)
 			}
@@ -607,8 +607,8 @@ func TestGS1_ThinkingTextToolWithSignature(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-	_, msg, err := streamAndCollect(p, testModel())
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	_, msg, err := streamAndCollect(p, ep, testModel())
 	if err != nil {
 		t.Fatalf("stream error: %v", err)
 	}
@@ -653,8 +653,8 @@ func TestGS2_SafetyBlockDiscardsContent(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-	events, _, err := streamAndCollect(p, testModel())
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	events, _, err := streamAndCollect(p, ep, testModel())
 	if err == nil {
 		t.Fatal("expected error for safety block")
 	}
@@ -690,8 +690,8 @@ func TestGS3_AllSafetyBlockReasons(t *testing.T) {
 			srv := stubserver.New(stubserver.WithFixture(fixture))
 			defer srv.Close()
 
-			p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-			_, _, err := streamAndCollect(p, testModel())
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			_, _, err := streamAndCollect(p, ep, testModel())
 			if err == nil {
 				t.Fatalf("expected error for safety block reason %q", reason)
 			}
@@ -714,8 +714,8 @@ func TestGS4_MultipleToolCalls(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-	events, msg, err := streamAndCollect(p, testModel())
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	events, msg, err := streamAndCollect(p, ep, testModel())
 	if err != nil {
 		t.Fatalf("stream error: %v", err)
 	}
@@ -774,8 +774,8 @@ func TestGS5_ToolCallWithoutID(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-	_, msg, err := streamAndCollect(p, testModel())
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	_, msg, err := streamAndCollect(p, ep, testModel())
 	if err != nil {
 		t.Fatalf("stream error: %v", err)
 	}
@@ -804,8 +804,8 @@ func TestSEC1_NoAPIKeyLeakage(t *testing.T) {
 	srv := stubserver.NewStatusCodeServer(500, `{"error":{"code":500,"message":"internal error"}}`)
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: secretKey, Version: "v1beta"})
-	_, _, err := streamAndCollect(p, testModel())
+	p, ep := testClientAndEndpoint(srv.URL, secretKey)
+	_, _, err := streamAndCollect(p, ep, testModel())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -859,8 +859,8 @@ func TestSEC3_EmptyBodyResponse(t *testing.T) {
 			srv := stubserver.NewEmptyBodyServer(status)
 			defer srv.Close()
 
-			p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-			_, _, err := streamAndCollect(p, testModel())
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			_, _, err := streamAndCollect(p, ep, testModel())
 			if err == nil {
 				t.Fatalf("expected error for status %d", status)
 			}

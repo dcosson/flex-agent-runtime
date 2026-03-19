@@ -14,11 +14,11 @@ import (
 	"github.com/dcosson/flex-agent-runtime/internal/ai"
 )
 
-func (p *Provider) Stream(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions) *ai.EventStream {
-	return p.streamInternal(ctx, model, llmCtx, opts, requestParams{})
+func (c *Client) Stream(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions) *ai.EventStream {
+	return c.streamInternal(ctx, endpoint, model, llmCtx, opts, requestParams{})
 }
 
-func (p *Provider) StreamSimple(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.SimpleStreamOptions) *ai.EventStream {
+func (c *Client) StreamSimple(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.Model, llmCtx ai.Context, opts ai.SimpleStreamOptions) *ai.EventStream {
 	base := ai.BuildBaseOptions(model, &opts)
 	if base.MaxTokens == nil {
 		maxTok := model.MaxTokens
@@ -42,21 +42,21 @@ func (p *Provider) StreamSimple(ctx context.Context, model ai.Model, llmCtx ai.C
 		base.MaxTokens = &maxTokens
 	}
 
-	return p.streamInternal(ctx, model, llmCtx, base, params)
+	return c.streamInternal(ctx, endpoint, model, llmCtx, base, params)
 }
 
-func (p *Provider) streamInternal(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, params requestParams) *ai.EventStream {
+func (c *Client) streamInternal(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, params requestParams) *ai.EventStream {
 	es := ai.NewEventStream()
 	go func() {
 		defer es.Close()
-		if err := p.runStream(ctx, model, llmCtx, opts, params, es); err != nil {
-			sendErrorEvent(es, model, err)
+		if err := c.runStream(ctx, endpoint, model, llmCtx, opts, params, es); err != nil {
+			sendErrorEvent(es, endpoint, model, err)
 		}
 	}()
 	return es
 }
 
-func (p *Provider) runStream(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, params requestParams, es *ai.EventStream) error {
+func (c *Client) runStream(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, params requestParams, es *ai.EventStream) error {
 	reqBody, err := buildRequest(model, llmCtx, opts, params)
 	if err != nil {
 		return err
@@ -66,16 +66,17 @@ func (p *Provider) runStream(ctx context.Context, model ai.Model, llmCtx ai.Cont
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(bodyBytes))
+	url := strings.TrimRight(endpoint.BaseURL, "/") + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	applyHeaders(req, p, model, opts)
+	applyHeaders(req, endpoint, model)
 
-	resp, err := p.client.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-			return &ai.ProviderError{Code: ai.ErrUnknown, Message: "request canceled", Provider: "openai"}
+			return &ai.ProviderError{Code: ai.ErrUnknown, Message: "request canceled", Provider: endpoint.ProviderName}
 		}
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -89,30 +90,28 @@ func (p *Provider) runStream(ctx context.Context, model ai.Model, llmCtx ai.Cont
 	return processStream(ctx, resp.Body, model, es)
 }
 
-func applyHeaders(req *http.Request, p *Provider, model ai.Model, opts ai.StreamOptions) {
+func applyHeaders(req *http.Request, endpoint ai.ProviderEndpoint, model ai.Model) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
-	key := strings.TrimSpace(opts.APIKey)
-	if key == "" {
-		key = p.apiKey
+	if endpoint.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
 	}
-	if key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
-	}
-	for k, vs := range model.Headers {
+	// Provider-level + call-level headers (already merged in endpoint)
+	for k, vs := range endpoint.Headers {
 		for _, v := range vs {
 			req.Header.Add(k, v)
 		}
 	}
-	for k, vs := range opts.Headers {
+	// Model-level headers
+	for k, vs := range model.Headers {
 		for _, v := range vs {
 			req.Header.Add(k, v)
 		}
 	}
 }
 
-func sendErrorEvent(es *ai.EventStream, model ai.Model, err error) {
-	perr := &ai.ProviderError{Code: ai.ErrUnknown, Message: err.Error(), Provider: "openai"}
+func sendErrorEvent(es *ai.EventStream, endpoint ai.ProviderEndpoint, model ai.Model, err error) {
+	perr := &ai.ProviderError{Code: ai.ErrUnknown, Message: err.Error(), Provider: endpoint.ProviderName}
 	if x, ok := err.(*ai.ProviderError); ok {
 		perr = x
 	}
@@ -122,7 +121,7 @@ func sendErrorEvent(es *ai.EventStream, model ai.Model, err error) {
 		Reason: ai.StopReasonError,
 		Error: &ai.AssistantMessage{
 			API:          model.API,
-			Provider:     "openai",
+			Provider:     endpoint.ProviderName,
 			Model:        model.ID,
 			StopReason:   ai.StopReasonError,
 			ErrorMessage: perr.Message,

@@ -15,11 +15,11 @@ import (
 	"github.com/dcosson/flex-agent-runtime/internal/ai/sse"
 )
 
-func (p *Provider) Stream(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions) *ai.EventStream {
-	return p.streamWithThinking(ctx, model, llmCtx, opts, nil)
+func (c *Client) Stream(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions) *ai.EventStream {
+	return c.streamWithThinking(ctx, endpoint, model, llmCtx, opts, nil)
 }
 
-func (p *Provider) StreamSimple(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.SimpleStreamOptions) *ai.EventStream {
+func (c *Client) StreamSimple(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.Model, llmCtx ai.Context, opts ai.SimpleStreamOptions) *ai.EventStream {
 	base := ai.BuildBaseOptions(model, &opts)
 	if base.MaxTokens == nil {
 		maxTok := model.MaxTokens
@@ -29,23 +29,23 @@ func (p *Provider) StreamSimple(ctx context.Context, model ai.Model, llmCtx ai.C
 		maxTokens, budget := ai.AdjustMaxTokensForThinking(*base.MaxTokens, model.MaxTokens, opts.Reasoning, opts.ThinkingBudgets)
 		base.MaxTokens = &maxTokens
 		thinking := &wireThinking{Type: "enabled", BudgetTokens: budget}
-		return p.streamWithThinking(ctx, model, llmCtx, base, thinking)
+		return c.streamWithThinking(ctx, endpoint, model, llmCtx, base, thinking)
 	}
-	return p.streamWithThinking(ctx, model, llmCtx, base, nil)
+	return c.streamWithThinking(ctx, endpoint, model, llmCtx, base, nil)
 }
 
-func (p *Provider) streamWithThinking(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, thinking *wireThinking) *ai.EventStream {
+func (c *Client) streamWithThinking(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, thinking *wireThinking) *ai.EventStream {
 	es := ai.NewEventStream()
 	go func() {
 		defer es.Close()
-		if err := p.runStream(ctx, model, llmCtx, opts, thinking, es); err != nil {
-			sendErrorEvent(es, model, err)
+		if err := c.runStream(ctx, endpoint, model, llmCtx, opts, thinking, es); err != nil {
+			sendErrorEvent(es, endpoint, model, err)
 		}
 	}()
 	return es
 }
 
-func (p *Provider) runStream(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, thinking *wireThinking, es *ai.EventStream) error {
+func (c *Client) runStream(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, thinking *wireThinking, es *ai.EventStream) error {
 	reqBody, err := buildRequest(model, llmCtx, opts, thinking)
 	if err != nil {
 		return err
@@ -55,16 +55,17 @@ func (p *Provider) runStream(ctx context.Context, model ai.Model, llmCtx ai.Cont
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/v1/messages", bytes.NewReader(bodyBytes))
+	url := strings.TrimRight(endpoint.BaseURL, "/") + "/v1/messages"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	applyHeaders(req, p, model, opts)
+	applyHeaders(req, endpoint, model)
 
-	resp, err := p.client.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-			return &ai.ProviderError{Code: ai.ErrUnknown, Message: "request canceled", Provider: "anthropic"}
+			return &ai.ProviderError{Code: ai.ErrUnknown, Message: "request canceled", Provider: endpoint.ProviderName}
 		}
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -80,7 +81,7 @@ func (p *Provider) runStream(ctx context.Context, model ai.Model, llmCtx ai.Cont
 	for scanner.Next() {
 		select {
 		case <-ctx.Done():
-			return &ai.ProviderError{Code: ai.ErrUnknown, Message: "request canceled", Provider: "anthropic"}
+			return &ai.ProviderError{Code: ai.ErrUnknown, Message: "request canceled", Provider: endpoint.ProviderName}
 		default:
 		}
 		e := scanner.UnsafeEvent()
@@ -94,36 +95,39 @@ func (p *Provider) runStream(ctx context.Context, model ai.Model, llmCtx ai.Cont
 	return processor.finish(nil)
 }
 
-func applyHeaders(req *http.Request, p *Provider, model ai.Model, opts ai.StreamOptions) {
+func applyHeaders(req *http.Request, endpoint ai.ProviderEndpoint, model ai.Model) {
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("accept", "text/event-stream")
-	req.Header.Set("anthropic-version", p.version)
-	key := strings.TrimSpace(opts.APIKey)
-	if key == "" {
-		key = p.apiKey
-	}
-	if key != "" {
-		req.Header.Set("x-api-key", key)
-	}
-	for _, beta := range p.betaHeaders {
-		if strings.TrimSpace(beta) != "" {
-			req.Header.Add("anthropic-beta", beta)
+
+	// API version from provider-specific config
+	version := defaultVersion
+	if endpoint.ProviderSpecific != nil {
+		if v, ok := endpoint.ProviderSpecific["apiVersion"]; ok && v != "" {
+			version = v
 		}
 	}
-	for k, vs := range model.Headers {
+	req.Header.Set("anthropic-version", version)
+
+	if endpoint.APIKey != "" {
+		req.Header.Set("x-api-key", endpoint.APIKey)
+	}
+
+	// Provider-level + call-level headers (already merged in endpoint)
+	for k, vs := range endpoint.Headers {
 		for _, v := range vs {
 			req.Header.Add(k, v)
 		}
 	}
-	for k, vs := range opts.Headers {
+	// Model-level headers
+	for k, vs := range model.Headers {
 		for _, v := range vs {
 			req.Header.Add(k, v)
 		}
 	}
 }
 
-func sendErrorEvent(es *ai.EventStream, model ai.Model, err error) {
-	perr := &ai.ProviderError{Code: ai.ErrUnknown, Message: err.Error(), Provider: "anthropic"}
+func sendErrorEvent(es *ai.EventStream, endpoint ai.ProviderEndpoint, model ai.Model, err error) {
+	perr := &ai.ProviderError{Code: ai.ErrUnknown, Message: err.Error(), Provider: endpoint.ProviderName}
 	if x, ok := err.(*ai.ProviderError); ok {
 		perr = x
 	}
@@ -133,7 +137,7 @@ func sendErrorEvent(es *ai.EventStream, model ai.Model, err error) {
 		Reason: ai.StopReasonError,
 		Error: &ai.AssistantMessage{
 			API:          model.API,
-			Provider:     "anthropic",
+			Provider:     endpoint.ProviderName,
 			Model:        model.ID,
 			StopReason:   ai.StopReasonError,
 			ErrorMessage: perr.Message,

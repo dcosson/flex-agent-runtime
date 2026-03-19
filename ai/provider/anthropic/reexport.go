@@ -7,13 +7,17 @@ import (
 
 // Anthropic supports chat/streaming only.
 type (
-	Config   = internal.Config
-	Provider = internal.Provider
+	Config       = internal.Config
+	ClientConfig = internal.ClientConfig
+	Client       = internal.Client
+	Provider     = internal.Provider
 )
 
 var (
-	New      = internal.New
-	Register = internal.Register
+	New                = internal.New
+	NewClient          = internal.NewClient
+	Register           = internal.Register
+	EndpointFromConfig = internal.EndpointFromConfig
 )
 
 func Capabilities() provider.CapabilitySet {

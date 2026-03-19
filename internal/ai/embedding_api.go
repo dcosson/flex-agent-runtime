@@ -5,7 +5,9 @@ import (
 	"fmt"
 )
 
-// Embed is the top-level embedding entry point.
+// Embed is the top-level embedding entry point. Resolution order:
+//  1. New path: model.Provider → ProviderConfig → EmbeddingAPIClient + ResolveEndpoint
+//  2. Legacy fallback: model.API → old EmbeddingProvider registry (until callers migrate)
 func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*EmbeddingResponse, error) {
 	if len(req.Texts) == 0 {
 		return nil, fmt.Errorf("embedding request requires at least one text")
@@ -14,11 +16,6 @@ func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*Embeddin
 	model, ok := GetEmbeddingModel(modelID)
 	if !ok {
 		return nil, fmt.Errorf("unknown embedding model: %s", modelID)
-	}
-
-	provider, err := GetEmbeddingProvider(model.API)
-	if err != nil {
-		return nil, err
 	}
 
 	if req.Dimensions > 0 && !model.SupportsDimCtrl {
@@ -31,12 +28,34 @@ func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*Embeddin
 		return nil, fmt.Errorf("requested dimensions %d exceeds max %d for model %s", req.Dimensions, model.MaxDims, modelID)
 	}
 
+	// Try new two-step resolution path first.
+	if cfg, err := GetProviderConfig(model.Provider); err == nil {
+		if client, err := GetEmbeddingAPIClient(cfg.EmbeddingAPIClientType); err == nil {
+			endpoint := ResolveEndpoint(cfg, StreamOptions{})
+			resp, err := client.Embed(ctx, endpoint, model, req)
+			if err != nil {
+				return nil, err
+			}
+			return finalizeEmbeddingResponse(resp, model)
+		}
+	}
+
+	// Legacy fallback: use old EmbeddingProvider registry.
+	provider, err := GetEmbeddingProvider(model.API)
+	if err != nil {
+		return nil, fmt.Errorf("no provider config for %q and no legacy embedding provider for API %q", model.Provider, model.API)
+	}
+
 	resp, err := provider.Embed(ctx, model, req)
 	if err != nil {
 		return nil, err
 	}
+	return finalizeEmbeddingResponse(resp, model)
+}
+
+func finalizeEmbeddingResponse(resp *EmbeddingResponse, model EmbeddingModel) (*EmbeddingResponse, error) {
 	if resp == nil {
-		return nil, fmt.Errorf("embedding provider %s returned nil response", model.API)
+		return nil, fmt.Errorf("embedding provider returned nil response for model %s", model.ID)
 	}
 	if resp.Model == "" {
 		resp.Model = model.ID

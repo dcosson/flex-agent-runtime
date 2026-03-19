@@ -29,62 +29,46 @@ var cohereInputTypes = map[ai.EmbeddingTaskType]string{
 	ai.EmbeddingTaskUnspecified:    "search_document", // required, default
 }
 
-// Config controls Cohere provider construction.
-type Config struct {
+// ClientConfig controls Cohere client construction.
+type ClientConfig struct {
 	HTTPClient *http.Client
-	BaseURL    string
-	APIKey     string
 }
 
-// EmbeddingProvider implements ai.EmbeddingProvider for the Cohere Embed API.
-type EmbeddingProvider struct {
-	client  *http.Client
-	baseURL string
-	apiKey  string
+// EmbeddingClient implements ai.EmbeddingAPIClient for the Cohere Embed API.
+// It is stateless — base URL and API key come from ProviderEndpoint per-call.
+type EmbeddingClient struct {
+	httpClient *http.Client
 }
 
-var _ ai.EmbeddingProvider = (*EmbeddingProvider)(nil)
+var _ ai.EmbeddingAPIClient = (*EmbeddingClient)(nil)
 
-// NewEmbedding constructs a Cohere embedding provider with sane defaults.
-func NewEmbedding(cfg Config) *EmbeddingProvider {
+// NewEmbeddingClient constructs a Cohere embedding client.
+func NewEmbeddingClient(cfg ClientConfig) *EmbeddingClient {
 	client := cfg.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: defaultTimeout}
 	}
-	baseURL := strings.TrimSpace(cfg.BaseURL)
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-	return &EmbeddingProvider{
-		client:  client,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  cfg.APIKey,
-	}
+	return &EmbeddingClient{httpClient: client}
 }
 
-// API returns the provider API identifier.
-func (p *EmbeddingProvider) API() string {
+// ClientType returns the embedding API client type identifier.
+func (c *EmbeddingClient) ClientType() string {
 	return embeddingAPIName
 }
 
-// RegisterEmbedding constructs and registers the Cohere embedding provider.
-func RegisterEmbedding(cfg Config, sourceID string) *EmbeddingProvider {
-	ep := NewEmbedding(cfg)
-	ai.RegisterEmbeddingProvider(ep, sourceID)
-	return ep
+// RegisterEmbeddingClient creates and registers the Cohere embedding API client.
+func RegisterEmbeddingClient(cfg ClientConfig) *EmbeddingClient {
+	c := NewEmbeddingClient(cfg)
+	ai.RegisterEmbeddingAPIClient(c)
+	return c
 }
 
 // Embed dispatches embedding requests with shared batch-splitting behavior.
-func (p *EmbeddingProvider) Embed(ctx context.Context, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
-	endpoint := ai.ProviderEndpoint{
-		ProviderName: model.Provider,
-		BaseURL:      p.baseURL,
-		APIKey:       p.apiKey,
-	}
-	return ai.BatchEmbed(ctx, p.embedSingle, endpoint, model, req)
+func (c *EmbeddingClient) Embed(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
+	return ai.BatchEmbed(ctx, c.embedSingle, endpoint, model, req)
 }
 
-func (p *EmbeddingProvider) embedSingle(ctx context.Context, _ ai.ProviderEndpoint, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
+func (c *EmbeddingClient) embedSingle(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
 	wireReq := embedRequestWire{
 		Model:     model.ID,
 		Texts:     append([]string(nil), req.Texts...),
@@ -102,17 +86,17 @@ func (p *EmbeddingProvider) embedSingle(ctx context.Context, _ ai.ProviderEndpoi
 		return nil, fmt.Errorf("marshal embedding request: %w", err)
 	}
 
-	endpoint := strings.TrimRight(p.baseURL, "/") + "/embed"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	url := strings.TrimRight(endpoint.BaseURL, "/") + "/embed"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("build embedding request: %w", err)
 	}
 	httpReq.Header.Set("content-type", "application/json")
-	if p.apiKey != "" {
-		httpReq.Header.Set("authorization", "Bearer "+p.apiKey)
+	if endpoint.APIKey != "" {
+		httpReq.Header.Set("authorization", "Bearer "+endpoint.APIKey)
 	}
 
-	resp, err := p.client.Do(httpReq)
+	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -186,4 +170,61 @@ func resolveInputType(taskType ai.EmbeddingTaskType) string {
 		return t
 	}
 	return "search_document"
+}
+
+// Legacy types for backward compatibility during migration.
+
+// Config is the legacy configuration struct.
+type Config struct {
+	HTTPClient *http.Client
+	BaseURL    string
+	APIKey     string
+}
+
+// EmbeddingProvider wraps EmbeddingClient with stored endpoint config for legacy callers.
+type EmbeddingProvider struct {
+	*EmbeddingClient
+	baseURL string
+	apiKey  string
+}
+
+var _ ai.EmbeddingProvider = (*EmbeddingProvider)(nil)
+
+// NewEmbedding constructs a legacy EmbeddingProvider with stored baseURL/apiKey.
+func NewEmbedding(cfg Config) *EmbeddingProvider {
+	client := cfg.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: defaultTimeout}
+	}
+	baseURL := strings.TrimSpace(cfg.BaseURL)
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
+	return &EmbeddingProvider{
+		EmbeddingClient: &EmbeddingClient{httpClient: client},
+		baseURL:         strings.TrimRight(baseURL, "/"),
+		apiKey:          cfg.APIKey,
+	}
+}
+
+// API returns the provider API identifier (legacy interface).
+func (p *EmbeddingProvider) API() string {
+	return embeddingAPIName
+}
+
+// Embed implements ai.EmbeddingProvider for legacy callers.
+func (p *EmbeddingProvider) Embed(ctx context.Context, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
+	endpoint := ai.ProviderEndpoint{
+		ProviderName: model.Provider,
+		BaseURL:      p.baseURL,
+		APIKey:       p.apiKey,
+	}
+	return p.EmbeddingClient.Embed(ctx, endpoint, model, req)
+}
+
+// RegisterEmbedding constructs and registers a legacy EmbeddingProvider.
+func RegisterEmbedding(cfg Config, sourceID string) *EmbeddingProvider {
+	p := NewEmbedding(cfg)
+	ai.RegisterEmbeddingProvider(p, sourceID)
+	return p
 }

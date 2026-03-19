@@ -342,29 +342,26 @@ func fallbackChatModels() map[string]map[string]ai.Model {
 func registerChatProviders() []string {
 	available := make([]string, 0, 3)
 
+	// Register API clients (protocol implementations) — one per protocol.
+	provideranthropic.Register(provideranthropic.ClientConfig{})
+	provideropenai.Register(provideropenai.ClientConfig{})
+	providergoogle.Register(providergoogle.ClientConfig{})
+
+	// Register provider configs for each available provider.
+	// API keys are resolved from env vars at call time via ProviderConfig.KeyEnvVars
+	// (loaded from catalog.json). We check here just for availability indication.
 	if key := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); key != "" {
-		provideranthropic.Register(provideranthropic.Config{
-			APIKey:  key,
-			BaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
-			Version: os.Getenv("ANTHROPIC_VERSION"),
-		}, "cmd-llm-demo")
+		_ = key
 		available = append(available, anthropicProvider)
 	}
 
 	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
-		provideropenai.Register(provideropenai.Config{
-			APIKey:  key,
-			BaseURL: os.Getenv("OPENAI_BASE_URL"),
-		}, "cmd-llm-demo")
+		_ = key
 		available = append(available, openaiProvider)
 	}
 
 	if key := strings.TrimSpace(os.Getenv("GOOGLE_API_KEY")); key != "" {
-		providergoogle.Register(providergoogle.Config{
-			APIKey:  key,
-			BaseURL: os.Getenv("GOOGLE_BASE_URL"),
-			Version: os.Getenv("GOOGLE_API_VERSION"),
-		}, "cmd-llm-demo")
+		_ = key
 		available = append(available, googleProvider)
 	}
 

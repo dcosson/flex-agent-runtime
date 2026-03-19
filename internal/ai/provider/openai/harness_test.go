@@ -195,12 +195,12 @@ func splitEvenly(s string, size int) []string {
 }
 
 // streamAndCollect runs a stream and collects all events plus the final result.
-func streamAndCollect(p *Provider, model ai.Model, ctxOpt ...context.Context) ([]ai.AssistantMessageEvent, ai.AssistantMessage, error) {
+func streamAndCollect(p *Client, ep ai.ProviderEndpoint, model ai.Model, ctxOpt ...context.Context) ([]ai.AssistantMessageEvent, ai.AssistantMessage, error) {
 	ctx := context.Background()
 	if len(ctxOpt) > 0 {
 		ctx = ctxOpt[0]
 	}
-	es := p.Stream(ctx, model, ai.Context{
+	es := p.Stream(ctx, ep, model, ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 
@@ -241,8 +241,8 @@ func TestP1_StreamEventOrdering(t *testing.T) {
 		srv := stubserver.New(stubserver.WithFixture(fixture))
 		defer srv.Close()
 
-		p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-		events, _, err := streamAndCollect(p, testModel())
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		events, _, err := streamAndCollect(p, ep, testModel())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -298,8 +298,8 @@ func TestP2_ToolJSONDeltaConvergence(t *testing.T) {
 		srv := stubserver.New(stubserver.WithFixture(fixture))
 		defer srv.Close()
 
-		p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-		events, _, err := streamAndCollect(p, testModel())
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		events, _, err := streamAndCollect(p, ep, testModel())
 		if err != nil {
 			t.Fatalf("stream error: %v", err)
 		}
@@ -385,8 +385,8 @@ func TestP4_MultiToolIndexIsolation(t *testing.T) {
 		srv := stubserver.New(stubserver.WithFixture(fixture))
 		defer srv.Close()
 
-		p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-		events, _, err := streamAndCollect(p, testModel())
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		events, _, err := streamAndCollect(p, ep, testModel())
 		if err != nil {
 			t.Fatalf("stream error: %v", err)
 		}
@@ -479,8 +479,8 @@ func TestP5_ModelCompatFlagIndependence(t *testing.T) {
 
 			model := testModelWithCompat(tc.compat)
 			max := 100
-			p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-			es := p.Stream(context.Background(), model, ai.Context{
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			es := p.Stream(context.Background(), ep, model, ai.Context{
 				SystemPrompt: "system",
 				Messages:     []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 			}, ai.StreamOptions{MaxTokens: &max})
@@ -541,8 +541,8 @@ func TestF1_MidStreamTCPReset(t *testing.T) {
 			srv := stubserver.NewTCPResetServer(fixture, cutAfter)
 			defer srv.Close()
 
-			p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-			_, _, err := streamAndCollect(p, testModel())
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			_, _, err := streamAndCollect(p, ep, testModel())
 			if err == nil {
 				t.Fatal("expected error after TCP reset")
 			}
@@ -569,9 +569,9 @@ func TestF2_MalformedSSEPayload(t *testing.T) {
 			srv := stubserver.NewMalformedServer(fixture, 0, tc.data)
 			defer srv.Close()
 
-			p := New(Config{BaseURL: srv.URL, APIKey: "k"})
+			p, ep := testClientAndEndpoint(srv.URL, "k")
 			// Must not panic
-			events, _, _ := streamAndCollect(p, testModel())
+			events, _, _ := streamAndCollect(p, ep, testModel())
 			_ = events
 		})
 	}
@@ -582,8 +582,8 @@ func TestF3_APIThrottlingStorm(t *testing.T) {
 	srv := stubserver.NewThrottleServer("1")
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	_, _, err := streamAndCollect(p, testModel())
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	_, _, err := streamAndCollect(p, ep, testModel())
 	if err == nil {
 		t.Fatal("expected error from throttle")
 	}
@@ -598,8 +598,8 @@ func TestF4_SlowConsumerBackpressure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(ctx, testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(ctx, ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 
@@ -625,8 +625,8 @@ func TestF5_ContextCancellationRaces(t *testing.T) {
 			defer srv.Close()
 
 			ctx, cancel := context.WithCancel(context.Background())
-			p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-			es := p.Stream(ctx, testModel(), ai.Context{
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			es := p.Stream(ctx, ep, testModel(), ai.Context{
 				Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 			}, ai.StreamOptions{})
 
@@ -649,8 +649,8 @@ func TestF6_EmptyBodyResponse(t *testing.T) {
 			srv := stubserver.NewEmptyBodyServer(status)
 			defer srv.Close()
 
-			p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-			_, _, err := streamAndCollect(p, testModel())
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			_, _, err := streamAndCollect(p, ep, testModel())
 			if err == nil {
 				t.Fatalf("expected error for status %d", status)
 			}
@@ -674,8 +674,8 @@ func TestS2_MultiToolInterleavedDeltas(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	events, _, err := streamAndCollect(p, testModel())
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	events, _, err := streamAndCollect(p, ep, testModel())
 	if err != nil {
 		t.Fatalf("stream error: %v", err)
 	}
@@ -777,8 +777,8 @@ func TestS3_ReasoningTextToolInterleaving(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(buf.String()))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	_, msg, err := streamAndCollect(p, reasoningModel())
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	_, msg, err := streamAndCollect(p, ep, reasoningModel())
 	if err != nil {
 		t.Fatalf("stream error: %v", err)
 	}
@@ -885,8 +885,8 @@ func TestS4_UsageInVariousPositions(t *testing.T) {
 			srv := stubserver.New(stubserver.WithFixture(tc.build()))
 			defer srv.Close()
 
-			p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-			_, msg, err := streamAndCollect(p, testModel())
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			_, msg, err := streamAndCollect(p, ep, testModel())
 			if err != nil {
 				t.Fatalf("stream error: %v", err)
 			}
@@ -929,8 +929,8 @@ func TestSEC1_MaliciousToolJSON(t *testing.T) {
 			srv := stubserver.New(stubserver.WithFixture(fixture))
 			defer srv.Close()
 
-			p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-			events, _, _ := streamAndCollect(p, testModel()) // must not panic
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			events, _, _ := streamAndCollect(p, ep, testModel()) // must not panic
 
 			for _, e := range events {
 				if e.Type == ai.EventToolCallEnd && e.ToolCall != nil {
@@ -950,8 +950,8 @@ func TestSEC2_NoAPIKeyLeakage(t *testing.T) {
 	srv := stubserver.NewStatusCodeServer(500, `{"error":{"message":"internal error"}}`)
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: secretKey})
-	_, _, err := streamAndCollect(p, testModel())
+	p, ep := testClientAndEndpoint(srv.URL, secretKey)
+	_, _, err := streamAndCollect(p, ep, testModel())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -976,8 +976,8 @@ func TestSEC3_OversizedPayloadProtection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(ctx, testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(ctx, ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 
@@ -1057,8 +1057,8 @@ func TestO3_CompatEndpointRequestFormat(t *testing.T) {
 			defer srv.Close()
 
 			max := 100
-			p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-			es := p.Stream(context.Background(), tc.model, ai.Context{
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			es := p.Stream(context.Background(), ep, tc.model, ai.Context{
 				SystemPrompt: tc.system,
 				Messages:     []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 			}, ai.StreamOptions{MaxTokens: &max})
@@ -1088,8 +1088,8 @@ func TestO3b_MistralToolIDNormalization(t *testing.T) {
 		defer srv.Close()
 
 		max := 100
-		p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-		es := p.Stream(context.Background(), mistralModel, ai.Context{
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		es := p.Stream(context.Background(), ep, mistralModel, ai.Context{
 			Messages: []ai.Message{
 				&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}},
 				&ai.AssistantMessage{Content: []ai.ContentBlock{
@@ -1152,8 +1152,8 @@ func TestO3b_MistralToolIDNormalization(t *testing.T) {
 
 		normalModel := testModel()
 		max := 100
-		p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-		es := p.Stream(context.Background(), normalModel, ai.Context{
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		es := p.Stream(context.Background(), ep, normalModel, ai.Context{
 			Messages: []ai.Message{
 				&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}},
 				&ai.AssistantMessage{Content: []ai.ContentBlock{

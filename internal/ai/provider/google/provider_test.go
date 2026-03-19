@@ -11,6 +11,15 @@ import (
 	"github.com/dcosson/flex-agent-runtime/internal/ai/testutil/stubserver"
 )
 
+func testEndpoint(baseURL, apiKey string) ai.ProviderEndpoint {
+	return EndpointFromConfig(Config{BaseURL: baseURL, APIKey: apiKey})
+}
+
+func testClientAndEndpoint(baseURL, apiKey string) (*Client, ai.ProviderEndpoint) {
+	p := New(Config{BaseURL: baseURL, APIKey: apiKey})
+	return p.Client, testEndpoint(baseURL, apiKey)
+}
+
 func testModel() ai.Model {
 	return ai.Model{
 		ID:        "gemini-2.5-flash",
@@ -308,10 +317,10 @@ func TestStreamTextFixture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
 	// Override URL construction by setting baseURL to srv.URL root
 	// The stub server handles any path, so this works
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 	msg, err := es.Drain()
@@ -340,8 +349,8 @@ func TestStreamThinkingFixture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 	msg, err := es.Drain()
@@ -370,8 +379,8 @@ func TestStreamToolCallFixture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 	msg, err := es.Drain()
@@ -400,8 +409,8 @@ func TestStreamToolCallNoIDFixture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 	msg, err := es.Drain()
@@ -423,8 +432,8 @@ func TestStreamThoughtSignatureFixture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 	msg, err := es.Drain()
@@ -451,8 +460,8 @@ func TestStreamSafetyBlockFixture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 
@@ -479,8 +488,8 @@ func TestStreamPromptBlockedFixture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 	_, err := es.Drain()
@@ -496,8 +505,8 @@ func TestHTTPErrorClassification(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "bad", Version: "v1beta"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "bad")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hello"}}}},
 	}, ai.StreamOptions{})
 
@@ -526,9 +535,9 @@ func TestStreamSimpleThinkingBudget(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
 	high := 4096
-	es := p.StreamSimple(context.Background(), testModel(), ai.Context{
+	es := p.StreamSimple(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.SimpleStreamOptions{
 		Reasoning:       ai.ThinkingHigh,
@@ -579,8 +588,8 @@ func TestStreamSimpleThinkingLevelMapping(t *testing.T) {
 			srv := stubserver.New(stubserver.WithFixture(fixture))
 			defer srv.Close()
 
-			p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-			es := p.StreamSimple(context.Background(), testModel(), ai.Context{
+			p, ep := testClientAndEndpoint(srv.URL, "k")
+			es := p.StreamSimple(context.Background(), ep, testModel(), ai.Context{
 				Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 			}, ai.SimpleStreamOptions{Reasoning: tc.level})
 			_, _ = es.Drain()
@@ -608,8 +617,8 @@ func TestStreamRequestCapture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "test-key", Version: "v1beta"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "test-key")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 	_, _ = es.Drain()

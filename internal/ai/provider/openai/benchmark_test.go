@@ -31,8 +31,8 @@ func BenchmarkB1_SSEThroughput(b *testing.B) {
 	b.SetBytes(int64(len(fixture)))
 	for i := 0; i < b.N; i++ {
 		srv := stubserver.New(stubserver.WithFixture(fixture))
-		p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-		es := p.Stream(context.Background(), testModel(), ai.Context{
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 			Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 		}, ai.StreamOptions{})
 		for range es.C {
@@ -58,8 +58,8 @@ func BenchmarkB3_ToolJSONParse(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		srv := stubserver.New(stubserver.WithFixture(fixture))
-		p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-		es := p.Stream(context.Background(), testModel(), ai.Context{
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 			Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 		}, ai.StreamOptions{})
 		for range es.C {
@@ -170,8 +170,8 @@ func TestST1_LongSessionSoak(t *testing.T) {
 		fixture := fixtures[i%len(fixtures)]
 		srv := stubserver.New(stubserver.WithFixture(fixture))
 
-		p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-		es := p.Stream(context.Background(), testModel(), ai.Context{
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 			Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 		}, ai.StreamOptions{})
 		for range es.C {
@@ -209,7 +209,7 @@ func TestST2_ConcurrencyStress(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
 
 	var wg sync.WaitGroup
 	var successCount, errorCount atomic.Int32
@@ -218,7 +218,7 @@ func TestST2_ConcurrencyStress(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			es := p.Stream(context.Background(), testModel(), ai.Context{
+			es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 				Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 			}, ai.StreamOptions{})
 			for range es.C {
@@ -262,7 +262,7 @@ func TestST3_BurstToolCallStress(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
 
 	var wg sync.WaitGroup
 	var successCount, errorCount atomic.Int32
@@ -271,7 +271,7 @@ func TestST3_BurstToolCallStress(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			es := p.Stream(context.Background(), testModel(), ai.Context{
+			es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 				Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 			}, ai.StreamOptions{})
 

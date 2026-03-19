@@ -1,8 +1,8 @@
 package openai
 
 import (
+	"context"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/dcosson/flex-agent-runtime/internal/ai"
@@ -10,49 +10,86 @@ import (
 
 const (
 	apiName        = "openai-completions"
-	defaultBaseURL = "https://api.openai.com/v1"
 	defaultTimeout = 60 * time.Second
 )
 
-// Config controls OpenAI provider construction.
+// ClientConfig controls OpenAI client construction.
+type ClientConfig struct {
+	HTTPClient *http.Client
+}
+
+// Client implements ai.APIClient for the OpenAI Chat Completions protocol.
+// It is stateless — base URL and API key come from ProviderEndpoint per-call.
+type Client struct {
+	httpClient *http.Client
+}
+
+// NewClient constructs an OpenAI protocol client.
+func NewClient(cfg ClientConfig) *Client {
+	client := cfg.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: defaultTimeout}
+	}
+	return &Client{httpClient: client}
+}
+
+// ClientType returns the API client type identifier.
+func (c *Client) ClientType() string {
+	return apiName
+}
+
+// Register creates a Client and registers it as an API client.
+func Register(cfg ClientConfig) *Client {
+	c := NewClient(cfg)
+	ai.RegisterAPIClient(c)
+	return c
+}
+
+// Config is the legacy configuration struct. Retained for embedding provider
+// backward compatibility during migration. New code should use ClientConfig.
 type Config struct {
 	HTTPClient *http.Client
 	BaseURL    string
 	APIKey     string
 }
 
-// Provider implements ai.Provider for OpenAI Chat Completions API.
+// Provider wraps Client with stored endpoint config for legacy callers that
+// use the old ai.Provider interface. Will be removed when callers migrate.
 type Provider struct {
-	client  *http.Client
-	baseURL string
-	apiKey  string
+	*Client
+	endpoint ai.ProviderEndpoint
 }
 
-// New constructs an OpenAI provider with sane defaults.
+// API returns the ai.Provider API identifier.
+func (p *Provider) API() string { return apiName }
+
+// Stream implements ai.Provider for legacy callers.
+func (p *Provider) Stream(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions) *ai.EventStream {
+	return p.Client.Stream(ctx, p.endpoint, model, llmCtx, opts)
+}
+
+// StreamSimple implements ai.Provider for legacy callers.
+func (p *Provider) StreamSimple(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.SimpleStreamOptions) *ai.EventStream {
+	return p.Client.StreamSimple(ctx, p.endpoint, model, llmCtx, opts)
+}
+
+// New constructs a legacy Provider with stored endpoint config.
+// Retained for backward compatibility during migration.
 func New(cfg Config) *Provider {
-	client := cfg.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: defaultTimeout}
-	}
-	baseURL := strings.TrimSpace(cfg.BaseURL)
+	client := NewClient(ClientConfig{HTTPClient: cfg.HTTPClient})
+	ep := EndpointFromConfig(cfg)
+	return &Provider{Client: client, endpoint: ep}
+}
+
+// EndpointFromConfig creates a ProviderEndpoint from legacy Config for testing.
+func EndpointFromConfig(cfg Config) ai.ProviderEndpoint {
+	baseURL := cfg.BaseURL
 	if baseURL == "" {
-		baseURL = defaultBaseURL
+		baseURL = "https://api.openai.com/v1"
 	}
-	return &Provider{
-		client:  client,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  cfg.APIKey,
+	return ai.ProviderEndpoint{
+		ProviderName: "openai",
+		BaseURL:      baseURL,
+		APIKey:       cfg.APIKey,
 	}
-}
-
-// API returns the provider API identifier.
-func (p *Provider) API() string {
-	return apiName
-}
-
-// Register constructs and registers the OpenAI provider in ai registry.
-func Register(cfg Config, sourceID string) *Provider {
-	p := New(cfg)
-	ai.RegisterProvider(p, sourceID)
-	return p
 }
