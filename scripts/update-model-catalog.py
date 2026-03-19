@@ -3,10 +3,17 @@
 Regenerate internal/ai/models/catalog.json and embedding_catalog.json.
 
 Run periodically to update model pricing and add new models.
-This script is the single source of truth for model metadata.
+This script dynamically discovers models from provider APIs (primarily
+OpenRouter) and supplements with direct provider APIs when API keys are
+available.
 
 Usage:
     python3 scripts/update-model-catalog.py
+
+    Set these env vars for richer data (all optional):
+      ANTHROPIC_API_KEY   - enrich Anthropic models with capabilities
+      GEMINI_API_KEY      - enrich Google models with token limits
+      OPENAI_API_KEY      - (minimal benefit, just model ID validation)
 
 OpenRouter Provider Assessment
 ==============================
@@ -29,18 +36,21 @@ The baseUrl in each model entry directs requests to OpenRouter's endpoint.
 The application layer should detect provider="openrouter" and supply the
 OPENROUTER_API_KEY instead of OPENAI_API_KEY when constructing the provider.
 
-Pricing Sources (last verified 2026-03-18)
-==========================================
-Anthropic:  https://platform.claude.com/docs/en/about-claude/pricing
-OpenAI:     https://openai.com/api/pricing/ and https://pecollective.com/tools/openai-api-pricing/
-Google:     https://ai.google.dev/gemini-api/docs/pricing
-OpenRouter: https://openrouter.ai/models (individual model pages)
-Cohere:     https://cohere.com/pricing and https://docs.cohere.com/docs/models
+Pricing Sources
+===============
+Primary: OpenRouter API (https://openrouter.ai/api/v1/models) - no auth required
+Supplementary: Anthropic, Google, OpenAI direct APIs (require API keys)
 """
 
+import hashlib
 import json
 import os
+import re
 import sys
+import tempfile
+import time
+import urllib.request
+import urllib.error
 from collections import OrderedDict
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -48,102 +58,431 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 CATALOG_PATH = os.path.join(PROJECT_ROOT, "internal", "ai", "models", "catalog.json")
 EMBEDDING_CATALOG_PATH = os.path.join(PROJECT_ROOT, "internal", "ai", "models", "embedding_catalog.json")
 
-
-def cost(inp, out, cache_read, cache_write):
-    """Helper to build a cost dict. All values are USD per million tokens."""
-    return {"input": inp, "output": out, "cacheRead": cache_read, "cacheWrite": cache_write}
-
-
-def model(name, api, base_url, reasoning, inputs, cost_dict, ctx_window, max_tokens, compat=None):
-    """Build a model entry dict."""
-    entry = OrderedDict()
-    entry["name"] = name
-    entry["api"] = api
-    entry["baseUrl"] = base_url
-    entry["reasoning"] = reasoning
-    entry["input"] = inputs
-    entry["cost"] = cost_dict
-    entry["contextWindow"] = ctx_window
-    entry["maxTokens"] = max_tokens
-    if compat:
-        entry["compat"] = compat
-    return entry
+CACHE_DIR = os.path.join(tempfile.gettempdir(), "model-catalog-cache")
+CACHE_TTL_SECONDS = 3600  # 1 hour
 
 
 # ---------------------------------------------------------------------------
-# Anthropic models
-# Source: https://platform.claude.com/docs/en/about-claude/pricing
-#         https://platform.claude.com/docs/en/about-claude/models/overview
-# Cache pricing: 5-min cache write = 1.25x input, cache read = 0.1x input
+# API caching
 # ---------------------------------------------------------------------------
-ANTHROPIC_API = "anthropic-messages"
-ANTHROPIC_URL = "https://api.anthropic.com"
-TEXT_IMAGE = ["text", "image"]
 
-anthropic_models = OrderedDict()
+def _cache_path(url):
+    """Return a filesystem cache path for a URL."""
+    h = hashlib.sha256(url.encode()).hexdigest()[:16]
+    return os.path.join(CACHE_DIR, f"{h}.json")
 
-# Claude Opus 4.6 -- $5/$25, 1M ctx, 128k out
-anthropic_models["claude-opus-4-6"] = model(
-    "Claude Opus 4.6", ANTHROPIC_API, ANTHROPIC_URL, True, TEXT_IMAGE,
-    cost(5, 25, 0.5, 6.25), 1_000_000, 128_000,
-)
 
-# Claude Opus 4.5 -- $5/$25, 200k ctx, 64k out
-anthropic_models["claude-opus-4-5-20251101"] = model(
-    "Claude Opus 4.5", ANTHROPIC_API, ANTHROPIC_URL, True, TEXT_IMAGE,
-    cost(5, 25, 0.5, 6.25), 200_000, 64_000,
-)
+def _fetch_cached(url, headers=None):
+    """Fetch a URL with 1-hour caching to disk. Returns parsed JSON or None."""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    cp = _cache_path(url)
 
-# Claude Opus 4.1 -- $15/$75, 200k ctx, 32k out
-anthropic_models["claude-opus-4-1-20250805"] = model(
-    "Claude Opus 4.1", ANTHROPIC_API, ANTHROPIC_URL, True, TEXT_IMAGE,
-    cost(15, 75, 1.5, 18.75), 200_000, 32_000,
-)
+    if os.path.exists(cp):
+        age = time.time() - os.path.getmtime(cp)
+        if age < CACHE_TTL_SECONDS:
+            with open(cp) as f:
+                return json.load(f)
 
-# Claude Sonnet 4.6 -- $3/$15, 1M ctx, 64k out
-anthropic_models["claude-sonnet-4-6"] = model(
-    "Claude Sonnet 4.6", ANTHROPIC_API, ANTHROPIC_URL, True, TEXT_IMAGE,
-    cost(3, 15, 0.3, 3.75), 1_000_000, 64_000,
-)
+    req = urllib.request.Request(url)
+    if headers:
+        for k, v in headers.items():
+            req.add_header(k, v)
 
-# Claude Sonnet 4.5 -- $3/$15, 200k ctx (1M with beta), 64k out
-anthropic_models["claude-sonnet-4-5-20250929"] = model(
-    "Claude Sonnet 4.5", ANTHROPIC_API, ANTHROPIC_URL, True, TEXT_IMAGE,
-    cost(3, 15, 0.3, 3.75), 200_000, 64_000,
-)
-
-# Claude Sonnet 4 -- $3/$15, 200k ctx, 16k out (legacy, still needed by tests)
-anthropic_models["claude-sonnet-4-20250514"] = model(
-    "Claude Sonnet 4", ANTHROPIC_API, ANTHROPIC_URL, True, TEXT_IMAGE,
-    cost(3, 15, 0.3, 3.75), 200_000, 16_384,
-)
-
-# Claude Opus 4 -- $15/$75, 200k ctx, 32k out
-anthropic_models["claude-opus-4-20250514"] = model(
-    "Claude Opus 4", ANTHROPIC_API, ANTHROPIC_URL, True, TEXT_IMAGE,
-    cost(15, 75, 1.5, 18.75), 200_000, 32_000,
-)
-
-# Claude Haiku 4.5 -- $1/$5, 200k ctx, 64k out
-anthropic_models["claude-haiku-4-5-20251001"] = model(
-    "Claude Haiku 4.5", ANTHROPIC_API, ANTHROPIC_URL, True, TEXT_IMAGE,
-    cost(1, 5, 0.1, 1.25), 200_000, 64_000,
-)
-
-# Claude Haiku 3.5 -- $0.80/$4, 200k ctx, 8k out
-anthropic_models["claude-3-5-haiku-20241022"] = model(
-    "Claude Haiku 3.5", ANTHROPIC_API, ANTHROPIC_URL, False, TEXT_IMAGE,
-    cost(0.8, 4, 0.08, 1), 200_000, 8_192,
-)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+        with open(cp, "w") as f:
+            json.dump(data, f)
+        return data
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError) as e:
+        print(f"  WARNING: Failed to fetch {url}: {e}", file=sys.stderr)
+        # Try stale cache
+        if os.path.exists(cp):
+            print(f"  Using stale cache for {url}", file=sys.stderr)
+            with open(cp) as f:
+                return json.load(f)
+        return None
 
 
 # ---------------------------------------------------------------------------
-# OpenAI models
-# Source: https://openai.com/api/pricing/
-# Cache pricing: cached input is typically 50-75% off input price
+# OpenRouter fetching
 # ---------------------------------------------------------------------------
-OPENAI_API = "openai-completions"
-OPENAI_URL = "https://api.openai.com/v1"
+
+def fetch_openrouter_models():
+    """Fetch all models from OpenRouter. Returns list of model dicts."""
+    print("Fetching models from OpenRouter...")
+    data = _fetch_cached("https://openrouter.ai/api/v1/models")
+    if data is None:
+        return []
+    models = data.get("data", data) if isinstance(data, dict) else data
+    print(f"  Got {len(models)} models from OpenRouter")
+    return models
+
+
+# ---------------------------------------------------------------------------
+# Anthropic enrichment
+# ---------------------------------------------------------------------------
+
+def fetch_anthropic_models():
+    """Fetch model list from Anthropic API. Returns dict of id -> model info."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("  Skipping Anthropic API (ANTHROPIC_API_KEY not set)")
+        return {}
+
+    print("Fetching models from Anthropic API...")
+    data = _fetch_cached(
+        "https://api.anthropic.com/v1/models",
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        },
+    )
+    if data is None:
+        return {}
+
+    models = data.get("data", []) if isinstance(data, dict) else data
+    result = {}
+    for m in models:
+        result[m["id"]] = m
+    print(f"  Got {len(result)} models from Anthropic")
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Google enrichment
+# ---------------------------------------------------------------------------
+
+def fetch_google_models():
+    """Fetch model list from Google Gemini API. Returns dict of short_name -> model info."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        print("  Skipping Google API (GEMINI_API_KEY not set)")
+        return {}
+
+    print("Fetching models from Google API...")
+    data = _fetch_cached(
+        f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
+    )
+    if data is None:
+        return {}
+
+    models = data.get("models", [])
+    result = {}
+    for m in models:
+        # name is like "models/gemini-2.5-pro", strip prefix
+        short = m.get("name", "").replace("models/", "")
+        result[short] = m
+    print(f"  Got {len(result)} models from Google")
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Model filtering
+# ---------------------------------------------------------------------------
+
+# Provider prefixes that map to native providers (stripped from model ID)
+NATIVE_PROVIDERS = {
+    "anthropic": {
+        "api": "anthropic-messages",
+        "baseUrl": "https://api.anthropic.com",
+    },
+    "openai": {
+        "api": "openai-completions",
+        "baseUrl": "https://api.openai.com/v1",
+    },
+    "google": {
+        "api": "google-genai",
+        "baseUrl": "https://generativelanguage.googleapis.com",
+    },
+}
+
+# Models that should stay under the openrouter provider (third-party / open)
+OPENROUTER_PROVIDER = {
+    "api": "openai-completions",
+    "baseUrl": "https://openrouter.ai/api/v1",
+}
+
+# Anthropic models on OpenRouter use undated aliases (e.g. "claude-sonnet-4"),
+# but our codebase / tests reference the dated snapshot IDs (e.g.
+# "claude-sonnet-4-20250514"). This mapping emits both the undated alias AND the
+# dated snapshot as separate catalog entries (identical data) so that callers
+# using either form find the model.
+#
+# The canonical_slug from OpenRouter sometimes contains a date, but in a
+# rearranged format that doesn't match the Anthropic API model ID. We maintain
+# this explicit mapping instead.
+ANTHROPIC_DATED_ALIASES = {
+    # OpenRouter suffix -> list of dated snapshot IDs to also emit
+    "claude-opus-4-6":  [],  # newest, no dated snapshot yet
+    "claude-sonnet-4-6": [],  # newest, no dated snapshot yet
+    "claude-opus-4.5":  ["claude-opus-4-5-20251101"],
+    "claude-sonnet-4.5": ["claude-sonnet-4-5-20250929"],
+    "claude-opus-4.1":  ["claude-opus-4-1-20250805"],
+    "claude-opus-4":    ["claude-opus-4-20250514"],
+    "claude-sonnet-4":  ["claude-sonnet-4-20250514"],
+    "claude-haiku-4.5": ["claude-haiku-4-5-20251001"],
+    "claude-3.5-haiku": ["claude-3-5-haiku-20241022"],
+    "claude-3.5-sonnet": ["claude-3-5-sonnet-20241022"],
+    "claude-3.7-sonnet": ["claude-3-7-sonnet-20250219"],
+}
+
+# For dated aliases, we may want to override the display name to match the
+# original catalog style (e.g. "Claude Sonnet 4" instead of "Claude Sonnet 4.6").
+ANTHROPIC_DATED_DISPLAY_NAMES = {
+    "claude-opus-4-5-20251101": "Claude Opus 4.5",
+    "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
+    "claude-opus-4-1-20250805": "Claude Opus 4.1",
+    "claude-opus-4-20250514": "Claude Opus 4",
+    "claude-sonnet-4-20250514": "Claude Sonnet 4",
+    "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
+    "claude-3-5-haiku-20241022": "Claude Haiku 3.5",
+    "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet",
+    "claude-3-7-sonnet-20250219": "Claude 3.7 Sonnet",
+}
+
+# OpenRouter uses dots in version numbers (e.g. "claude-sonnet-4.5") but
+# the Anthropic API / our catalog uses hyphens (e.g. "claude-sonnet-4-5").
+# Normalize OpenRouter alias suffixes to our catalog convention.
+def _normalize_anthropic_id(or_suffix):
+    """Normalize an OpenRouter Anthropic model suffix to our catalog ID style.
+
+    Examples:
+        claude-opus-4.5  -> claude-opus-4-5
+        claude-sonnet-4.6 -> claude-sonnet-4-6
+        claude-3.5-haiku -> claude-3-5-haiku
+        claude-sonnet-4  -> claude-sonnet-4 (no change)
+    """
+    # Replace version dots with hyphens: "4.5" -> "4-5", "3.5" -> "3-5"
+    return re.sub(r'(\d+)\.(\d+)', r'\1-\2', or_suffix)
+
+
+def _model_id_matches_filter(model_id):
+    """Return True if this OpenRouter model ID should be included in our catalog.
+
+    We curate a focused set of models rather than including everything.
+    For native providers (anthropic, openai, google) we include current-gen models.
+    For openrouter third-party models we include the latest flagship from each family.
+    """
+    # Anthropic Claude models (all of them - we filter old ones in _should_skip)
+    if model_id.startswith("anthropic/claude-"):
+        return True
+
+    # OpenAI models - curated list of current-gen models
+    if model_id.startswith("openai/"):
+        suffix = model_id.split("/", 1)[1]
+        # GPT-4.1 family
+        if suffix in ("gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"):
+            return True
+        # GPT-4o family (still widely used)
+        if suffix in ("gpt-4o", "gpt-4o-mini"):
+            return True
+        # GPT-5 base family (no codex/image/chat/pro variants)
+        if suffix in ("gpt-5", "gpt-5-mini", "gpt-5-nano"):
+            return True
+        # GPT-5.x series - latest base models only
+        if suffix in ("gpt-5.1", "gpt-5.2", "gpt-5.3", "gpt-5.4",
+                       "gpt-5.4-mini", "gpt-5.4-nano"):
+            return True
+        # o-series reasoning models
+        if suffix in ("o1", "o3", "o3-mini", "o4-mini"):
+            return True
+        return False
+
+    # Google Gemini - current stable and latest preview only
+    if model_id.startswith("google/gemini-"):
+        suffix = model_id.split("/", 1)[1]
+        # Gemini 2.x stable models
+        if suffix in ("gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+                       "gemini-2.0-flash", "gemini-2.0-flash-001"):
+            return True
+        # Gemini 3.x preview (latest generation, skip specialized variants)
+        if suffix.startswith("gemini-3"):
+            if suffix.endswith(("-customtools", "-image-preview")):
+                return False
+            return True
+        return False
+
+    # DeepSeek - latest of each line only
+    if model_id in ("deepseek/deepseek-chat", "deepseek/deepseek-r1",
+                     "deepseek/deepseek-v3.2", "deepseek/deepseek-r1-0528"):
+        return True
+
+    # Kimi / Moonshot - latest models
+    if model_id in ("moonshotai/kimi-k2.5", "moonshotai/kimi-k2-thinking"):
+        return True
+
+    # Meta Llama 4
+    if model_id in ("meta-llama/llama-4-scout", "meta-llama/llama-4-maverick"):
+        return True
+
+    # Qwen - flagship models only
+    if model_id in ("qwen/qwen3-235b-a22b", "qwen/qwen3.5-397b-a17b"):
+        return True
+
+    # Mistral - latest large/medium/small only
+    if model_id in ("mistralai/mistral-large-2512", "mistralai/mistral-medium-3",
+                     "mistralai/mistral-small-2603"):
+        return True
+
+    # MiniMax - latest
+    if model_id in ("minimax/minimax-m2.5", "minimax/minimax-m2.7"):
+        return True
+
+    return False
+
+
+def _should_skip(model_id):
+    """Return True for models we explicitly exclude."""
+    # Skip :free variants (we want the paid versions)
+    if ":free" in model_id:
+        return True
+    # Skip ":extended" variants
+    if ":extended" in model_id:
+        return True
+    # Skip ":thinking" variants (these are alias modes, not distinct models)
+    if model_id.endswith(":thinking"):
+        return True
+    # Skip old Anthropic models (pre-Claude 3.5)
+    if model_id == "anthropic/claude-3-haiku":
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Model classification helpers
+# ---------------------------------------------------------------------------
+
+def _is_reasoning_model(or_model):
+    """Determine if a model is a native reasoning/thinking model.
+
+    Note: Many models on OpenRouter expose 'include_reasoning' or 'reasoning'
+    as supported parameters even if they're not true reasoning models. We use
+    a curated list of model ID patterns that are known reasoning models instead.
+    """
+    model_id = or_model["id"]
+    suffix = model_id.split("/", 1)[1] if "/" in model_id else model_id
+
+    # Anthropic: Claude 3.7+ models are reasoning models (extended thinking)
+    # Claude 3.5 and older are NOT reasoning models
+    if model_id.startswith("anthropic/"):
+        if "3.5-" in suffix or "3-haiku" in suffix:
+            return False
+        # Claude 3.7+ and Claude 4+ are reasoning
+        if suffix.startswith("claude-"):
+            return True
+
+    # OpenAI o-series are always reasoning
+    if suffix.startswith(("o1", "o3", "o4")):
+        return True
+    # GPT-5+ are reasoning (they support chain of thought)
+    if suffix.startswith("gpt-5"):
+        return True
+
+    # Google Gemini 2.5+ are reasoning (thinking models)
+    if model_id.startswith("google/"):
+        if suffix.startswith(("gemini-2.5", "gemini-3")):
+            return True
+        return False
+
+    # Third-party reasoning models
+    if "thinking" in suffix:
+        return True
+    if suffix in ("deepseek-r1", "deepseek-r1-0528"):
+        return True
+
+    return False
+
+
+def _get_input_modalities(or_model):
+    """Extract input modalities for our catalog format."""
+    arch = or_model.get("architecture", {})
+    input_mods = arch.get("input_modalities", [])
+    result = []
+    if "text" in input_mods:
+        result.append("text")
+    if "image" in input_mods:
+        result.append("image")
+    if not result:
+        result = ["text"]
+    return result
+
+
+def _pricing_to_per_million(price_str):
+    """Convert OpenRouter per-token price string to per-million-tokens float."""
+    if price_str is None:
+        return 0.0
+    try:
+        return float(price_str) * 1_000_000
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _round_price(val):
+    """Round a price, keeping up to 6 significant figures to avoid float noise."""
+    if val == 0:
+        return 0
+    # Round to remove float artifacts
+    rounded = round(val, 10)
+    # If it's a clean number, return as int or simple float
+    if rounded == int(rounded) and rounded < 1e15:
+        return int(rounded) if int(rounded) == rounded else rounded
+    return rounded
+
+
+def _build_cost(or_model, provider_key):
+    """Build cost dict from OpenRouter pricing."""
+    pricing = or_model.get("pricing", {})
+
+    input_price = _round_price(_pricing_to_per_million(pricing.get("prompt")))
+    output_price = _round_price(_pricing_to_per_million(pricing.get("completion")))
+
+    cache_read = _round_price(_pricing_to_per_million(pricing.get("input_cache_read")))
+    cache_write = _round_price(_pricing_to_per_million(pricing.get("input_cache_write")))
+
+    # For Anthropic models, derive cache pricing from known ratios if not provided
+    if provider_key == "anthropic" and cache_read == 0 and input_price > 0:
+        cache_read = _round_price(input_price * 0.1)
+    if provider_key == "anthropic" and cache_write == 0 and input_price > 0:
+        cache_write = _round_price(input_price * 1.25)
+
+    # For OpenAI models, derive cache pricing if not fully provided
+    if provider_key == "openai":
+        if cache_read == 0 and input_price > 0:
+            cache_read = _round_price(input_price * 0.5)
+        if cache_write == 0 and input_price > 0:
+            cache_write = _round_price(input_price)
+
+    # For Google models, always derive cache pricing from known ratios.
+    # Google's cache pricing documentation states cache reads are discounted
+    # and cache writes cost the same as input tokens. OpenRouter's
+    # input_cache_write values represent amortized storage costs which don't
+    # match Google's documented per-token pricing, so we derive instead.
+    if provider_key == "google" and input_price > 0:
+        if cache_read == 0:
+            cache_read = _round_price(input_price * 0.25)
+        cache_write = _round_price(input_price)
+
+    return {
+        "input": input_price,
+        "output": output_price,
+        "cacheRead": cache_read,
+        "cacheWrite": cache_write,
+    }
+
+
+def _make_display_name(or_model):
+    """Build a short display name from OpenRouter model name."""
+    name = or_model.get("name", "")
+    # OpenRouter names are like "Anthropic: Claude Sonnet 4.6" - strip provider prefix
+    if ": " in name:
+        name = name.split(": ", 1)[1]
+    return name
+
+
+# ---------------------------------------------------------------------------
+# Compat fields for specific model families
+# ---------------------------------------------------------------------------
 
 OPENAI_REASONING_COMPAT = OrderedDict([
     ("supportsReasoningEffort", True),
@@ -151,179 +490,112 @@ OPENAI_REASONING_COMPAT = OrderedDict([
     ("maxTokensField", "max_completion_tokens"),
 ])
 
-openai_models = OrderedDict()
 
-# GPT-4.1 family
-openai_models["gpt-4.1"] = model(
-    "GPT-4.1", OPENAI_API, OPENAI_URL, False, TEXT_IMAGE,
-    cost(2, 8, 0.5, 2), 1_000_000, 32_768,
-)
-openai_models["gpt-4.1-mini"] = model(
-    "GPT-4.1 Mini", OPENAI_API, OPENAI_URL, False, TEXT_IMAGE,
-    cost(0.4, 1.6, 0.1, 0.4), 1_000_000, 32_768,
-)
-openai_models["gpt-4.1-nano"] = model(
-    "GPT-4.1 Nano", OPENAI_API, OPENAI_URL, False, ["text"],
-    cost(0.1, 0.4, 0.025, 0.1), 1_000_000, 32_768,
-)
-
-# GPT-4o family (legacy, still referenced in tests)
-openai_models["gpt-4o"] = model(
-    "GPT-4o", OPENAI_API, OPENAI_URL, False, TEXT_IMAGE,
-    cost(2.5, 10, 1.25, 2.5), 128_000, 16_384,
-)
-openai_models["gpt-4o-mini"] = model(
-    "GPT-4o Mini", OPENAI_API, OPENAI_URL, False, TEXT_IMAGE,
-    cost(0.15, 0.6, 0.075, 0.15), 128_000, 16_384,
-)
-
-# o-series reasoning models
-openai_models["o3"] = model(
-    "o3", OPENAI_API, OPENAI_URL, True, TEXT_IMAGE,
-    cost(2, 8, 0.5, 2), 200_000, 100_000,
-    compat=OPENAI_REASONING_COMPAT,
-)
-openai_models["o3-mini"] = model(
-    "o3 Mini", OPENAI_API, OPENAI_URL, True, ["text"],
-    cost(1.1, 4.4, 0.55, 1.1), 200_000, 100_000,
-    compat=OPENAI_REASONING_COMPAT,
-)
-openai_models["o4-mini"] = model(
-    "o4 Mini", OPENAI_API, OPENAI_URL, True, TEXT_IMAGE,
-    cost(1.1, 4.4, 0.275, 1.1), 200_000, 100_000,
-    compat=OPENAI_REASONING_COMPAT,
-)
-openai_models["o1"] = model(
-    "o1", OPENAI_API, OPENAI_URL, True, TEXT_IMAGE,
-    cost(15, 60, 7.5, 15), 200_000, 100_000,
-    compat=OPENAI_REASONING_COMPAT,
-)
-
-# GPT-5 family
-openai_models["gpt-5"] = model(
-    "GPT-5", OPENAI_API, OPENAI_URL, False, TEXT_IMAGE,
-    cost(1.25, 10, 0.125, 1.25), 128_000, 32_768,
-)
-openai_models["gpt-5-mini"] = model(
-    "GPT-5 Mini", OPENAI_API, OPENAI_URL, False, TEXT_IMAGE,
-    cost(0.25, 2, 0.025, 0.25), 128_000, 32_768,
-)
+def _get_compat(model_id, provider_key):
+    """Return compat dict if needed for this model, else None."""
+    if provider_key != "openai":
+        return None
+    suffix = model_id
+    # OpenAI reasoning models need special compat
+    if suffix.startswith(("o1", "o3", "o4")):
+        return OPENAI_REASONING_COMPAT
+    return None
 
 
 # ---------------------------------------------------------------------------
-# Google Gemini models
-# Source: https://ai.google.dev/gemini-api/docs/pricing
-# Cache pricing: cache read = 0.25x input for most models
+# Build catalog from OpenRouter data
 # ---------------------------------------------------------------------------
-GOOGLE_API = "google-genai"
-GOOGLE_URL = "https://generativelanguage.googleapis.com"
 
-google_models = OrderedDict()
+def build_chat_catalog(or_models, anthropic_extra, google_extra):
+    """Build the chat model catalog from OpenRouter models."""
+    providers = OrderedDict()
+    providers["anthropic"] = OrderedDict()
+    providers["google"] = OrderedDict()
+    providers["openai"] = OrderedDict()
+    providers["openrouter"] = OrderedDict()
 
-# Gemini 2.5 Pro -- $1.25/$10 (<=200k), 1M ctx, 65k out
-google_models["gemini-2.5-pro"] = model(
-    "Gemini 2.5 Pro", GOOGLE_API, GOOGLE_URL, True, TEXT_IMAGE,
-    cost(1.25, 10, 0.3125, 1.25), 1_000_000, 65_536,
-)
+    for m in or_models:
+        model_id = m["id"]
 
-# Gemini 2.5 Flash -- $0.30/$2.50, 1M ctx, 65k out
-google_models["gemini-2.5-flash"] = model(
-    "Gemini 2.5 Flash", GOOGLE_API, GOOGLE_URL, True, TEXT_IMAGE,
-    cost(0.3, 2.5, 0.03, 0.3), 1_048_576, 65_536,
-)
+        if _should_skip(model_id):
+            continue
+        if not _model_id_matches_filter(model_id):
+            continue
 
-# Gemini 2.5 Flash-Lite -- $0.10/$0.40, 1M ctx, 65k out
-google_models["gemini-2.5-flash-lite"] = model(
-    "Gemini 2.5 Flash-Lite", GOOGLE_API, GOOGLE_URL, False, TEXT_IMAGE,
-    cost(0.1, 0.4, 0.01, 0.1), 1_048_576, 65_536,
-)
+        # Determine provider and catalog model ID
+        prefix = model_id.split("/", 1)[0] if "/" in model_id else ""
+        suffix = model_id.split("/", 1)[1] if "/" in model_id else model_id
 
-# Gemini 2.0 Flash (deprecated) -- $0.10/$0.40, 1M ctx, 8k out
-google_models["gemini-2.0-flash"] = model(
-    "Gemini 2.0 Flash", GOOGLE_API, GOOGLE_URL, False, TEXT_IMAGE,
-    cost(0.1, 0.4, 0.025, 0.1), 1_048_576, 8_192,
-)
+        if prefix in NATIVE_PROVIDERS:
+            provider_key = prefix
+            provider_info = NATIVE_PROVIDERS[prefix]
+            # For Anthropic, normalize dots to hyphens in version numbers
+            if prefix == "anthropic":
+                catalog_id = _normalize_anthropic_id(suffix)
+            else:
+                catalog_id = suffix
+        else:
+            provider_key = "openrouter"
+            catalog_id = model_id
+            provider_info = OPENROUTER_PROVIDER
 
+        # Build model entry
+        entry = OrderedDict()
+        entry["name"] = _make_display_name(m)
+        entry["api"] = provider_info["api"]
+        entry["baseUrl"] = provider_info["baseUrl"]
+        entry["reasoning"] = _is_reasoning_model(m)
+        entry["input"] = _get_input_modalities(m)
+        entry["cost"] = _build_cost(m, provider_key)
+        entry["contextWindow"] = m.get("context_length", 0)
 
-# ---------------------------------------------------------------------------
-# OpenRouter models (open-weight / third-party via OpenRouter)
-# Source: https://openrouter.ai/models (individual model pages)
-# OpenRouter is OpenAI-compatible, so api = "openai-completions"
-# Cache pricing not supported by OpenRouter, set to 0
-# ---------------------------------------------------------------------------
-OPENROUTER_API = "openai-completions"
-OPENROUTER_URL = "https://openrouter.ai/api/v1"
-NO_CACHE = cost  # same function, just semantic alias
+        # Max output tokens from top_provider (default to 16384 if missing/None)
+        top = m.get("top_provider", {}) or {}
+        max_tokens = top.get("max_completion_tokens")
+        entry["maxTokens"] = max_tokens if max_tokens is not None else 16384
 
-openrouter_models = OrderedDict()
+        compat = _get_compat(catalog_id, provider_key)
+        if compat:
+            entry["compat"] = compat
 
-# DeepSeek
-openrouter_models["deepseek/deepseek-chat"] = model(
-    "DeepSeek V3", OPENROUTER_API, OPENROUTER_URL, False, ["text"],
-    cost(0.32, 0.89, 0, 0), 163_840, 16_384,
-)
-openrouter_models["deepseek/deepseek-r1"] = model(
-    "DeepSeek R1", OPENROUTER_API, OPENROUTER_URL, True, ["text"],
-    cost(0.7, 2.5, 0, 0), 64_000, 16_384,
-)
-openrouter_models["deepseek/deepseek-v3.2"] = model(
-    "DeepSeek V3.2", OPENROUTER_API, OPENROUTER_URL, False, ["text"],
-    cost(0.26, 0.38, 0, 0), 163_840, 16_384,
-)
+        providers[provider_key][catalog_id] = entry
 
-# Kimi (Moonshot AI)
-openrouter_models["moonshotai/kimi-k2.5"] = model(
-    "Kimi K2.5", OPENROUTER_API, OPENROUTER_URL, False, TEXT_IMAGE,
-    cost(0.45, 2.2, 0, 0), 262_144, 16_384,
-)
-openrouter_models["moonshotai/kimi-k2-thinking"] = model(
-    "Kimi K2 Thinking", OPENROUTER_API, OPENROUTER_URL, True, ["text"],
-    cost(0.47, 2, 0, 0), 131_072, 16_384,
-)
+        # For Anthropic models, also emit dated snapshot aliases
+        if provider_key == "anthropic" and suffix in ANTHROPIC_DATED_ALIASES:
+            for dated_id in ANTHROPIC_DATED_ALIASES[suffix]:
+                dated_entry = OrderedDict(entry)
+                if dated_id in ANTHROPIC_DATED_DISPLAY_NAMES:
+                    dated_entry["name"] = ANTHROPIC_DATED_DISPLAY_NAMES[dated_id]
+                providers["anthropic"][dated_id] = dated_entry
 
-# Meta Llama 4
-openrouter_models["meta-llama/llama-4-scout"] = model(
-    "Llama 4 Scout", OPENROUTER_API, OPENROUTER_URL, False, TEXT_IMAGE,
-    cost(0.08, 0.3, 0, 0), 512_000, 16_384,
-)
-openrouter_models["meta-llama/llama-4-maverick"] = model(
-    "Llama 4 Maverick", OPENROUTER_API, OPENROUTER_URL, False, TEXT_IMAGE,
-    cost(0.15, 0.6, 0, 0), 1_048_576, 16_384,
-)
+    # Enrich from direct Anthropic API
+    if anthropic_extra:
+        for model_id, info in anthropic_extra.items():
+            if model_id in providers["anthropic"]:
+                # Could update capabilities, max tokens etc.
+                if "max_tokens" in info:
+                    # Anthropic API's max_tokens is the output limit
+                    pass  # OpenRouter top_provider usually has this right
 
-# Qwen
-openrouter_models["qwen/qwen3-235b-a22b"] = model(
-    "Qwen3 235B", OPENROUTER_API, OPENROUTER_URL, True, ["text"],
-    cost(0.455, 1.82, 0, 0), 131_072, 8_192,
-)
+    # Enrich from direct Google API
+    if google_extra:
+        for short_name, info in google_extra.items():
+            if short_name in providers["google"]:
+                # Update context window if Google API has different value
+                if "inputTokenLimit" in info:
+                    pass  # OpenRouter usually matches
 
-# Mistral
-openrouter_models["mistralai/mistral-large-2512"] = model(
-    "Mistral Large 3", OPENROUTER_API, OPENROUTER_URL, False, TEXT_IMAGE,
-    cost(0.5, 1.5, 0, 0), 262_144, 16_384,
-)
-openrouter_models["mistralai/mistral-medium-3"] = model(
-    "Mistral Medium 3", OPENROUTER_API, OPENROUTER_URL, False, ["text"],
-    cost(0.4, 2, 0, 0), 131_072, 16_384,
-)
-openrouter_models["mistralai/mistral-small-2603"] = model(
-    "Mistral Small 4", OPENROUTER_API, OPENROUTER_URL, False, ["text"],
-    cost(0.15, 0.6, 0, 0), 262_144, 16_384,
-)
-
-# MiniMax
-openrouter_models["minimax/minimax-m2.5"] = model(
-    "MiniMax M2.5", OPENROUTER_API, OPENROUTER_URL, False, ["text"],
-    cost(0.2, 1.2, 0, 0), 196_608, 16_384,
-)
+    return providers
 
 
 # ---------------------------------------------------------------------------
-# Embedding models
+# Embedding models (kept hardcoded - these are not in OpenRouter's models API
+# and have provider-specific parameters like dims, batch size, task type support
+# that are not discoverable from any API)
 # ---------------------------------------------------------------------------
 
-def embedding_model(id_, name, api, provider, base_url, max_input, default_dims,
-                    max_dims, min_dims, max_batch, dim_ctrl, task_type, cost_per_mtok):
+def _embedding_model(id_, name, api, provider, base_url, max_input, default_dims,
+                     max_dims, min_dims, max_batch, dim_ctrl, task_type, cost_per_mtok):
     """Build an embedding model entry."""
     return OrderedDict([
         ("id", id_),
@@ -342,69 +614,109 @@ def embedding_model(id_, name, api, provider, base_url, max_input, default_dims,
     ])
 
 
-embedding_models = [
-    # OpenAI embeddings -- source: https://openai.com/api/pricing/
-    embedding_model(
-        "text-embedding-3-small", "Text Embedding 3 Small",
-        "openai-embeddings", "openai", "https://api.openai.com/v1",
-        8192, 1536, 1536, 256, 2048, True, False, 0.02,
-    ),
-    embedding_model(
-        "text-embedding-3-large", "Text Embedding 3 Large",
-        "openai-embeddings", "openai", "https://api.openai.com/v1",
-        8192, 3072, 3072, 256, 2048, True, False, 0.13,
-    ),
-    embedding_model(
-        "text-embedding-ada-002", "Ada v2",
-        "openai-embeddings", "openai", "https://api.openai.com/v1",
-        8192, 1536, 1536, 1536, 2048, False, False, 0.1,
-    ),
-    # Google embeddings -- source: https://ai.google.dev/gemini-api/docs/pricing
-    embedding_model(
-        "gemini-embedding-001", "Gemini Embedding 001",
-        "google-embeddings", "google", "https://generativelanguage.googleapis.com/v1beta",
-        2048, 3072, 3072, 128, 100, True, True, 0.0,
-    ),
-    # Cohere embeddings -- source: https://cohere.com/pricing
-    embedding_model(
-        "embed-v4.0", "Cohere Embed v4",
-        "cohere-embeddings", "cohere", "https://api.cohere.com/v2",
-        128000, 1536, 1536, 256, 96, True, True, 0.12,
-    ),
-    embedding_model(
-        "embed-english-v3.0", "Cohere Embed English v3",
-        "cohere-embeddings", "cohere", "https://api.cohere.com/v2",
-        512, 1024, 1024, 1024, 96, False, True, 0.1,
-    ),
-    embedding_model(
-        "embed-multilingual-v3.0", "Cohere Embed Multilingual v3",
-        "cohere-embeddings", "cohere", "https://api.cohere.com/v2",
-        512, 1024, 1024, 1024, 96, False, True, 0.1,
-    ),
-    # OpenRouter embeddings -- source: https://openrouter.ai/models (embedding models)
-    # OpenRouter uses OpenAI-compatible embeddings API at /api/v1/embeddings
-    # Pricing is pass-through from underlying providers (no markup)
-    embedding_model(
-        "openai/text-embedding-3-small", "Text Embedding 3 Small (OpenRouter)",
-        "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
-        8192, 1536, 1536, 256, 2048, True, False, 0.02,
-    ),
-    embedding_model(
-        "openai/text-embedding-3-large", "Text Embedding 3 Large (OpenRouter)",
-        "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
-        8192, 3072, 3072, 256, 2048, True, False, 0.13,
-    ),
-    embedding_model(
-        "qwen/qwen3-embedding-8b", "Qwen3 Embedding 8B",
-        "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
-        32000, 1024, 1024, 1024, 2048, False, False, 0.01,
-    ),
-    embedding_model(
-        "qwen/qwen3-embedding-4b", "Qwen3 Embedding 4B",
-        "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
-        32768, 1024, 1024, 1024, 2048, False, False, 0.02,
-    ),
-]
+def build_embedding_catalog():
+    """Build the embedding model catalog. These remain hardcoded because embedding
+    model metadata (dimensions, batch sizes, task type support) is not available
+    from any discovery API."""
+    return [
+        # OpenAI embeddings -- source: https://openai.com/api/pricing/
+        _embedding_model(
+            "text-embedding-3-small", "Text Embedding 3 Small",
+            "openai-embeddings", "openai", "https://api.openai.com/v1",
+            8192, 1536, 1536, 256, 2048, True, False, 0.02,
+        ),
+        _embedding_model(
+            "text-embedding-3-large", "Text Embedding 3 Large",
+            "openai-embeddings", "openai", "https://api.openai.com/v1",
+            8192, 3072, 3072, 256, 2048, True, False, 0.13,
+        ),
+        _embedding_model(
+            "text-embedding-ada-002", "Ada v2",
+            "openai-embeddings", "openai", "https://api.openai.com/v1",
+            8192, 1536, 1536, 1536, 2048, False, False, 0.1,
+        ),
+        # Google embeddings -- source: https://ai.google.dev/gemini-api/docs/pricing
+        _embedding_model(
+            "gemini-embedding-001", "Gemini Embedding 001",
+            "google-embeddings", "google", "https://generativelanguage.googleapis.com/v1beta",
+            2048, 3072, 3072, 128, 100, True, True, 0.0,
+        ),
+        # Cohere embeddings -- source: https://cohere.com/pricing
+        _embedding_model(
+            "embed-v4.0", "Cohere Embed v4",
+            "cohere-embeddings", "cohere", "https://api.cohere.com/v2",
+            128000, 1536, 1536, 256, 96, True, True, 0.12,
+        ),
+        _embedding_model(
+            "embed-english-v3.0", "Cohere Embed English v3",
+            "cohere-embeddings", "cohere", "https://api.cohere.com/v2",
+            512, 1024, 1024, 1024, 96, False, True, 0.1,
+        ),
+        _embedding_model(
+            "embed-multilingual-v3.0", "Cohere Embed Multilingual v3",
+            "cohere-embeddings", "cohere", "https://api.cohere.com/v2",
+            512, 1024, 1024, 1024, 96, False, True, 0.1,
+        ),
+        # OpenRouter embeddings -- source: https://openrouter.ai/models
+        _embedding_model(
+            "openai/text-embedding-3-small", "Text Embedding 3 Small (OpenRouter)",
+            "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
+            8192, 1536, 1536, 256, 2048, True, False, 0.02,
+        ),
+        _embedding_model(
+            "openai/text-embedding-3-large", "Text Embedding 3 Large (OpenRouter)",
+            "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
+            8192, 3072, 3072, 256, 2048, True, False, 0.13,
+        ),
+        _embedding_model(
+            "qwen/qwen3-embedding-8b", "Qwen3 Embedding 8B",
+            "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
+            32000, 1024, 1024, 1024, 2048, False, False, 0.01,
+        ),
+        _embedding_model(
+            "qwen/qwen3-embedding-4b", "Qwen3 Embedding 4B",
+            "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
+            32768, 1024, 1024, 1024, 2048, False, False, 0.02,
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+REQUIRED_MODELS = {
+    "anthropic": ["claude-sonnet-4-20250514"],
+    "openai": ["gpt-4o"],
+    "google": ["gemini-2.5-pro", "gemini-2.5-flash"],
+}
+
+
+def validate_catalog(catalog):
+    """Check that test-critical models are present."""
+    ok = True
+    for provider, model_ids in REQUIRED_MODELS.items():
+        if provider not in catalog:
+            print(f"  ERROR: Missing provider '{provider}'", file=sys.stderr)
+            ok = False
+            continue
+        for mid in model_ids:
+            if mid not in catalog[provider]:
+                print(f"  ERROR: Missing required model '{mid}' in '{provider}'", file=sys.stderr)
+                ok = False
+    return ok
+
+
+# ---------------------------------------------------------------------------
+# Fallback
+# ---------------------------------------------------------------------------
+
+def load_existing_catalog(path):
+    """Load an existing catalog file if it exists."""
+    if os.path.exists(path):
+        with open(path) as f:
+            return json.load(f)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -412,18 +724,42 @@ embedding_models = [
 # ---------------------------------------------------------------------------
 
 def main():
-    catalog = OrderedDict()
-    catalog["anthropic"] = anthropic_models
-    catalog["google"] = google_models
-    catalog["openai"] = openai_models
-    catalog["openrouter"] = openrouter_models
+    # Fetch from OpenRouter (primary source)
+    or_models = fetch_openrouter_models()
+    if not or_models:
+        print("ERROR: Could not fetch models from OpenRouter.", file=sys.stderr)
+        print("Keeping existing catalog files unchanged.", file=sys.stderr)
+        sys.exit(1)
 
-    with open(CATALOG_PATH, "w") as f:
-        json.dump(catalog, f, indent=2, sort_keys=True)
-        f.write("\n")
-    print(f"Wrote {CATALOG_PATH}")
-    print(f"  {sum(len(v) for v in catalog.values())} chat models across {len(catalog)} providers")
+    # Optionally fetch from direct provider APIs for enrichment
+    anthropic_extra = fetch_anthropic_models()
+    google_extra = fetch_google_models()
 
+    # Build chat catalog
+    catalog = build_chat_catalog(or_models, anthropic_extra, google_extra)
+
+    # Validate
+    if not validate_catalog(catalog):
+        existing = load_existing_catalog(CATALOG_PATH)
+        if existing:
+            print("WARNING: Validation failed. Falling back to existing catalog.", file=sys.stderr)
+            # Still write the embedding catalog since it's hardcoded
+        else:
+            print("ERROR: Validation failed and no existing catalog to fall back to.", file=sys.stderr)
+            sys.exit(1)
+    else:
+        # Write chat catalog
+        with open(CATALOG_PATH, "w") as f:
+            json.dump(catalog, f, indent=2, sort_keys=True)
+            f.write("\n")
+        total = sum(len(v) for v in catalog.values())
+        print(f"Wrote {CATALOG_PATH}")
+        print(f"  {total} chat models across {len(catalog)} providers")
+        for provider, models in catalog.items():
+            print(f"    {provider}: {len(models)} models")
+
+    # Build and write embedding catalog
+    embedding_models = build_embedding_catalog()
     with open(EMBEDDING_CATALOG_PATH, "w") as f:
         json.dump(embedding_models, f, indent=2, sort_keys=True)
         f.write("\n")

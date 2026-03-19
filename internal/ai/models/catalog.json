@@ -1,5 +1,23 @@
 {
   "anthropic": {
+    "claude-3-5-haiku": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com",
+      "contextWindow": 200000,
+      "cost": {
+        "cacheRead": 0.08,
+        "cacheWrite": 1,
+        "input": 0.8,
+        "output": 4
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 8192,
+      "name": "Claude 3.5 Haiku",
+      "reasoning": false
+    },
     "claude-3-5-haiku-20241022": {
       "api": "anthropic-messages",
       "baseUrl": "https://api.anthropic.com",
@@ -18,6 +36,96 @@
       "name": "Claude Haiku 3.5",
       "reasoning": false
     },
+    "claude-3-5-sonnet": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com",
+      "contextWindow": 200000,
+      "cost": {
+        "cacheRead": 0.6,
+        "cacheWrite": 7.5,
+        "input": 6,
+        "output": 30
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 8192,
+      "name": "Claude 3.5 Sonnet",
+      "reasoning": false
+    },
+    "claude-3-5-sonnet-20241022": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com",
+      "contextWindow": 200000,
+      "cost": {
+        "cacheRead": 0.6,
+        "cacheWrite": 7.5,
+        "input": 6,
+        "output": 30
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 8192,
+      "name": "Claude 3.5 Sonnet",
+      "reasoning": false
+    },
+    "claude-3-7-sonnet": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com",
+      "contextWindow": 200000,
+      "cost": {
+        "cacheRead": 0.3,
+        "cacheWrite": 3.75,
+        "input": 3,
+        "output": 15
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 64000,
+      "name": "Claude 3.7 Sonnet",
+      "reasoning": true
+    },
+    "claude-3-7-sonnet-20250219": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com",
+      "contextWindow": 200000,
+      "cost": {
+        "cacheRead": 0.3,
+        "cacheWrite": 3.75,
+        "input": 3,
+        "output": 15
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 64000,
+      "name": "Claude 3.7 Sonnet",
+      "reasoning": true
+    },
+    "claude-haiku-4-5": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com",
+      "contextWindow": 200000,
+      "cost": {
+        "cacheRead": 0.1,
+        "cacheWrite": 1.25,
+        "input": 1,
+        "output": 5
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 64000,
+      "name": "Claude Haiku 4.5",
+      "reasoning": true
+    },
     "claude-haiku-4-5-20251001": {
       "api": "anthropic-messages",
       "baseUrl": "https://api.anthropic.com",
@@ -34,6 +142,42 @@
       ],
       "maxTokens": 64000,
       "name": "Claude Haiku 4.5",
+      "reasoning": true
+    },
+    "claude-opus-4": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com",
+      "contextWindow": 200000,
+      "cost": {
+        "cacheRead": 1.5,
+        "cacheWrite": 18.75,
+        "input": 15,
+        "output": 75
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 32000,
+      "name": "Claude Opus 4",
+      "reasoning": true
+    },
+    "claude-opus-4-1": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com",
+      "contextWindow": 200000,
+      "cost": {
+        "cacheRead": 1.5,
+        "cacheWrite": 18.75,
+        "input": 15,
+        "output": 75
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 32000,
+      "name": "Claude Opus 4.1",
       "reasoning": true
     },
     "claude-opus-4-1-20250805": {
@@ -72,6 +216,24 @@
       "name": "Claude Opus 4",
       "reasoning": true
     },
+    "claude-opus-4-5": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com",
+      "contextWindow": 200000,
+      "cost": {
+        "cacheRead": 0.5,
+        "cacheWrite": 6.25,
+        "input": 5,
+        "output": 25
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 64000,
+      "name": "Claude Opus 4.5",
+      "reasoning": true
+    },
     "claude-opus-4-5-20251101": {
       "api": "anthropic-messages",
       "baseUrl": "https://api.anthropic.com",
@@ -108,6 +270,24 @@
       "name": "Claude Opus 4.6",
       "reasoning": true
     },
+    "claude-sonnet-4": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com",
+      "contextWindow": 200000,
+      "cost": {
+        "cacheRead": 0.3,
+        "cacheWrite": 3.75,
+        "input": 3,
+        "output": 15
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 64000,
+      "name": "Claude Sonnet 4",
+      "reasoning": true
+    },
     "claude-sonnet-4-20250514": {
       "api": "anthropic-messages",
       "baseUrl": "https://api.anthropic.com",
@@ -122,14 +302,32 @@
         "text",
         "image"
       ],
-      "maxTokens": 16384,
+      "maxTokens": 64000,
       "name": "Claude Sonnet 4",
+      "reasoning": true
+    },
+    "claude-sonnet-4-5": {
+      "api": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com",
+      "contextWindow": 1000000,
+      "cost": {
+        "cacheRead": 0.3,
+        "cacheWrite": 3.75,
+        "input": 3,
+        "output": 15
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 64000,
+      "name": "Claude Sonnet 4.5",
       "reasoning": true
     },
     "claude-sonnet-4-5-20250929": {
       "api": "anthropic-messages",
       "baseUrl": "https://api.anthropic.com",
-      "contextWindow": 200000,
+      "contextWindow": 1000000,
       "cost": {
         "cacheRead": 0.3,
         "cacheWrite": 3.75,
@@ -158,13 +356,13 @@
         "text",
         "image"
       ],
-      "maxTokens": 64000,
+      "maxTokens": 128000,
       "name": "Claude Sonnet 4.6",
       "reasoning": true
     }
   },
   "google": {
-    "gemini-2.0-flash": {
+    "gemini-2.0-flash-001": {
       "api": "google-genai",
       "baseUrl": "https://generativelanguage.googleapis.com",
       "contextWindow": 1048576,
@@ -196,7 +394,7 @@
         "text",
         "image"
       ],
-      "maxTokens": 65536,
+      "maxTokens": 65535,
       "name": "Gemini 2.5 Flash",
       "reasoning": true
     },
@@ -214,16 +412,16 @@
         "text",
         "image"
       ],
-      "maxTokens": 65536,
-      "name": "Gemini 2.5 Flash-Lite",
-      "reasoning": false
+      "maxTokens": 65535,
+      "name": "Gemini 2.5 Flash Lite",
+      "reasoning": true
     },
     "gemini-2.5-pro": {
       "api": "google-genai",
       "baseUrl": "https://generativelanguage.googleapis.com",
-      "contextWindow": 1000000,
+      "contextWindow": 1048576,
       "cost": {
-        "cacheRead": 0.3125,
+        "cacheRead": 0.125,
         "cacheWrite": 1.25,
         "input": 1.25,
         "output": 10
@@ -235,13 +433,85 @@
       "maxTokens": 65536,
       "name": "Gemini 2.5 Pro",
       "reasoning": true
+    },
+    "gemini-3-flash-preview": {
+      "api": "google-genai",
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "contextWindow": 1048576,
+      "cost": {
+        "cacheRead": 0.05,
+        "cacheWrite": 0.5,
+        "input": 0.5,
+        "output": 3
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 65536,
+      "name": "Gemini 3 Flash Preview",
+      "reasoning": true
+    },
+    "gemini-3-pro-preview": {
+      "api": "google-genai",
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "contextWindow": 1048576,
+      "cost": {
+        "cacheRead": 0.2,
+        "cacheWrite": 2,
+        "input": 2,
+        "output": 12
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 65536,
+      "name": "Gemini 3 Pro Preview",
+      "reasoning": true
+    },
+    "gemini-3.1-flash-lite-preview": {
+      "api": "google-genai",
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "contextWindow": 1048576,
+      "cost": {
+        "cacheRead": 0.025,
+        "cacheWrite": 0.25,
+        "input": 0.25,
+        "output": 1.5
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 65536,
+      "name": "Gemini 3.1 Flash Lite Preview",
+      "reasoning": true
+    },
+    "gemini-3.1-pro-preview": {
+      "api": "google-genai",
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "contextWindow": 1048576,
+      "cost": {
+        "cacheRead": 0.2,
+        "cacheWrite": 2,
+        "input": 2,
+        "output": 12
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 65536,
+      "name": "Gemini 3.1 Pro Preview",
+      "reasoning": true
     }
   },
   "openai": {
     "gpt-4.1": {
       "api": "openai-completions",
       "baseUrl": "https://api.openai.com/v1",
-      "contextWindow": 1000000,
+      "contextWindow": 1047576,
       "cost": {
         "cacheRead": 0.5,
         "cacheWrite": 2,
@@ -259,7 +529,7 @@
     "gpt-4.1-mini": {
       "api": "openai-completions",
       "baseUrl": "https://api.openai.com/v1",
-      "contextWindow": 1000000,
+      "contextWindow": 1047576,
       "cost": {
         "cacheRead": 0.1,
         "cacheWrite": 0.4,
@@ -277,7 +547,7 @@
     "gpt-4.1-nano": {
       "api": "openai-completions",
       "baseUrl": "https://api.openai.com/v1",
-      "contextWindow": 1000000,
+      "contextWindow": 1047576,
       "cost": {
         "cacheRead": 0.025,
         "cacheWrite": 0.1,
@@ -285,7 +555,8 @@
         "output": 0.4
       },
       "input": [
-        "text"
+        "text",
+        "image"
       ],
       "maxTokens": 32768,
       "name": "GPT-4.1 Nano",
@@ -324,13 +595,13 @@
         "image"
       ],
       "maxTokens": 16384,
-      "name": "GPT-4o Mini",
+      "name": "GPT-4o-mini",
       "reasoning": false
     },
     "gpt-5": {
       "api": "openai-completions",
       "baseUrl": "https://api.openai.com/v1",
-      "contextWindow": 128000,
+      "contextWindow": 400000,
       "cost": {
         "cacheRead": 0.125,
         "cacheWrite": 1.25,
@@ -341,14 +612,14 @@
         "text",
         "image"
       ],
-      "maxTokens": 32768,
+      "maxTokens": 128000,
       "name": "GPT-5",
-      "reasoning": false
+      "reasoning": true
     },
     "gpt-5-mini": {
       "api": "openai-completions",
       "baseUrl": "https://api.openai.com/v1",
-      "contextWindow": 128000,
+      "contextWindow": 400000,
       "cost": {
         "cacheRead": 0.025,
         "cacheWrite": 0.25,
@@ -359,9 +630,117 @@
         "text",
         "image"
       ],
-      "maxTokens": 32768,
+      "maxTokens": 128000,
       "name": "GPT-5 Mini",
-      "reasoning": false
+      "reasoning": true
+    },
+    "gpt-5-nano": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.openai.com/v1",
+      "contextWindow": 400000,
+      "cost": {
+        "cacheRead": 0.005,
+        "cacheWrite": 0.05,
+        "input": 0.05,
+        "output": 0.4
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 128000,
+      "name": "GPT-5 Nano",
+      "reasoning": true
+    },
+    "gpt-5.1": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.openai.com/v1",
+      "contextWindow": 400000,
+      "cost": {
+        "cacheRead": 0.125,
+        "cacheWrite": 1.25,
+        "input": 1.25,
+        "output": 10
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 128000,
+      "name": "GPT-5.1",
+      "reasoning": true
+    },
+    "gpt-5.2": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.openai.com/v1",
+      "contextWindow": 400000,
+      "cost": {
+        "cacheRead": 0.175,
+        "cacheWrite": 1.75,
+        "input": 1.75,
+        "output": 14
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 128000,
+      "name": "GPT-5.2",
+      "reasoning": true
+    },
+    "gpt-5.4": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.openai.com/v1",
+      "contextWindow": 1050000,
+      "cost": {
+        "cacheRead": 0.25,
+        "cacheWrite": 2.5,
+        "input": 2.5,
+        "output": 15
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 128000,
+      "name": "GPT-5.4",
+      "reasoning": true
+    },
+    "gpt-5.4-mini": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.openai.com/v1",
+      "contextWindow": 400000,
+      "cost": {
+        "cacheRead": 0.075,
+        "cacheWrite": 0.75,
+        "input": 0.75,
+        "output": 4.5
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 128000,
+      "name": "GPT-5.4 Mini",
+      "reasoning": true
+    },
+    "gpt-5.4-nano": {
+      "api": "openai-completions",
+      "baseUrl": "https://api.openai.com/v1",
+      "contextWindow": 400000,
+      "cost": {
+        "cacheRead": 0.02,
+        "cacheWrite": 0.2,
+        "input": 0.2,
+        "output": 1.25
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 128000,
+      "name": "GPT-5.4 Nano",
+      "reasoning": true
     },
     "o1": {
       "api": "openai-completions",
@@ -469,7 +848,7 @@
       "input": [
         "text"
       ],
-      "maxTokens": 16384,
+      "maxTokens": 163840,
       "name": "DeepSeek V3",
       "reasoning": false
     },
@@ -486,8 +865,25 @@
       "input": [
         "text"
       ],
-      "maxTokens": 16384,
-      "name": "DeepSeek R1",
+      "maxTokens": 16000,
+      "name": "R1",
+      "reasoning": true
+    },
+    "deepseek/deepseek-r1-0528": {
+      "api": "openai-completions",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "contextWindow": 163840,
+      "cost": {
+        "cacheRead": 0.225,
+        "cacheWrite": 0,
+        "input": 0.45,
+        "output": 2.15
+      },
+      "input": [
+        "text"
+      ],
+      "maxTokens": 65536,
+      "name": "R1 0528",
       "reasoning": true
     },
     "deepseek/deepseek-v3.2": {
@@ -495,7 +891,7 @@
       "baseUrl": "https://openrouter.ai/api/v1",
       "contextWindow": 163840,
       "cost": {
-        "cacheRead": 0,
+        "cacheRead": 0.13,
         "cacheWrite": 0,
         "input": 0.26,
         "output": 0.38
@@ -528,7 +924,7 @@
     "meta-llama/llama-4-scout": {
       "api": "openai-completions",
       "baseUrl": "https://openrouter.ai/api/v1",
-      "contextWindow": 512000,
+      "contextWindow": 327680,
       "cost": {
         "cacheRead": 0,
         "cacheWrite": 0,
@@ -556,8 +952,25 @@
       "input": [
         "text"
       ],
-      "maxTokens": 16384,
+      "maxTokens": 196608,
       "name": "MiniMax M2.5",
+      "reasoning": false
+    },
+    "minimax/minimax-m2.7": {
+      "api": "openai-completions",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "contextWindow": 204800,
+      "cost": {
+        "cacheRead": 0.06,
+        "cacheWrite": 0,
+        "input": 0.3,
+        "output": 1.2
+      },
+      "input": [
+        "text"
+      ],
+      "maxTokens": 131072,
+      "name": "MiniMax M2.7",
       "reasoning": false
     },
     "mistralai/mistral-large-2512": {
@@ -565,7 +978,7 @@
       "baseUrl": "https://openrouter.ai/api/v1",
       "contextWindow": 262144,
       "cost": {
-        "cacheRead": 0,
+        "cacheRead": 0.05,
         "cacheWrite": 0,
         "input": 0.5,
         "output": 1.5
@@ -575,7 +988,7 @@
         "image"
       ],
       "maxTokens": 16384,
-      "name": "Mistral Large 3",
+      "name": "Mistral Large 3 2512",
       "reasoning": false
     },
     "mistralai/mistral-medium-3": {
@@ -583,13 +996,14 @@
       "baseUrl": "https://openrouter.ai/api/v1",
       "contextWindow": 131072,
       "cost": {
-        "cacheRead": 0,
+        "cacheRead": 0.04,
         "cacheWrite": 0,
         "input": 0.4,
         "output": 2
       },
       "input": [
-        "text"
+        "text",
+        "image"
       ],
       "maxTokens": 16384,
       "name": "Mistral Medium 3",
@@ -600,13 +1014,14 @@
       "baseUrl": "https://openrouter.ai/api/v1",
       "contextWindow": 262144,
       "cost": {
-        "cacheRead": 0,
+        "cacheRead": 0.015,
         "cacheWrite": 0,
         "input": 0.15,
         "output": 0.6
       },
       "input": [
-        "text"
+        "text",
+        "image"
       ],
       "maxTokens": 16384,
       "name": "Mistral Small 4",
@@ -617,7 +1032,7 @@
       "baseUrl": "https://openrouter.ai/api/v1",
       "contextWindow": 131072,
       "cost": {
-        "cacheRead": 0,
+        "cacheRead": 0.141,
         "cacheWrite": 0,
         "input": 0.47,
         "output": 2
@@ -634,7 +1049,7 @@
       "baseUrl": "https://openrouter.ai/api/v1",
       "contextWindow": 262144,
       "cost": {
-        "cacheRead": 0,
+        "cacheRead": 0.225,
         "cacheWrite": 0,
         "input": 0.45,
         "output": 2.2
@@ -643,7 +1058,7 @@
         "text",
         "image"
       ],
-      "maxTokens": 16384,
+      "maxTokens": 65535,
       "name": "Kimi K2.5",
       "reasoning": false
     },
@@ -661,8 +1076,26 @@
         "text"
       ],
       "maxTokens": 8192,
-      "name": "Qwen3 235B",
-      "reasoning": true
+      "name": "Qwen3 235B A22B",
+      "reasoning": false
+    },
+    "qwen/qwen3.5-397b-a17b": {
+      "api": "openai-completions",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "contextWindow": 262144,
+      "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0.39,
+        "output": 2.34
+      },
+      "input": [
+        "text",
+        "image"
+      ],
+      "maxTokens": 65536,
+      "name": "Qwen3.5 397B A17B",
+      "reasoning": false
     }
   }
 }
