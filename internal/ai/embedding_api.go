@@ -30,7 +30,12 @@ func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*Embeddin
 
 	// Try new two-step resolution path first.
 	if cfg, err := GetProviderConfig(model.Provider); err == nil {
-		if client, err := GetEmbeddingAPIClient(cfg.EmbeddingAPIClientType); err == nil {
+		// Determine embedding client type: provider config first, then model.API fallback.
+		clientType := cfg.EmbeddingAPIClientType
+		if clientType == "" {
+			clientType = model.API
+		}
+		if client, err := GetEmbeddingAPIClient(clientType); err == nil {
 			endpoint := ResolveEndpoint(cfg, StreamOptions{})
 			resp, err := client.Embed(ctx, endpoint, model, req)
 			if err != nil {

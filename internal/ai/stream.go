@@ -30,7 +30,7 @@ func StreamSimple(ctx context.Context, model Model, llmCtx Context, opts SimpleS
 	// Try new two-step resolution path first.
 	if cfg, err := GetProviderConfig(model.Provider); err == nil {
 		if client, err := GetAPIClient(cfg.APIClientType); err == nil {
-			endpoint := ResolveEndpoint(cfg, StreamOptions{})
+			endpoint := ResolveEndpoint(cfg, opts.StreamOptions)
 			return client.StreamSimple(ctx, endpoint, model, llmCtx, opts)
 		}
 	}
