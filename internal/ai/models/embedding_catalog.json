@@ -12,7 +12,9 @@
     "maxBatchSize": 2048,
     "supportsDimCtrl": true,
     "supportsTaskType": false,
-    "cost": { "perMTok": 0.02 }
+    "cost": {
+      "perMTok": 0.02
+    }
   },
   {
     "id": "text-embedding-3-large",
@@ -27,7 +29,26 @@
     "maxBatchSize": 2048,
     "supportsDimCtrl": true,
     "supportsTaskType": false,
-    "cost": { "perMTok": 0.13 }
+    "cost": {
+      "perMTok": 0.13
+    }
+  },
+  {
+    "id": "text-embedding-ada-002",
+    "name": "Ada v2",
+    "api": "openai-embeddings",
+    "provider": "openai",
+    "baseUrl": "https://api.openai.com/v1",
+    "maxInputTokens": 8192,
+    "defaultDims": 1536,
+    "maxDims": 1536,
+    "minDims": 1536,
+    "maxBatchSize": 2048,
+    "supportsDimCtrl": false,
+    "supportsTaskType": false,
+    "cost": {
+      "perMTok": 0.1
+    }
   },
   {
     "id": "gemini-embedding-001",
@@ -42,7 +63,9 @@
     "maxBatchSize": 100,
     "supportsDimCtrl": true,
     "supportsTaskType": true,
-    "cost": { "perMTok": 0.0 }
+    "cost": {
+      "perMTok": 0.0
+    }
   },
   {
     "id": "embed-v4.0",
@@ -50,13 +73,49 @@
     "api": "cohere-embeddings",
     "provider": "cohere",
     "baseUrl": "https://api.cohere.com/v2",
-    "maxInputTokens": 512,
+    "maxInputTokens": 128000,
     "defaultDims": 1536,
     "maxDims": 1536,
     "minDims": 256,
     "maxBatchSize": 96,
     "supportsDimCtrl": true,
     "supportsTaskType": true,
-    "cost": { "perMTok": 0.12 }
+    "cost": {
+      "perMTok": 0.12
+    }
+  },
+  {
+    "id": "embed-english-v3.0",
+    "name": "Cohere Embed English v3",
+    "api": "cohere-embeddings",
+    "provider": "cohere",
+    "baseUrl": "https://api.cohere.com/v2",
+    "maxInputTokens": 512,
+    "defaultDims": 1024,
+    "maxDims": 1024,
+    "minDims": 1024,
+    "maxBatchSize": 96,
+    "supportsDimCtrl": false,
+    "supportsTaskType": true,
+    "cost": {
+      "perMTok": 0.1
+    }
+  },
+  {
+    "id": "embed-multilingual-v3.0",
+    "name": "Cohere Embed Multilingual v3",
+    "api": "cohere-embeddings",
+    "provider": "cohere",
+    "baseUrl": "https://api.cohere.com/v2",
+    "maxInputTokens": 512,
+    "defaultDims": 1024,
+    "maxDims": 1024,
+    "minDims": 1024,
+    "maxBatchSize": 96,
+    "supportsDimCtrl": false,
+    "supportsTaskType": true,
+    "cost": {
+      "perMTok": 0.1
+    }
   }
 ]
