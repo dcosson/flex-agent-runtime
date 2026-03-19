@@ -1,10 +1,11 @@
 # 01-ai-core Addendum 03: Separate API Client Type from Provider, Fallback Provider
 
-**Status:** Draft
+**Status:** Draft (R1 reviews incorporated)
 **Parent plan:** [01-ai-core](./01-ai-core.md)
 **Depends on:** 01-ai-core (core types, registries), [01-ai-core.add01](./01-ai-core.add01.md) (embedding types)
 **Depended on by:** Future provider plans, agent runtime configuration
 **Implements:** API client type / provider separation, provider registry refactor, fallback/custom provider mechanism, catalog restructuring
+**Reviews incorporated:** R1A (Reviewer A), R1B (Reviewer B) -- see disposition table at end
 
 ---
 
@@ -51,6 +52,7 @@ Add a **fallback/custom provider** mechanism for arbitrary endpoints not in the 
 graph TB
     subgraph "internal/ai"
         apiclient_registry[api_client_registry.go<br/>APIClient interface<br/>+ registry, keyed by<br/>API client type name]
+        embed_client_registry[embedding_api_client_registry.go<br/>EmbeddingAPIClient interface<br/>+ registry, keyed by<br/>embedding client type name]
         provider_config[provider.go<br/>ProviderConfig struct<br/>+ ProviderEndpoint resolved type]
         provider_registry[provider_registry.go<br/>Provider registry<br/>keyed by provider name]
         stream_entry[stream.go<br/>Stream, Complete<br/>resolve provider → client]
@@ -76,6 +78,7 @@ graph TB
     google_client --> apiclient_registry
 
     style apiclient_registry fill:#e1f5fe
+    style embed_client_registry fill:#e1f5fe
     style provider_config fill:#e1f5fe
     style provider_registry fill:#e1f5fe
     style stream_entry fill:#e1f5fe
@@ -110,6 +113,7 @@ sequenceDiagram
 sequenceDiagram
     participant StreamAPI as ai.Stream()
     participant ProvReg as Provider Registry
+    participant DirectKeys as directAPIKeys map
     participant Env as os.Getenv
 
     StreamAPI->>ProvReg: GetProvider("openrouter")
@@ -117,6 +121,9 @@ sequenceDiagram
     StreamAPI->>StreamAPI: resolve API key
     alt opts.APIKey is set
         Note over StreamAPI: Use opts.APIKey directly
+    else directAPIKeys has entry for provider
+        StreamAPI->>DirectKeys: lookup by provider name
+        DirectKeys-->>StreamAPI: direct key value
     else KeyEnvVars configured
         StreamAPI->>Env: os.Getenv("OPENROUTER_API_KEY")
         Env-->>StreamAPI: "sk-or-..."
@@ -139,6 +146,9 @@ sequenceDiagram
 │    "openai-completions"  → protocol impl            │
 │    "anthropic-messages"  → protocol impl            │
 │    "google-genai"        → protocol impl            │
+│  Embedding API Client Registry                      │
+│    "openai-embeddings"   → protocol impl            │
+│    "google-embeddings"   → protocol impl            │
 ├─────────────────────────────────────────────────────┤
 │  HTTP / SSE / Wire Format                           │
 └─────────────────────────────────────────────────────┘
@@ -213,11 +223,52 @@ func GetAPIClient(clientType string) (APIClient, error) {
     return c, nil
 }
 
-// ClearAPIClients removes all registered API clients. For testing.
+// ClearAPIClients removes all registered API clients.
+// For testing only. Do not call in production code.
 func ClearAPIClients() {
     apiClientMu.Lock()
     defer apiClientMu.Unlock()
     apiClientRegistry = make(map[string]APIClient)
+}
+```
+
+### 3.2.1 Embedding API Client Registry
+
+The embedding API client registry follows the same pattern as Section 3.2, but for embedding protocol implementations.
+
+```go
+// embedding_api_client_registry.go (in internal/ai)
+
+var (
+    embeddingAPIClientMu       sync.RWMutex
+    embeddingAPIClientRegistry = make(map[string]EmbeddingAPIClient)
+)
+
+// RegisterEmbeddingAPIClient registers an embedding API client type.
+// Typically called once per embedding protocol implementation at init time.
+func RegisterEmbeddingAPIClient(c EmbeddingAPIClient) {
+    embeddingAPIClientMu.Lock()
+    defer embeddingAPIClientMu.Unlock()
+    embeddingAPIClientRegistry[c.ClientType()] = c
+}
+
+// GetEmbeddingAPIClient returns the embedding API client for the given type.
+func GetEmbeddingAPIClient(clientType string) (EmbeddingAPIClient, error) {
+    embeddingAPIClientMu.RLock()
+    defer embeddingAPIClientMu.RUnlock()
+    c, ok := embeddingAPIClientRegistry[clientType]
+    if !ok {
+        return nil, fmt.Errorf("no embedding API client registered for type: %s", clientType)
+    }
+    return c, nil
+}
+
+// ClearEmbeddingAPIClients removes all registered embedding API clients.
+// For testing only. Do not call in production code.
+func ClearEmbeddingAPIClients() {
+    embeddingAPIClientMu.Lock()
+    defer embeddingAPIClientMu.Unlock()
+    embeddingAPIClientRegistry = make(map[string]EmbeddingAPIClient)
 }
 ```
 
@@ -238,10 +289,20 @@ type ProviderConfig struct {
     // Examples: "openai", "anthropic", "openrouter".
     Name string `json:"name"`
 
-    // APIClientType is the protocol to use for this provider.
-    // Must match a registered APIClient's ClientType().
+    // APIClientType is the protocol to use for chat completions with this provider.
+    // Must match a registered APIClient's ClientType() return value.
     // Examples: "openai-completions", "anthropic-messages", "google-genai".
+    // Note: embedding models use a separate client type — see EmbeddingAPIClientType.
     APIClientType string `json:"apiClientType"`
+
+    // EmbeddingAPIClientType is the protocol to use for embeddings with this provider.
+    // Must match a registered EmbeddingAPIClient's ClientType() return value.
+    // Optional: only needed if this provider offers embedding models.
+    // When present, embedding resolution uses this instead of requiring each
+    // embedding model to specify its own API field.
+    // When absent, embedding models must specify their own API field.
+    // Examples: "openai-embeddings", "google-embeddings".
+    EmbeddingAPIClientType string `json:"embeddingApiClientType,omitempty"`
 
     // BaseURL is the base URL for the API endpoint.
     // Examples: "https://api.openai.com/v1", "https://openrouter.ai/api/v1".
@@ -253,14 +314,29 @@ type ProviderConfig struct {
     KeyEnvVars []string `json:"keyEnvVars,omitempty"`
 
     // Headers are extra HTTP headers sent with every request to this provider.
-    // Useful for provider-specific routing headers (e.g., OpenRouter site headers).
-    Headers map[string]string `json:"headers,omitempty"`
+    // Multi-valued headers (e.g., Anthropic beta headers) use multiple values
+    // in the slice. Each value is added via req.Header.Add(), so multiple
+    // values for the same key are sent as separate header entries per HTTP spec.
+    // Examples: {"anthropic-beta": ["prompt-caching-2024-07-31", "max-tokens-3-5-sonnet-2024-07-15"]}
+    Headers map[string][]string `json:"headers,omitempty"`
 
     // ProviderSpecific holds provider-level config that API client
     // implementations may need. Examples: Anthropic API version,
     // Google API version path segment.
     ProviderSpecific map[string]string `json:"providerSpecific,omitempty"`
 }
+```
+
+**Direct API keys:** Custom providers that supply API keys directly (not via env vars) use a separate module-level map rather than a field on ProviderConfig. See Section 3.9 for details. This keeps ProviderConfig a clean, fully-serializable struct with no unexported fields.
+
+```go
+// directAPIKeys stores API keys supplied directly via RegisterCustomProvider,
+// keyed by provider name. Checked by ResolveEndpoint as step 2 in key resolution.
+// Not part of ProviderConfig to keep that struct fully JSON-serializable.
+var (
+    directAPIKeysMu sync.RWMutex
+    directAPIKeys   = make(map[string]string)
+)
 ```
 
 #### ProviderEndpoint
@@ -273,6 +349,7 @@ This is the resolved, ready-to-use endpoint passed to API clients on each call. 
 // from environment variables or StreamOptions overrides.
 type ProviderEndpoint struct {
     // ProviderName is the provider identifier (for error messages, telemetry).
+    // API client implementations use this to set AssistantMessage.Provider.
     ProviderName string
 
     // BaseURL is the resolved base URL.
@@ -283,7 +360,8 @@ type ProviderEndpoint struct {
     APIKey string
 
     // Headers are merged provider-level + call-level headers.
-    Headers map[string]string
+    // Multi-valued: each key maps to one or more header values.
+    Headers map[string][]string
 
     // ProviderSpecific passes through from ProviderConfig.
     ProviderSpecific map[string]string
@@ -334,17 +412,27 @@ func ListProviderConfigs() []string {
 }
 
 // UnregisterProviderConfig removes a provider by name.
+// Also removes any direct API key associated with this provider.
 func UnregisterProviderConfig(name string) {
     providerConfigMu.Lock()
     defer providerConfigMu.Unlock()
     delete(providerConfigRegistry, name)
+    directAPIKeysMu.Lock()
+    defer directAPIKeysMu.Unlock()
+    delete(directAPIKeys, name)
 }
 
-// ClearProviderConfigs removes all provider configurations. For testing.
+// ClearProviderConfigs removes all provider configurations and direct API keys.
+// For testing only. Do not call in production code.
+// Tests should use t.Cleanup(ai.ClearProviderConfigs) for full cleanup,
+// or defer ai.UnregisterProviderConfig(name) for individual cleanup.
 func ClearProviderConfigs() {
     providerConfigMu.Lock()
     defer providerConfigMu.Unlock()
     providerConfigRegistry = make(map[string]ProviderConfig)
+    directAPIKeysMu.Lock()
+    defer directAPIKeysMu.Unlock()
+    directAPIKeys = make(map[string]string)
 }
 
 func deepCopyProviderConfig(cfg ProviderConfig) ProviderConfig {
@@ -354,9 +442,11 @@ func deepCopyProviderConfig(cfg ProviderConfig) ProviderConfig {
         cfg.KeyEnvVars = kv
     }
     if cfg.Headers != nil {
-        h := make(map[string]string, len(cfg.Headers))
+        h := make(map[string][]string, len(cfg.Headers))
         for k, v := range cfg.Headers {
-            h[k] = v
+            vc := make([]string, len(v))
+            copy(vc, v)
+            h[k] = vc
         }
         cfg.Headers = h
     }
@@ -371,6 +461,8 @@ func deepCopyProviderConfig(cfg ProviderConfig) ProviderConfig {
 }
 ```
 
+**Note on sourceID removal:** The old `RegisterProvider` took a `sourceID` parameter for bulk unregistration via `UnregisterProviders(sourceID)`. This is intentionally removed. The new registry keys by name, making individual cleanup straightforward via `UnregisterProviderConfig(name)`. Tests should use `t.Cleanup(ai.ClearProviderConfigs)` for full cleanup, or `defer ai.UnregisterProviderConfig(name)` for individual cleanup. See Section 4.2 for migration details.
+
 ### 3.5 Endpoint Resolution
 
 A helper function resolves `ProviderConfig` + `StreamOptions` into a `ProviderEndpoint`:
@@ -381,10 +473,16 @@ A helper function resolves `ProviderConfig` + `StreamOptions` into a `ProviderEn
 // ResolveEndpoint creates a ProviderEndpoint from a ProviderConfig and
 // call-level options. API key resolution order:
 //   1. opts.APIKey (explicit per-call override)
-//   2. First non-empty env var from cfg.KeyEnvVars
-//   3. Empty string (provider may not require auth)
+//   2. directAPIKeys[cfg.Name] (set by RegisterCustomProvider)
+//   3. First non-empty env var from cfg.KeyEnvVars
+//   4. Empty string (provider may not require auth)
 func ResolveEndpoint(cfg ProviderConfig, opts StreamOptions) ProviderEndpoint {
     apiKey := strings.TrimSpace(opts.APIKey)
+    if apiKey == "" {
+        directAPIKeysMu.RLock()
+        apiKey = directAPIKeys[cfg.Name]
+        directAPIKeysMu.RUnlock()
+    }
     if apiKey == "" {
         for _, envVar := range cfg.KeyEnvVars {
             if v := os.Getenv(envVar); v != "" {
@@ -394,14 +492,14 @@ func ResolveEndpoint(cfg ProviderConfig, opts StreamOptions) ProviderEndpoint {
         }
     }
 
-    // Merge headers: provider-level, then model-level (from caller),
-    // then call-level opts. Later values override earlier ones.
-    headers := make(map[string]string)
-    for k, v := range cfg.Headers {
-        headers[k] = v
+    // Merge headers: provider-level, then call-level opts.
+    // Uses Add semantics: multiple values for the same key are preserved.
+    headers := make(map[string][]string)
+    for k, vs := range cfg.Headers {
+        headers[k] = append(headers[k], vs...)
     }
-    for k, v := range opts.Headers {
-        headers[k] = v
+    for k, vs := range opts.Headers {
+        headers[k] = append(headers[k], vs...)
     }
 
     return ProviderEndpoint{
@@ -414,6 +512,8 @@ func ResolveEndpoint(cfg ProviderConfig, opts StreamOptions) ProviderEndpoint {
 }
 ```
 
+**Note on per-call BaseURL override:** Per-call base URL override is intentionally not supported. All URL overrides must go through `RegisterCustomProvider` to create a named provider with the desired base URL. This keeps the resolution path simple and auditable.
+
 ### 3.6 Model Struct Changes
 
 The `Model` struct's `Provider` field now refers to the **provider name** (e.g., `"openrouter"`) rather than being a loose grouping key. The `API` field is retained for backwards compatibility and as a convenience to identify which API client type the model uses, but the canonical resolution path is now `model.Provider` -> `ProviderConfig.APIClientType`.
@@ -423,17 +523,18 @@ The `BaseURL` field is **removed from Model**. Base URLs are provider-level conf
 ```go
 // Model defines a provider model configuration.
 type Model struct {
-    ID            string            `json:"id"`
-    Name          string            `json:"name"`
-    Provider      string            `json:"provider"`      // provider name, e.g. "openrouter"
-    API           string            `json:"api"`            // retained for compat; derived from provider's apiClientType
-    Reasoning     bool              `json:"reasoning"`
-    Input         []string          `json:"input"`
-    Cost          ModelCost         `json:"cost"`
-    ContextWindow int               `json:"contextWindow"`
-    MaxTokens     int               `json:"maxTokens"`
-    Headers       map[string]string `json:"headers,omitempty"`
-    Compat        *ModelCompat      `json:"compat,omitempty"`
+    ID            string              `json:"id"`
+    Name          string              `json:"name"`
+    Provider      string              `json:"provider"`      // provider name, e.g. "openrouter"
+    API           string              `json:"api"`            // retained for compat; derived from provider's apiClientType
+    Reasoning     bool                `json:"reasoning"`
+    Input         []string            `json:"input"`
+    Cost          ModelCost           `json:"cost"`
+    PricingKnown  bool                `json:"pricingKnown"`  // true for catalog models, false for custom models by default
+    ContextWindow int                 `json:"contextWindow"`
+    MaxTokens     int                 `json:"maxTokens"`
+    Headers       map[string][]string `json:"headers,omitempty"`
+    Compat        *ModelCompat        `json:"compat,omitempty"`
 }
 ```
 
@@ -441,6 +542,8 @@ Changes from current:
 - `BaseURL` field removed (provider-level concern now)
 - `Provider` field semantics tightened: must match a registered provider name
 - `API` field retained but now derived/validated against `ProviderConfig.APIClientType`
+- `PricingKnown` field added: `true` for catalog-loaded models (pricing is known and accurate), `false` for custom models by default (can be set via `CustomModelOpts`). This disambiguates "genuinely free" (PricingKnown=true, Cost all zeros) from "unknown pricing" (PricingKnown=false)
+- `Headers` field changed from `map[string]string` to `map[string][]string` for multi-valued header support
 
 ### 3.7 Stream Entry Points Changes
 
@@ -450,7 +553,7 @@ The top-level `Stream()` / `Complete()` functions change their resolution logic:
 // stream.go (in internal/ai)
 
 // Stream starts a streaming LLM call.
-// Resolution: model.Provider → ProviderConfig → APIClient → Stream()
+// Resolution: model.Provider -> ProviderConfig -> APIClient -> Stream()
 func Stream(ctx context.Context, model Model, llmCtx Context, opts StreamOptions) *EventStream {
     cfg, err := GetProviderConfig(model.Provider)
     if err != nil {
@@ -483,9 +586,13 @@ func StreamSimple(ctx context.Context, model Model, llmCtx Context, opts SimpleS
 // Complete and CompleteSimple remain wrappers over Stream/StreamSimple.
 ```
 
+**AssistantMessage.Provider:** API client implementations use `ProviderEndpoint.ProviderName` (which is already passed on every call) to set `AssistantMessage.Provider`. This is simple and the information is already available -- no wrapping or annotation layer needed.
+
 ### 3.8 Catalog Structure Changes
 
-The catalog changes from a flat `provider → modelID → Model` structure to a structure that includes provider-level configuration.
+The catalog changes from a flat `provider -> modelID -> Model` structure to a structure that includes provider-level configuration.
+
+**Migration note:** The catalog format change must be atomic: new `catalog.json` + new `init()` parsing code + updated `catalogFile` struct must land in the same commit. Tests that construct mock catalogs or test catalog loading must be updated in the same commit.
 
 **New `catalog.json` structure:**
 
@@ -494,19 +601,25 @@ The catalog changes from a flat `provider → modelID → Model` structure to a 
   "providers": {
     "anthropic": {
       "apiClientType": "anthropic-messages",
+      "embeddingApiClientType": "anthropic-embeddings",
       "baseUrl": "https://api.anthropic.com",
       "keyEnvVars": ["ANTHROPIC_API_KEY"],
+      "headers": {
+        "anthropic-beta": ["prompt-caching-2024-07-31", "max-tokens-3-5-sonnet-2024-07-15"]
+      },
       "providerSpecific": {
         "apiVersion": "2023-06-01"
       }
     },
     "openai": {
       "apiClientType": "openai-completions",
+      "embeddingApiClientType": "openai-embeddings",
       "baseUrl": "https://api.openai.com/v1",
       "keyEnvVars": ["OPENAI_API_KEY"]
     },
     "google": {
       "apiClientType": "google-genai",
+      "embeddingApiClientType": "google-embeddings",
       "baseUrl": "https://generativelanguage.googleapis.com",
       "keyEnvVars": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
       "providerSpecific": {
@@ -518,8 +631,8 @@ The catalog changes from a flat `provider → modelID → Model` structure to a 
       "baseUrl": "https://openrouter.ai/api/v1",
       "keyEnvVars": ["OPENROUTER_API_KEY"],
       "headers": {
-        "HTTP-Referer": "https://flex-agent-runtime",
-        "X-Title": "flex-agent-runtime"
+        "HTTP-Referer": ["https://flex-agent-runtime"],
+        "X-Title": ["flex-agent-runtime"]
       }
     }
   },
@@ -575,8 +688,12 @@ Key changes:
 - Top-level `"providers"` section with provider configs
 - Model entries no longer have `baseUrl` or `api` fields (derived from provider)
 - `api` field is set on `Model` struct at catalog load time from `ProviderConfig.APIClientType`
+- `Headers` values are `[]string` (multi-valued), e.g. Anthropic beta headers
+- Anthropic beta headers are expressed as a multi-valued header in the providers section
 
 **Catalog loading changes:**
+
+Both chat and embedding catalogs are loaded in the same `init()` function in `models.go`. Provider configs are registered first, then chat models, then embedding models. Single `init()`, single file, deterministic order.
 
 ```go
 // models.go init()
@@ -592,13 +709,13 @@ func init() {
         panic(fmt.Sprintf("failed to load model catalog: %v", err))
     }
 
-    // Register provider configs
+    // Phase 1: Register provider configs
     for name, cfg := range catalog.Providers {
         cfg.Name = name
         RegisterProviderConfig(cfg)
     }
 
-    // Register models, deriving API from provider config
+    // Phase 2: Register chat models, deriving API from provider config
     for providerName, models := range catalog.Models {
         provCfg, ok := catalog.Providers[providerName]
         if !ok {
@@ -608,9 +725,16 @@ func init() {
             m.ID = id
             m.Provider = providerName
             m.API = provCfg.APIClientType
+            m.PricingKnown = true // catalog models have known pricing
             RegisterModel(m)
         }
     }
+
+    // Phase 3: Register embedding models (from embedding catalog)
+    // ... embedding catalog loading follows the same pattern,
+    // validating that each model's Provider matches a registered provider config.
+    // EmbeddingModel.API is derived from ProviderConfig.EmbeddingAPIClientType
+    // when present, or retained from the embedding catalog's own "api" field.
 }
 ```
 
@@ -631,38 +755,24 @@ For arbitrary endpoints not in the catalog, callers can register a custom provid
 // CustomProviderConfig is a convenience for registering a provider at runtime
 // for an arbitrary endpoint. Unlike catalog providers, custom providers:
 // - Accept any model name (no catalog validation)
-// - Have unknown pricing (Cost fields zero-valued)
+// - Have unknown pricing by default (PricingKnown=false, Cost fields zero-valued)
 // - Can accept API keys directly (not just via env vars)
 type CustomProviderConfig struct {
-    // Name is the unique provider name. Required.
-    Name string
-
-    // APIClientType is the protocol to use. Required.
-    // Must match a registered APIClient (e.g., "openai-completions").
-    APIClientType string
-
-    // BaseURL is the endpoint URL. Required.
-    BaseURL string
+    ProviderConfig
 
     // APIKey is a directly-provided API key. If set, takes precedence
     // over KeyEnvVars during resolution.
     APIKey string
-
-    // KeyEnvVars is the ordered list of env var names to check.
-    // Checked only if APIKey is empty.
-    KeyEnvVars []string
-
-    // Headers are extra HTTP headers for this provider.
-    Headers map[string]string
-
-    // ProviderSpecific holds provider-level config for the API client.
-    ProviderSpecific map[string]string
 }
 
 // RegisterCustomProvider registers a custom provider from runtime config.
 // It registers the ProviderConfig in the provider registry.
-// Returns an error if Name, APIClientType, or BaseURL is empty,
-// or if the APIClientType is not registered.
+// Returns an error if Name, APIClientType, or BaseURL is empty.
+//
+// Note: API client type validation is NOT performed at registration time.
+// This is intentional -- API clients may not be registered yet if
+// RegisterCustomProvider is called during init(). Validation happens at
+// Stream()/Embed() time, which already checks via GetAPIClient/GetEmbeddingAPIClient.
 func RegisterCustomProvider(cfg CustomProviderConfig) error {
     if cfg.Name == "" {
         return fmt.Errorf("custom provider name is required")
@@ -674,49 +784,17 @@ func RegisterCustomProvider(cfg CustomProviderConfig) error {
         return fmt.Errorf("custom provider %q: baseURL is required", cfg.Name)
     }
 
-    // Validate that the API client type exists
-    if _, err := GetAPIClient(cfg.APIClientType); err != nil {
-        return fmt.Errorf("custom provider %q: %w", cfg.Name, err)
-    }
-
-    provCfg := ProviderConfig{
-        Name:             cfg.Name,
-        APIClientType:    cfg.APIClientType,
-        BaseURL:          cfg.BaseURL,
-        KeyEnvVars:       cfg.KeyEnvVars,
-        Headers:          cfg.Headers,
-        ProviderSpecific: cfg.ProviderSpecific,
-    }
-
-    // If a direct API key was provided, store it so ResolveEndpoint can use it.
-    // We do this via a special sentinel env var name + direct key storage.
+    // If a direct API key was provided, store it in the module-level map.
+    // ResolveEndpoint checks this map as step 2 in key resolution.
     if cfg.APIKey != "" {
-        provCfg.directAPIKey = cfg.APIKey
+        directAPIKeysMu.Lock()
+        directAPIKeys[cfg.Name] = cfg.APIKey
+        directAPIKeysMu.Unlock()
     }
 
-    RegisterProviderConfig(provCfg)
+    RegisterProviderConfig(cfg.ProviderConfig)
     return nil
 }
-```
-
-The `directAPIKey` field requires a small extension to `ProviderConfig` and `ResolveEndpoint`:
-
-```go
-// In ProviderConfig (unexported field, not serialized):
-type ProviderConfig struct {
-    // ... exported fields as above ...
-
-    // directAPIKey is set by RegisterCustomProvider for providers that
-    // have a directly-supplied API key rather than env var lookup.
-    // Not serialized to JSON. Not exported.
-    directAPIKey string
-}
-
-// ResolveEndpoint updated key resolution order:
-//   1. opts.APIKey (explicit per-call override)
-//   2. cfg.directAPIKey (set by RegisterCustomProvider)
-//   3. First non-empty env var from cfg.KeyEnvVars
-//   4. Empty string
 ```
 
 #### Custom Model Registration
@@ -726,7 +804,7 @@ For custom providers, models can be registered dynamically:
 ```go
 // RegisterCustomModel registers a model for a custom provider.
 // The model's Provider and API fields are set from the provider config.
-// Cost fields are zero-valued (unknown pricing).
+// PricingKnown defaults to false unless explicitly set in opts.
 func RegisterCustomModel(providerName string, modelID string, opts CustomModelOpts) error {
     cfg, err := GetProviderConfig(providerName)
     if err != nil {
@@ -740,6 +818,7 @@ func RegisterCustomModel(providerName string, modelID string, opts CustomModelOp
         Reasoning:     opts.Reasoning,
         Input:         opts.Input,
         Cost:          opts.Cost, // zero-valued if unknown
+        PricingKnown:  opts.PricingKnown,
         ContextWindow: opts.ContextWindow,
         MaxTokens:     opts.MaxTokens,
         Compat:        opts.Compat,
@@ -757,6 +836,7 @@ type CustomModelOpts struct {
     Reasoning     bool
     Input         []string
     Cost          ModelCost
+    PricingKnown  bool // false by default; set to true if pricing is known
     ContextWindow int
     MaxTokens     int
     Compat        *ModelCompat
@@ -832,12 +912,17 @@ func applyHeaders(req *http.Request, endpoint ai.ProviderEndpoint,
         req.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
     }
     // Provider-level headers (from ProviderEndpoint, already merged with opts)
-    for k, v := range endpoint.Headers {
-        req.Header.Set(k, v)
+    // Uses Add for multi-valued header support.
+    for k, vs := range endpoint.Headers {
+        for _, v := range vs {
+            req.Header.Add(k, v)
+        }
     }
     // Model-level headers
-    for k, v := range model.Headers {
-        req.Header.Set(k, v)
+    for k, vs := range model.Headers {
+        for _, v := range vs {
+            req.Header.Add(k, v)
+        }
     }
 }
 
@@ -851,7 +936,7 @@ func Register(cfg ClientConfig) *Client {
 
 **Example: Anthropic client refactor**
 
-The Anthropic client follows the same pattern. Provider-specific config like `apiVersion` comes from `endpoint.ProviderSpecific`:
+The Anthropic client follows the same pattern. Provider-specific config like `apiVersion` comes from `endpoint.ProviderSpecific`. Beta headers come from `endpoint.Headers` (multi-valued):
 
 ```go
 func (c *Client) runStream(ctx context.Context, endpoint ai.ProviderEndpoint, ...) error {
@@ -864,6 +949,27 @@ func (c *Client) runStream(ctx context.Context, endpoint ai.ProviderEndpoint, ..
     if endpoint.APIKey != "" {
         req.Header.Set("x-api-key", endpoint.APIKey)
     }
+    // Beta headers come through endpoint.Headers["anthropic-beta"] as []string,
+    // applied via the shared applyHeaders helper using Add semantics.
+    // ...
+}
+```
+
+**Example: Google client refactor**
+
+The Google client uses `ProviderSpecific["apiVersion"]` as a URL path segment (not a header value), demonstrating that ProviderSpecific values are interpreted by each client implementation as needed:
+
+```go
+func (c *Client) runStream(ctx context.Context, endpoint ai.ProviderEndpoint,
+    model ai.Model, ...) error {
+    // Google constructs URL using apiVersion as a path segment:
+    // baseURL + "/" + apiVersion + "/models/" + modelID + ":streamGenerateContent"
+    apiVersion := endpoint.ProviderSpecific["apiVersion"]
+    if apiVersion == "" {
+        apiVersion = "v1beta"
+    }
+    url := fmt.Sprintf("%s/%s/models/%s:streamGenerateContent",
+        endpoint.BaseURL, apiVersion, model.ID)
     // ...
 }
 ```
@@ -886,29 +992,36 @@ type EmbeddingAPIClient interface {
 }
 ```
 
-The embedding API client registry, embedding model registry, and `Embed()` entry point follow the same pattern:
+The `EmbeddingModel` struct is updated with `BaseURL` removed (now resolved from the provider config):
 
 ```go
-// Embed() resolution changes:
-func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*EmbeddingResponse, error) {
-    model, ok := GetEmbeddingModel(modelID)
-    if !ok {
-        return nil, fmt.Errorf("unknown embedding model: %s", modelID)
-    }
-    cfg, err := GetProviderConfig(model.Provider)
-    if err != nil {
-        return nil, err
-    }
-    client, err := GetEmbeddingAPIClient(cfg.APIClientType)
-    // ... note: embedding models may use a different API client type name
-    // e.g., provider "openai" has apiClientType "openai-completions" for chat
-    // but embedding models need "openai-embeddings" client type.
-    // Resolution: EmbeddingModel stores its own API field, used for client lookup.
-    // ...
+type EmbeddingModel struct {
+    ID              string          `json:"id"`
+    Name            string          `json:"name"`
+    API             string          `json:"api"`      // embedding client type, e.g. "openai-embeddings"
+    Provider        string          `json:"provider"` // provider name, e.g. "openai"
+    // BaseURL removed -- now comes from ProviderConfig via ProviderEndpoint
+    MaxInputTokens  int             `json:"maxInputTokens"`
+    DefaultDims     int             `json:"defaultDims"`
+    MaxDims         int             `json:"maxDims"`
+    MinDims         int             `json:"minDims"`
+    MaxBatchSize    int             `json:"maxBatchSize"`
+    SupportsDimCtrl bool            `json:"supportsDimCtrl"`
+    SupportsTaskType bool           `json:"supportsTaskType"`
+    Cost            EmbeddingCost   `json:"cost"`
+    PricingKnown    bool            `json:"pricingKnown"`
 }
 ```
 
-**Important nuance:** A single provider (e.g., "openai") may use different API client types for chat vs embeddings. The `EmbeddingModel.API` field is used to look up the `EmbeddingAPIClient`, independent of `ProviderConfig.APIClientType` (which is for chat). The `ProviderConfig` still supplies base URL and credentials. To make this explicit:
+The embedding API client registry is specified in Section 3.2.1. The `Embed()` entry point follows the same resolution pattern:
+
+**Important nuance:** A single provider (e.g., "openai") may use different API client types for chat vs embeddings. The embedding client type is resolved as follows:
+1. If `ProviderConfig.EmbeddingAPIClientType` is set, use that.
+2. Otherwise, use `EmbeddingModel.API` directly.
+
+This resolves the asymmetry between chat and embedding resolution paths:
+- For chat: `model.Provider` -> `ProviderConfig.APIClientType` -> `APIClient`
+- For embeddings: `model.Provider` -> `ProviderConfig.EmbeddingAPIClientType` (preferred) or `model.API` (fallback) -> `EmbeddingAPIClient`
 
 ```go
 func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*EmbeddingResponse, error) {
@@ -920,7 +1033,14 @@ func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*Embeddin
     if err != nil {
         return nil, err
     }
-    client, err := GetEmbeddingAPIClient(model.API) // use model.API, not cfg.APIClientType
+
+    // Resolve embedding client type: prefer provider-level, fall back to model-level
+    embeddingClientType := cfg.EmbeddingAPIClientType
+    if embeddingClientType == "" {
+        embeddingClientType = model.API
+    }
+
+    client, err := GetEmbeddingAPIClient(embeddingClientType)
     if err != nil {
         return nil, err
     }
@@ -929,6 +1049,8 @@ func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*Embeddin
     return client.Embed(ctx, endpoint, model, req)
 }
 ```
+
+**Per-call embedding overrides:** Per-call API key or header overrides for embeddings are out of scope for now. Custom providers that supply keys via `RegisterCustomProvider` work for embeddings since the key is on the provider config. This may be revisited in the future if per-call embedding overrides are needed.
 
 ### 3.12 Backwards Compatibility Shim
 
@@ -951,6 +1073,13 @@ Each provider package (`openai`, `anthropic`, `google`) must:
 5. Remove stored `baseURL` and `apiKey` fields -- use `endpoint.BaseURL` and `endpoint.APIKey` instead.
 6. Move provider-specific defaults (Anthropic version, Google API version) to `ProviderSpecific` in catalog config.
 7. Change `Register()` to register an `APIClient` (not the old `Provider`) and separately ensure provider configs are registered via catalog or explicit calls.
+
+Each embedding provider package (`openai`, `google`, `cohere`) must additionally:
+
+8. Rename its embedding type to implement `ai.EmbeddingAPIClient` instead of `ai.EmbeddingProvider`.
+9. Add `ProviderEndpoint` parameter to `Embed()`.
+10. Remove `model.BaseURL` usage -- use `endpoint.BaseURL` instead.
+11. Change `Register()` to also call `ai.RegisterEmbeddingAPIClient()`.
 
 ### 4.2 Caller Migration
 
@@ -986,11 +1115,28 @@ Change to:
 ```go
 // New: register a named custom provider
 ai.RegisterCustomProvider(ai.CustomProviderConfig{
-    Name:          "my-proxy",
-    APIClientType: "openai-completions",
-    BaseURL:       "https://my-proxy.example.com/v1",
-    KeyEnvVars:    []string{"PROXY_API_KEY"},
+    ProviderConfig: ai.ProviderConfig{
+        Name:          "my-proxy",
+        APIClientType: "openai-completions",
+        BaseURL:       "https://my-proxy.example.com/v1",
+        KeyEnvVars:    []string{"PROXY_API_KEY"},
+    },
 })
+```
+
+**sourceID cleanup migration:** Tests that currently use sourceID-based bulk cleanup:
+```go
+// Old pattern:
+sourceID := "tier2-agent-flow-" + t.Name()
+ai.RegisterProvider(provider, sourceID)
+defer ai.UnregisterProviders(sourceID)
+
+// New pattern (full cleanup):
+t.Cleanup(ai.ClearProviderConfigs)
+
+// New pattern (individual cleanup):
+ai.RegisterProviderConfig(cfg)
+defer ai.UnregisterProviderConfig(cfg.Name)
 ```
 
 ### 4.3 Demo CLI Migration
@@ -1003,7 +1149,17 @@ The model registry's outer key changes from a loose grouping (e.g., `"anthropic"
 
 ### 4.5 AssistantMessage Changes
 
-The `AssistantMessage.Provider` field now carries the provider name (e.g., `"openrouter"`) rather than a loose label. The `AssistantMessage.API` field carries the API client type. Both are set by the stream entry points before delegating to the API client, so API client implementations don't need to know their own provider name.
+The `AssistantMessage.Provider` field now carries the provider name (e.g., `"openrouter"`) rather than a loose label. The `AssistantMessage.API` field carries the API client type. API client implementations set `AssistantMessage.Provider` from `ProviderEndpoint.ProviderName`, which is passed on every call.
+
+### 4.6 Embedding Provider Migration
+
+Each embedding provider implementation must:
+
+1. Switch from `ai.EmbeddingProvider` to `ai.EmbeddingAPIClient` interface.
+2. Add `ProviderEndpoint` parameter to `Embed()` method.
+3. Replace `model.BaseURL` usage with `endpoint.BaseURL`.
+4. Register via `ai.RegisterEmbeddingAPIClient()` instead of the old embedding provider registration.
+5. Use `endpoint.APIKey` instead of stored API key fields.
 
 ---
 
@@ -1014,7 +1170,7 @@ The `AssistantMessage.Provider` field now carries the provider name (e.g., `"ope
 | Test Area | Change Required |
 |-----------|----------------|
 | Registry tests | Split into API client registry tests and provider config registry tests |
-| Stream entry point tests | Update mock to implement `APIClient` instead of `Provider`; verify two-step resolution (provider config → API client) |
+| Stream entry point tests | Update mock to implement `APIClient` instead of `Provider`; verify two-step resolution (provider config -> API client) |
 | Provider package tests (openai, anthropic, google) | Update to pass `ProviderEndpoint` instead of using stored fields; update mock server tests |
 | Catalog loading tests | Verify new catalog format loads both provider configs and models correctly |
 | Transform tests | Update `AssistantMessage.Provider` expectations if they check provider name |
@@ -1025,23 +1181,30 @@ The `AssistantMessage.Provider` field now carries the provider name (e.g., `"ope
 | Test | Description |
 |------|-------------|
 | `TestAPIClientRegistry` | Register/Get/Clear for API clients, concurrent access |
+| `TestEmbeddingAPIClientRegistry` | Register/Get/Clear for embedding API clients, concurrent access -- parallel to `TestAPIClientRegistry` |
 | `TestProviderConfigRegistry` | Register/Get/List/Unregister/Clear for provider configs, concurrent access, deep copy isolation |
-| `TestResolveEndpoint` | API key resolution order (opts > direct > env > empty), header merging, provider-specific passthrough |
+| `TestResolveEndpoint` | API key resolution order (opts > direct > env > empty), header merging (multi-valued), provider-specific passthrough |
 | `TestResolveEndpointEnvVars` | Multiple env vars, first-wins behavior, empty env vars skipped |
-| `TestStreamResolution` | Full path: model.Provider → ProviderConfig → APIClient → Stream(). Verify endpoint fields propagated correctly |
+| `TestStreamResolution` | Full path: model.Provider -> ProviderConfig -> APIClient -> Stream(). Verify endpoint fields propagated correctly |
 | `TestStreamMissingProvider` | Error when model references unregistered provider |
 | `TestStreamMissingAPIClient` | Error when provider config references unregistered API client type |
-| `TestCustomProviderRegistration` | RegisterCustomProvider validation (empty fields, unknown API client type), successful registration |
+| `TestCustomProviderRegistration` | RegisterCustomProvider validation (empty fields), successful registration. Note: does NOT validate API client type at registration time (intentional -- see Section 3.9) |
+| `TestCustomProviderOverwritesCatalogProvider` | Register a custom provider with the same name as a catalog provider, verify the new config is used and old config does not leak through |
 | `TestCustomModelRegistration` | RegisterCustomModel with and without optional fields, error on unknown provider |
+| `TestCustomModelPricingKnown` | Verify PricingKnown=false by default for custom models, PricingKnown=true when explicitly set |
 | `TestMultipleProvidersPerAPIClient` | Register "openai" and "openrouter" both using "openai-completions", verify independent resolution with different base URLs and keys |
 | `TestCatalogNewFormat` | Load new catalog.json format, verify provider configs and models both registered correctly, verify model.API derived from provider |
-| `TestEmbeddingResolution` | Embedding model resolves provider config for credentials/baseURL but uses model.API for embedding client lookup |
+| `TestEmbeddingResolution` | Embedding model resolves provider config for credentials/baseURL but uses EmbeddingAPIClientType (or model.API fallback) for embedding client lookup |
+| `TestEmbeddingCustomProvider` | Register custom provider, register embedding model against it, verify `Embed()` resolves correctly |
+| `TestEmbeddingBaseURLFromProvider` | Verify embedding providers use `endpoint.BaseURL` not `model.BaseURL` (which is removed) |
+| `TestCalculateCostPricingKnown` | Verify CalculateCost behavior with PricingKnown=true (zero means free) vs PricingKnown=false (zero means unknown) |
+| `TestMultiValuedHeaders` | Verify multi-valued headers (e.g., Anthropic beta) are sent via Add semantics, not Set |
 
 ### 5.3 Property Tests
 
 - **Resolution determinism:** For any registered provider config and API client, `ResolveEndpoint` always produces the same `ProviderEndpoint` given the same inputs.
-- **Registry isolation:** Registering/unregistering provider configs does not affect the API client registry, and vice versa.
-- **Deep copy integrity:** Mutating a returned `ProviderConfig` does not affect registry state.
+- **Registry isolation:** Registering/unregistering provider configs does not affect the API client registry or embedding API client registry, and vice versa.
+- **Deep copy integrity:** Mutating a returned `ProviderConfig` does not affect registry state. Multi-valued header slices are independently copied.
 
 ---
 
@@ -1078,19 +1241,25 @@ The `AssistantMessage.Provider` field now carries the provider name (e.g., `"ope
   "providers": {
     "anthropic": {
       "apiClientType": "anthropic-messages",
+      "embeddingApiClientType": "anthropic-embeddings",
       "baseUrl": "https://api.anthropic.com",
       "keyEnvVars": ["ANTHROPIC_API_KEY"],
+      "headers": {
+        "anthropic-beta": ["prompt-caching-2024-07-31", "max-tokens-3-5-sonnet-2024-07-15"]
+      },
       "providerSpecific": {
         "apiVersion": "2023-06-01"
       }
     },
     "openai": {
       "apiClientType": "openai-completions",
+      "embeddingApiClientType": "openai-embeddings",
       "baseUrl": "https://api.openai.com/v1",
       "keyEnvVars": ["OPENAI_API_KEY"]
     },
     "google": {
       "apiClientType": "google-genai",
+      "embeddingApiClientType": "google-embeddings",
       "baseUrl": "https://generativelanguage.googleapis.com",
       "keyEnvVars": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
       "providerSpecific": {
@@ -1102,8 +1271,8 @@ The `AssistantMessage.Provider` field now carries the provider name (e.g., `"ope
       "baseUrl": "https://openrouter.ai/api/v1",
       "keyEnvVars": ["OPENROUTER_API_KEY"],
       "headers": {
-        "HTTP-Referer": "https://flex-agent-runtime",
-        "X-Title": "flex-agent-runtime"
+        "HTTP-Referer": ["https://flex-agent-runtime"],
+        "X-Title": ["flex-agent-runtime"]
       }
     }
   },
@@ -1144,7 +1313,7 @@ The `AssistantMessage.Provider` field now carries the provider name (e.g., `"ope
 
 ### 6.3 Embedding Catalog
 
-The embedding catalog (`models/embedding_catalog.json`) follows the same pattern. The `EmbeddingModel.Provider` field references a provider in the main catalog's `"providers"` section. The `EmbeddingModel.API` field is retained (since embedding models use a different API client type than chat models from the same provider), but `baseUrl` is removed:
+The embedding catalog (`models/embedding_catalog.json`) follows the same pattern. The `EmbeddingModel.Provider` field references a provider in the main catalog's `"providers"` section. The `EmbeddingModel.API` field is retained (since embedding models may use a different API client type than chat models from the same provider), but `baseUrl` is removed. When the provider has `EmbeddingAPIClientType` set, the embedding model's `API` field is derived from it at catalog load time:
 
 ```json
 [
@@ -1171,46 +1340,92 @@ Note: `baseUrl` removed from embedding models. The embedding `Embed()` entry poi
 
 ## 7. File Organization
 
-New and changed files:
+New and changed files (test files follow the standard `*_test.go` convention and are co-located with their source files):
 
 ```
 internal/ai/
     api_client.go               # NEW: APIClient interface
     api_client_registry.go      # NEW: API client type registry
+    api_client_registry_test.go # NEW: tests
+    embedding_api_client.go     # NEW: EmbeddingAPIClient interface
+    embedding_api_client_registry.go  # NEW: EmbeddingAPIClient registry
+                                #   (Register, Get, Clear — same pattern as 3.2)
+    embedding_api_client_registry_test.go # NEW: tests
     provider.go                 # CHANGED: ProviderConfig + ProviderEndpoint types
                                 #   (was: Provider interface — interface removed)
+                                #   Headers changed to map[string][]string
     provider_registry.go        # NEW: provider config registry (replaces registry.go)
+                                #   Also manages directAPIKeys map
+    provider_registry_test.go   # NEW: tests
     registry.go                 # REMOVED: old provider registry
     resolve.go                  # NEW: ResolveEndpoint helper
+    resolve_test.go             # NEW: tests
     custom_provider.go          # NEW: CustomProviderConfig, RegisterCustomProvider,
                                 #       RegisterCustomModel
+    custom_provider_test.go     # NEW: tests
     stream.go                   # CHANGED: two-step resolution
-    models.go                   # CHANGED: Model struct (BaseURL removed),
-                                #           catalog loading (new format)
-    embedding.go                # CHANGED: EmbeddingModel (BaseURL removed)
-    embedding_api_client.go     # NEW: EmbeddingAPIClient interface + registry
-    embedding_api.go            # CHANGED: Embed() uses provider config for endpoint
-    embedding_models.go         # CHANGED: catalog loading (baseUrl removed)
+    models.go                   # CHANGED: Model struct (BaseURL removed, PricingKnown added),
+                                #           catalog loading (new format),
+                                #           single init() for providers + chat + embedding models
+    embedding.go                # CHANGED: EmbeddingModel (BaseURL removed, PricingKnown added)
+    embedding_api.go            # CHANGED: Embed() uses provider config for endpoint,
+                                #           resolves embedding client type from provider or model
 
 internal/ai/provider/openai/
     client.go                   # CHANGED: renamed from provider.go, implements APIClient
     stream.go                   # CHANGED: takes ProviderEndpoint param
-    embedding_client.go         # CHANGED: implements EmbeddingAPIClient
+    embedding_client.go         # CHANGED: implements EmbeddingAPIClient,
+                                #           uses endpoint.BaseURL instead of model.BaseURL
 
 internal/ai/provider/anthropic/
     client.go                   # CHANGED: renamed from provider.go, implements APIClient
-    stream.go                   # CHANGED: takes ProviderEndpoint param
+    stream.go                   # CHANGED: takes ProviderEndpoint param,
+                                #           beta headers come from endpoint.Headers
 
 internal/ai/provider/google/
     client.go                   # CHANGED: renamed from provider.go, implements APIClient
-    stream.go                   # CHANGED: takes ProviderEndpoint param
+    stream.go                   # CHANGED: takes ProviderEndpoint param,
+                                #           apiVersion from ProviderSpecific used for URL path
 
 internal/ai/models/
-    catalog.json                # CHANGED: new format with providers section
+    catalog.json                # CHANGED: new format with providers section,
+                                #           headers as map[string][]string
 
 ai/
-    ai.go                       # CHANGED: re-exports updated types
+    ai.go                       # CHANGED: re-exports updated types (see 7.1)
 ```
+
+### 7.1 Public Re-export Layer Changes (ai/ package)
+
+The `ai/ai.go` public re-export layer changes as follows:
+
+**Removed exports:**
+- `Provider` (interface -- retired)
+- `RegisterProvider`
+- `GetProvider`
+- `UnregisterProviders`
+
+**Added exports:**
+- `APIClient` (interface)
+- `EmbeddingAPIClient` (interface)
+- `ProviderConfig` (struct)
+- `ProviderEndpoint` (struct)
+- `CustomProviderConfig` (struct)
+- `CustomModelOpts` (struct)
+- `RegisterAPIClient`
+- `GetAPIClient`
+- `ClearAPIClients`
+- `RegisterEmbeddingAPIClient`
+- `GetEmbeddingAPIClient`
+- `ClearEmbeddingAPIClients`
+- `RegisterProviderConfig`
+- `GetProviderConfig`
+- `ListProviderConfigs`
+- `UnregisterProviderConfig`
+- `ClearProviderConfigs`
+- `RegisterCustomProvider`
+- `RegisterCustomModel`
+- `ResolveEndpoint`
 
 ---
 
@@ -1220,19 +1435,53 @@ ai/
 |----------|-------------------|
 | Should `ProviderConfig` live in catalog only, or also support programmatic-only providers? | Both. Catalog provides defaults, `RegisterProviderConfig` and `RegisterCustomProvider` allow runtime additions. |
 | Should the old `Provider` interface name be reused for something? | No. The name is retired. `APIClient` and `ProviderConfig` are distinct enough to avoid confusion. |
-| How do API clients that need per-provider state (e.g., Anthropic beta headers) get it? | Via `ProviderEndpoint.ProviderSpecific` map and `ProviderEndpoint.Headers`. |
+| How do API clients that need per-provider state (e.g., Anthropic beta headers) get it? | Via `ProviderEndpoint.Headers` (multi-valued `map[string][]string`) and `ProviderEndpoint.ProviderSpecific` map. Beta headers are expressed as multi-valued headers in the catalog and applied via `req.Header.Add()`. |
 | Should `ResolveEndpoint` cache resolved keys? | No. Env var lookup is cheap and caching would prevent runtime key rotation. |
-| How does `CalculateCost` work for custom models with zero pricing? | It returns zero cost. Callers must handle `Usage.Cost.Total == 0` as "unknown" rather than "free". |
+| How does `CalculateCost` work for custom models with zero pricing? | It returns zero cost. The `PricingKnown` field on `Model` distinguishes "genuinely free" (PricingKnown=true, Cost=0) from "unknown pricing" (PricingKnown=false). Catalog-loaded models have PricingKnown=true. Custom models have PricingKnown=false by default. |
 
 ---
 
-## 9. Acceptance Criteria
+## 9. Round 1 Review Disposition
+
+Reviews incorporated: `docs/reviews/01-ai-core.add03-r1-review-a.md` (Reviewer A), `docs/reviews/01-ai-core.add03-r1-review-b.md` (Reviewer B). Review files deleted after incorporation.
+
+| ID | Sev | Title | Disposition | Section(s) Updated |
+|----|-----|-------|-------------|-------------------|
+| R1A-1 + R1B-1 | P0 | Anthropic beta headers cannot be represented | Incorporate. Changed `Headers` from `map[string]string` to `map[string][]string` in ProviderConfig, ProviderEndpoint, and Model. Updated deepCopy, applyHeaders, catalog JSON examples. | 3.3, 3.4, 3.5, 3.6, 3.8, 3.10, 6.2 |
+| R1A-2 + R1B-3 | P0 | directAPIKey on ProviderConfig breaks JSON round-trip | Incorporate. Replaced unexported field with module-level `directAPIKeys map[string]string`. RegisterCustomProvider writes to it, ResolveEndpoint checks it, ClearProviderConfigs clears it. | 3.3, 3.4, 3.5, 3.9, 2.3 |
+| R1A-5 + R1B-2 | P1 | sourceID removal not addressed | Incorporate. Documented intentional removal. Tests use `t.Cleanup(ai.ClearProviderConfigs)` or `defer ai.UnregisterProviderConfig(name)`. | 3.4, 4.2 |
+| R1A-3 + R1B-4 | P1 | Embedding API client type asymmetry | Incorporate. Added `EmbeddingAPIClientType` field to ProviderConfig. Added comment to APIClientType clarifying it's for chat. | 3.3, 3.11, 3.8, 6.2 |
+| R1A-4 + R1B-5 | P1 | EmbeddingAPIClient registry not specified | Incorporate. Added Section 3.2.1 with full registry spec. Added embedding migration steps to Section 4.1 and 4.6. | 3.2.1, 4.1, 4.6, 5.2, 7 |
+| R1A-6 | P1 | RegisterCustomProvider init ordering | Incorporate. Removed registration-time API client type validation. Added comment noting this design choice. | 3.9, 5.2 |
+| R1B-6 | P1 | Catalog init order | Incorporate. Documented single init() in models.go for providers, chat models, and embedding models. | 3.8 |
+| R1A-7 | P2 | Atomic catalog migration | Incorporate. Added note that format change + init() + tests must land atomically. | 3.8 |
+| R1A-9 | P2 | AssistantMessage.Provider mechanism | Incorporate. Specified that API clients use ProviderEndpoint.ProviderName. | 3.7, 4.5 |
+| R1A-8 + R1B-13 | P2 | Per-call BaseURL override | Not Incorporate. Intentionally not supported. Documented in Section 3.5. | 3.5 |
+| R1A-10 | P2 | Test for overwriting catalog provider | Incorporate. Added TestCustomProviderOverwritesCatalogProvider. | 5.2 |
+| R1A-11 + R1B-9 | P2 | CustomProviderConfig duplication | Incorporate. CustomProviderConfig now embeds ProviderConfig. | 3.9, 4.2 |
+| R1A-12 + R1B-16 | P2 | Zero pricing ambiguity | Incorporate. Added PricingKnown bool to Model. Catalog=true, custom=false by default. | 3.6, 3.8, 3.9, 5.2, 8 |
+| R1B-7 | P2 | Per-call embedding override | Not Incorporate. Out of scope, documented as future work. | 3.11 |
+| R1B-8 | P2 | EmbeddingModel struct update | Incorporate. Showed updated EmbeddingModel with BaseURL removed. Added embedding provider migration. | 3.11, 4.1, 4.6 |
+| R1B-10 | P2 | Google ProviderSpecific usage | Incorporate. Added Google client example showing URL path construction. | 3.10 |
+| R1B-11 | P2 | Public re-export layer | Incorporate. Added Section 7.1 listing removed and added public exports. | 7.1 |
+| R1B-12 | P2 | Embedding test coverage | Incorporate. Added embedding-specific test cases. | 5.2 |
+| R1A-13 | P3 | JSON tag note | Not Incorporate (informational, no action needed). | -- |
+| R1A-14 | P3 | Clear functions docs | Incorporate. Added "Do not call in production code." | 3.2, 3.2.1, 3.4 |
+| R1A-15 | P3 | Missing test files in file org | Incorporate. Added test file convention note and listed test files. | 7 |
+| R1B-14 | P3 | Naming clarification | Incorporate. Added comment to APIClientType field. | 3.3 |
+| R1B-15 | P3 | Deep copy confirmation | Not Incorporate (no action needed, already correct). | -- |
+
+---
+
+## 10. Acceptance Criteria
 
 1. **AC1:** Multiple providers using the same API client type can be registered simultaneously (e.g., "openai" and "openrouter" both using "openai-completions"), and `Stream()` routes to the correct base URL based on `model.Provider`.
 2. **AC2:** API keys are resolved from provider-configured env vars without explicit key passing at registration time.
 3. **AC3:** `RegisterCustomProvider` allows registering an arbitrary endpoint, and models registered against it can be used with `Stream()`.
 4. **AC4:** The catalog loads both provider configs and models from the new format. Model.API is derived from provider config's APIClientType.
 5. **AC5:** All existing provider tests pass after migration (openai, anthropic, google).
-6. **AC6:** Embedding resolution uses provider config for base URL and credentials while using model.API for API client type lookup.
-7. **AC7:** The API client registry and provider config registry are independently thread-safe under `-race`.
+6. **AC6:** Embedding resolution uses provider config for base URL and credentials while using EmbeddingAPIClientType (or model.API fallback) for API client type lookup.
+7. **AC7:** The API client registry, embedding API client registry, and provider config registry are independently thread-safe under `-race`.
 8. **AC8:** `make check && make test` pass clean with no warnings.
+9. **AC9:** Multi-valued headers (e.g., Anthropic beta headers) are correctly sent via `Add` semantics, not `Set`.
+10. **AC10:** `PricingKnown` field correctly distinguishes catalog models (true) from custom models (false by default).
