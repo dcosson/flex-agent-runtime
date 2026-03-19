@@ -1,11 +1,11 @@
 # 01-ai-core Addendum 03: Separate API Client Type from Provider, Fallback Provider
 
-**Status:** Draft (R1 reviews incorporated)
+**Status:** Reviewed
 **Parent plan:** [01-ai-core](./01-ai-core.md)
 **Depends on:** 01-ai-core (core types, registries), [01-ai-core.add01](./01-ai-core.add01.md) (embedding types)
 **Depended on by:** Future provider plans, agent runtime configuration
 **Implements:** API client type / provider separation, provider registry refactor, fallback/custom provider mechanism, catalog restructuring
-**Reviews incorporated:** R1A (Reviewer A), R1B (Reviewer B) -- see disposition table at end
+**Reviews incorporated:** R1A (Reviewer A), R1B (Reviewer B), R2 -- see disposition tables at end
 
 ---
 
@@ -512,6 +512,8 @@ func ResolveEndpoint(cfg ProviderConfig, opts StreamOptions) ProviderEndpoint {
 }
 ```
 
+**Note on StreamOptions.Headers type change:** `StreamOptions.Headers` in `options.go` changes from `map[string]string` to `map[string][]string` for consistency with `ProviderConfig.Headers`, `ProviderEndpoint.Headers`, and `Model.Headers`. Additionally, `BuildBaseOptions` has its `apiKey` parameter removed since API key resolution now happens in `ResolveEndpoint`, not at options construction time.
+
 **Note on per-call BaseURL override:** Per-call base URL override is intentionally not supported. All URL overrides must go through `RegisterCustomProvider` to create a named provider with the desired base URL. This keeps the resolution path simple and auditable.
 
 ### 3.6 Model Struct Changes
@@ -996,22 +998,25 @@ The `EmbeddingModel` struct is updated with `BaseURL` removed (now resolved from
 
 ```go
 type EmbeddingModel struct {
-    ID              string          `json:"id"`
-    Name            string          `json:"name"`
-    API             string          `json:"api"`      // embedding client type, e.g. "openai-embeddings"
-    Provider        string          `json:"provider"` // provider name, e.g. "openai"
+    ID              string              `json:"id"`
+    Name            string              `json:"name"`
+    API             string              `json:"api"`      // embedding client type, e.g. "openai-embeddings"
+    Provider        string              `json:"provider"` // provider name, e.g. "openai"
     // BaseURL removed -- now comes from ProviderConfig via ProviderEndpoint
-    MaxInputTokens  int             `json:"maxInputTokens"`
-    DefaultDims     int             `json:"defaultDims"`
-    MaxDims         int             `json:"maxDims"`
-    MinDims         int             `json:"minDims"`
-    MaxBatchSize    int             `json:"maxBatchSize"`
-    SupportsDimCtrl bool            `json:"supportsDimCtrl"`
-    SupportsTaskType bool           `json:"supportsTaskType"`
-    Cost            EmbeddingCost   `json:"cost"`
-    PricingKnown    bool            `json:"pricingKnown"`
+    MaxInputTokens  int                 `json:"maxInputTokens"`
+    DefaultDims     int                 `json:"defaultDims"`
+    MaxDims         int                 `json:"maxDims"`
+    MinDims         int                 `json:"minDims"`
+    MaxBatchSize    int                 `json:"maxBatchSize"`
+    SupportsDimCtrl bool                `json:"supportsDimCtrl"`
+    SupportsTaskType bool               `json:"supportsTaskType"`
+    Headers         map[string][]string `json:"headers,omitempty"` // per-model headers, parity with Model.Headers
+    Cost            EmbeddingCost       `json:"cost"`
+    PricingKnown    bool                `json:"pricingKnown"`
 }
 ```
+
+**Note on deep copy:** `deepCopyEmbeddingModel` must be updated to handle the `Headers map[string][]string` field, deep-copying slice values the same way `deepCopyProviderConfig` handles `ProviderConfig.Headers` (Section 3.4).
 
 The embedding API client registry is specified in Section 3.2.1. The `Embed()` entry point follows the same resolution pattern:
 
@@ -1313,7 +1318,9 @@ Each embedding provider implementation must:
 
 ### 6.3 Embedding Catalog
 
-The embedding catalog (`models/embedding_catalog.json`) follows the same pattern. The `EmbeddingModel.Provider` field references a provider in the main catalog's `"providers"` section. The `EmbeddingModel.API` field is retained (since embedding models may use a different API client type than chat models from the same provider), but `baseUrl` is removed. When the provider has `EmbeddingAPIClientType` set, the embedding model's `API` field is derived from it at catalog load time:
+The embedding catalog (`models/embedding_catalog.json`) follows the same pattern. The `EmbeddingModel.Provider` field references a provider in the main catalog's `"providers"` section. The `EmbeddingModel.API` field is retained (since embedding models may use a different API client type than chat models from the same provider), but `baseUrl` is removed. When the provider has `EmbeddingAPIClientType` set, the embedding model's `API` field is derived from it at catalog load time.
+
+**Embedding catalog `api` field:** The `api` field in embedding catalog JSON entries is **optional** when the provider has `EmbeddingAPIClientType` set. If omitted, `API` is derived from `ProviderConfig.EmbeddingAPIClientType` at load time. If present, it **overrides** the provider-level `EmbeddingAPIClientType` for that specific model, allowing a single provider to serve embedding models using different protocols if needed.
 
 ```json
 [
@@ -1367,9 +1374,16 @@ internal/ai/
     models.go                   # CHANGED: Model struct (BaseURL removed, PricingKnown added),
                                 #           catalog loading (new format),
                                 #           single init() for providers + chat + embedding models
-    embedding.go                # CHANGED: EmbeddingModel (BaseURL removed, PricingKnown added)
+    options.go                  # CHANGED: StreamOptions.Headers changed from map[string]string
+                                #           to map[string][]string; BuildBaseOptions apiKey
+                                #           parameter removed (key resolution moves to ResolveEndpoint)
+    embedding.go                # CHANGED: EmbeddingModel (BaseURL removed, PricingKnown added,
+                                #           Headers changed to map[string][]string)
     embedding_api.go            # CHANGED: Embed() uses provider config for endpoint,
-                                #           resolves embedding client type from provider or model
+                                #           resolves embedding client type from provider or model.
+                                #           EmbedFunc type signature needs updating to include
+                                #           ProviderEndpoint, or removed if superseded by
+                                #           EmbeddingAPIClient interface
 
 internal/ai/provider/openai/
     client.go                   # CHANGED: renamed from provider.go, implements APIClient
@@ -1473,7 +1487,22 @@ Reviews incorporated: `docs/reviews/01-ai-core.add03-r1-review-a.md` (Reviewer A
 
 ---
 
-## 10. Acceptance Criteria
+## 10. Round 2 Review Disposition
+
+Review incorporated: `docs/reviews/01-ai-core.add03-r2-review.md` (R2 Reviewer). Review file deleted after incorporation.
+
+| ID | Sev | Title | Disposition | Section(s) Updated |
+|----|-----|-------|-------------|-------------------|
+| R2-1 | P1 | StreamOptions.Headers type not updated to map[string][]string | Incorporate. Added `options.go` to Section 7 as CHANGED. Explicitly noted `StreamOptions.Headers` changes from `map[string]string` to `map[string][]string`. Noted `BuildBaseOptions` apiKey parameter removal since key resolution moves to `ResolveEndpoint`. | 3.5, 7 |
+| R2-2 | P1 | EmbeddingModel.Headers field silently dropped | Incorporate. Retained `Headers map[string][]string` on `EmbeddingModel` for parity with `Model`. | 3.11 |
+| R2-3 | P2 | EmbedFunc type not addressed | Incorporate. Noted in Section 7 that `EmbedFunc` signature needs updating to include `ProviderEndpoint`, or marked for removal if superseded by `EmbeddingAPIClient`. | 7 |
+| R2-4 | P2 | deepCopyEmbeddingModel not updated for map[string][]string Headers | Incorporate. Noted that `deepCopyEmbeddingModel` must handle `map[string][]string` Headers field. | 3.11 |
+| R2-5 | P3 | Embed() passes empty StreamOptions for key resolution | Not Incorporate. Works correctly; acknowledged as minor smell, not worth changing now. | -- |
+| R2-6 | P3 | Embedding catalog api field redundancy | Incorporate. Clarified that `api` field in embedding catalog JSON is optional when provider has `EmbeddingAPIClientType` set; if present it overrides. | 6.3 |
+
+---
+
+## 11. Acceptance Criteria
 
 1. **AC1:** Multiple providers using the same API client type can be registered simultaneously (e.g., "openai" and "openrouter" both using "openai-completions"), and `Stream()` routes to the correct base URL based on `model.Provider`.
 2. **AC2:** API keys are resolved from provider-configured env vars without explicit key passing at registration time.
