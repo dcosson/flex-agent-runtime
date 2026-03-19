@@ -381,6 +381,29 @@ embedding_models = [
         "cohere-embeddings", "cohere", "https://api.cohere.com/v2",
         512, 1024, 1024, 1024, 96, False, True, 0.1,
     ),
+    # OpenRouter embeddings -- source: https://openrouter.ai/models (embedding models)
+    # OpenRouter uses OpenAI-compatible embeddings API at /api/v1/embeddings
+    # Pricing is pass-through from underlying providers (no markup)
+    embedding_model(
+        "openai/text-embedding-3-small", "Text Embedding 3 Small (OpenRouter)",
+        "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
+        8192, 1536, 1536, 256, 2048, True, False, 0.02,
+    ),
+    embedding_model(
+        "openai/text-embedding-3-large", "Text Embedding 3 Large (OpenRouter)",
+        "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
+        8192, 3072, 3072, 256, 2048, True, False, 0.13,
+    ),
+    embedding_model(
+        "qwen/qwen3-embedding-8b", "Qwen3 Embedding 8B",
+        "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
+        32000, 1024, 1024, 1024, 2048, False, False, 0.01,
+    ),
+    embedding_model(
+        "qwen/qwen3-embedding-4b", "Qwen3 Embedding 4B",
+        "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
+        32768, 1024, 1024, 1024, 2048, False, False, 0.02,
+    ),
 ]
 
 

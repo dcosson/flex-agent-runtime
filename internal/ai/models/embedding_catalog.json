@@ -117,5 +117,73 @@
     "provider": "cohere",
     "supportsDimCtrl": false,
     "supportsTaskType": true
+  },
+  {
+    "api": "openai-embeddings",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "cost": {
+      "perMTok": 0.02
+    },
+    "defaultDims": 1536,
+    "id": "openai/text-embedding-3-small",
+    "maxBatchSize": 2048,
+    "maxDims": 1536,
+    "maxInputTokens": 8192,
+    "minDims": 256,
+    "name": "Text Embedding 3 Small (OpenRouter)",
+    "provider": "openrouter",
+    "supportsDimCtrl": true,
+    "supportsTaskType": false
+  },
+  {
+    "api": "openai-embeddings",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "cost": {
+      "perMTok": 0.13
+    },
+    "defaultDims": 3072,
+    "id": "openai/text-embedding-3-large",
+    "maxBatchSize": 2048,
+    "maxDims": 3072,
+    "maxInputTokens": 8192,
+    "minDims": 256,
+    "name": "Text Embedding 3 Large (OpenRouter)",
+    "provider": "openrouter",
+    "supportsDimCtrl": true,
+    "supportsTaskType": false
+  },
+  {
+    "api": "openai-embeddings",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "cost": {
+      "perMTok": 0.01
+    },
+    "defaultDims": 1024,
+    "id": "qwen/qwen3-embedding-8b",
+    "maxBatchSize": 2048,
+    "maxDims": 1024,
+    "maxInputTokens": 32000,
+    "minDims": 1024,
+    "name": "Qwen3 Embedding 8B",
+    "provider": "openrouter",
+    "supportsDimCtrl": false,
+    "supportsTaskType": false
+  },
+  {
+    "api": "openai-embeddings",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "cost": {
+      "perMTok": 0.02
+    },
+    "defaultDims": 1024,
+    "id": "qwen/qwen3-embedding-4b",
+    "maxBatchSize": 2048,
+    "maxDims": 1024,
+    "maxInputTokens": 32768,
+    "minDims": 1024,
+    "name": "Qwen3 Embedding 4B",
+    "provider": "openrouter",
+    "supportsDimCtrl": false,
+    "supportsTaskType": false
   }
 ]
