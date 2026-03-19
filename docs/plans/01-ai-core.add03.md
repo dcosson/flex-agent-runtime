@@ -5,7 +5,7 @@
 **Depends on:** 01-ai-core (core types, registries), [01-ai-core.add01](./01-ai-core.add01.md) (embedding types)
 **Depended on by:** Future provider plans, agent runtime configuration
 **Implements:** API client type / provider separation, provider registry refactor, fallback/custom provider mechanism, catalog restructuring
-**Reviews incorporated:** R1A (Reviewer A), R1B (Reviewer B), R2, SR (Seam Review) -- see disposition tables at end
+**Reviews incorporated:** R1A (Reviewer A), R1B (Reviewer B), R2, SR (Seam Review), SR2 (Seam Review 2) -- see disposition tables at end
 
 ---
 
@@ -596,12 +596,13 @@ func StreamSimple(ctx context.Context, model Model, llmCtx Context, opts SimpleS
 
 The catalog changes from a flat `provider -> modelID -> Model` structure to a structure that includes provider-level configuration.
 
-**Migration note:** The catalog format change must be atomic: new `catalog.json` + new `init()` parsing code + updated `catalogFile` struct must land in the same commit. Tests that construct mock catalogs or test catalog loading must be updated in the same commit.
+**Migration note:** The catalog format change must be atomic: new `catalog.json` + new `init()` parsing code + updated `catalogFile` struct must land in the same commit. Tests that construct mock catalogs or test catalog loading must be updated in the same commit. The Python script (`scripts/update-model-catalog.py`) must also be updated as part of this migration: it currently outputs model data under `"providers"` and emits `api`/`baseUrl` per model entry. The script must be refactored to emit provider configs under `"providers"`, model data under `"models"`, and stop emitting `api`/`baseUrl` per model (these are derived from provider config at Go load time).
 
 **New `catalog.json` structure:**
 
 ```json
 {
+  "lastUpdated": "2026-03-19T00:00:00Z",
   "providers": {
     "anthropic": {
       "apiClientType": "anthropic-messages",
@@ -638,6 +639,11 @@ The catalog changes from a flat `provider -> modelID -> Model` structure to a st
         "HTTP-Referer": ["https://flex-agent-runtime"],
         "X-Title": ["flex-agent-runtime"]
       }
+    },
+    "cohere": {
+      "embeddingApiClientType": "cohere-embeddings",
+      "baseUrl": "https://api.cohere.com/v2",
+      "keyEnvVars": ["COHERE_API_KEY"]
     }
   },
   "models": {
@@ -689,6 +695,7 @@ The catalog changes from a flat `provider -> modelID -> Model` structure to a st
 ```
 
 Key changes:
+- Top-level `"lastUpdated"` ISO 8601 timestamp -- written by `scripts/update-model-catalog.py` on each run, used as a freshness check to skip re-fetching if < 1 hour old (`--force` overrides). Parsed but unused by Go code.
 - Top-level `"providers"` section with provider configs
 - Model entries no longer have `baseUrl` or `api` fields (derived from provider)
 - `api` field is set on `Model` struct at catalog load time from `ProviderConfig.APIClientType`
@@ -703,8 +710,9 @@ Both chat and embedding catalogs are loaded in the same `init()` function in `mo
 // models.go init()
 
 type catalogFile struct {
-    Providers map[string]ProviderConfig             `json:"providers"`
-    Models    map[string]map[string]Model           `json:"models"`
+    LastUpdated string                               `json:"lastUpdated"`
+    Providers   map[string]ProviderConfig             `json:"providers"`
+    Models      map[string]map[string]Model           `json:"models"`
 }
 
 func init() {
@@ -1270,6 +1278,7 @@ Each embedding provider implementation must:
 
 ```json
 {
+  "lastUpdated": "2026-03-19T00:00:00Z",
   "providers": {
     "anthropic": {
       "apiClientType": "anthropic-messages",
@@ -1306,6 +1315,11 @@ Each embedding provider implementation must:
         "HTTP-Referer": ["https://flex-agent-runtime"],
         "X-Title": ["flex-agent-runtime"]
       }
+    },
+    "cohere": {
+      "embeddingApiClientType": "cohere-embeddings",
+      "baseUrl": "https://api.cohere.com/v2",
+      "keyEnvVars": ["COHERE_API_KEY"]
     }
   },
   "models": {
@@ -1345,12 +1359,14 @@ Each embedding provider implementation must:
 
 ### 6.3 Embedding Catalog
 
-The embedding catalog (`models/embedding_catalog.json`) follows the same pattern. The `EmbeddingModel.Provider` field references a provider in the main catalog's `"providers"` section. The `EmbeddingModel.API` field is retained (since embedding models may use a different API client type than chat models from the same provider), but `baseUrl` is removed. When the provider has `EmbeddingAPIClientType` set, the embedding model's `API` field is derived from it at catalog load time.
+The embedding catalog (`models/embedding_catalog.json`) uses a `{"lastUpdated": "...", "models": [...]}` envelope matching the chat catalog pattern. The `EmbeddingModel.Provider` field references a provider in the main catalog's `"providers"` section. The `EmbeddingModel.API` field is retained (since embedding models may use a different API client type than chat models from the same provider), but `baseUrl` is removed. When the provider has `EmbeddingAPIClientType` set, the embedding model's `API` field is derived from it at catalog load time.
 
 **Embedding catalog `api` field:** The `api` field in embedding catalog JSON entries is **optional** when the provider has `EmbeddingAPIClientType` set. If omitted, `API` is derived from `ProviderConfig.EmbeddingAPIClientType` at load time. If present, it **overrides** the provider-level `EmbeddingAPIClientType` for that specific model, allowing a single provider to serve embedding models using different protocols if needed.
 
 ```json
-[
+{
+  "lastUpdated": "2026-03-19T00:00:00Z",
+  "models": [
     {
       "id": "text-embedding-3-small",
       "name": "Text Embedding 3 Small",
@@ -1365,10 +1381,43 @@ The embedding catalog (`models/embedding_catalog.json`) follows the same pattern
       "supportsTaskType": false,
       "cost": { "perMTok": 0.02 }
     }
-]
+  ]
+}
 ```
 
 Note: `baseUrl` removed from embedding models. The embedding `Embed()` entry point resolves base URL from `GetProviderConfig(model.Provider)`.
+
+**`loadEmbeddingCatalog` implementation:**
+
+```go
+// embedding_models.go
+
+type embeddingCatalogFile struct {
+    LastUpdated string           `json:"lastUpdated"`
+    Models      []EmbeddingModel `json:"models"`
+}
+
+// loadEmbeddingCatalog parses embedding_catalog.json and registers embedding models.
+// Called from the single init() in models.go after provider configs are registered.
+func loadEmbeddingCatalog(providers map[string]ProviderConfig) {
+    var catalog embeddingCatalogFile
+    if err := json.Unmarshal(embeddingCatalogJSON, &catalog); err != nil {
+        panic(fmt.Sprintf("failed to load embedding catalog: %v", err))
+    }
+    for _, m := range catalog.Models {
+        provCfg, ok := providers[m.Provider]
+        if !ok {
+            panic(fmt.Sprintf("embedding catalog: provider %q not in providers section", m.Provider))
+        }
+        // Derive API from provider's EmbeddingAPIClientType if model doesn't specify
+        if m.API == "" && provCfg.EmbeddingAPIClientType != "" {
+            m.API = provCfg.EmbeddingAPIClientType
+        }
+        m.PricingKnown = true // catalog models have known pricing
+        RegisterEmbeddingModel(m)
+    }
+}
+```
 
 ---
 
@@ -1409,7 +1458,11 @@ internal/ai/
     embedding_api.go            # CHANGED: Embed() uses provider config for endpoint,
                                 #           resolves embedding client type from provider or model.
                                 #           EmbedFunc updated to include ProviderEndpoint as
-                                #           second parameter. BatchEmbed passes endpoint through.
+                                #           second parameter.
+    embedding_batch.go          # CHANGED: BatchEmbed passes ProviderEndpoint through to
+                                #           EmbedFunc calls. Test files (embedding_batch_test.go,
+                                #           embedding_harness_test.go) must update all EmbedFunc
+                                #           lambdas to the new 4-parameter signature.
 
 internal/ai/provider/openai/
     client.go                   # CHANGED: renamed from provider.go, implements APIClient
@@ -1542,6 +1595,29 @@ Review incorporated: `docs/reviews/01-ai-core.add03-seam-review.md` (seam-review
 | SR-6 | P1 | ABBA deadlock in RegisterCustomProvider vs UnregisterProviderConfig | Incorporate. Fixed Section 3.9: `RegisterCustomProvider` now calls `RegisterProviderConfig` BEFORE storing the direct API key, ensuring consistent lock ordering (providerConfigMu -> directAPIKeysMu) across all code paths. | 3.9 |
 | SR-7 | P2 | Embedding catalog init() consolidation unclear | Incorporate. Clarified in Section 3.8 that `//go:embed` for `embedding_catalog.json` stays in `embedding_models.go`, but `init()` is removed. `models.go` `init()` calls a package-level `loadEmbeddingCatalog()` function from `embedding_models.go`. | 3.8 |
 | SR-8 | P2 | deepCopyModel not updated for map[string][]string Headers | Incorporate. Added note to Section 3.6 that `deepCopyModel` must be updated to handle `map[string][]string` Headers (clone inner slices), matching the pattern in `deepCopyProviderConfig`. | 3.6 |
+
+---
+
+## 10b. Seam Review 2 Disposition
+
+Review incorporated: `docs/plans/01-ai-core.add03-sr2-review.md` (SR2 agent). Review file deleted after incorporation.
+
+| ID | Sev | Title | Disposition | Section(s) Updated |
+|----|-----|-------|-------------|-------------------|
+| SR2-1 | P0 | Python script outputs wrong chat catalog structure | Incorporated. Added explicit migration note in Section 3.8 that the script must be refactored to emit provider configs under "providers" and model data under "models". | 3.8 |
+| SR2-2 | P1 | Script still emits api/baseUrl per model | Incorporated. Covered by SR2-1 migration note — script must stop emitting per-model api/baseUrl fields. | 3.8 |
+| SR2-3 | P1 | Script still emits baseUrl per embedding model | Incorporated. Covered by SR2-1 migration note — script must remove baseUrl from embedding entries. | 3.8 |
+| SR2-4 | P1 | Missing Cohere provider config | Incorporated. Added "cohere" provider config (embedding-only) to Sections 3.8 and 6.2 provider examples. | 3.8, 6.2 |
+| SR2-5 | P1 | loadEmbeddingCatalog implementation not specified | Incorporated. Added full implementation with embeddingCatalogFile struct, provider validation, and API field derivation in Section 6.3. | 6.3 |
+| SR2-6 | P2 | catalogFile.Providers Name field asymmetry | Not Incorporated. Informational; cfg.Name is set from map key in existing code comment. | -- |
+| SR2-7 | P2 | UnregisterProviderConfig nested lock ordering | Not Incorporated. Lock ordering already documented and fixed in SR-6 (Round 1 Seam Review). | -- |
+| SR2-8 | P2 | Embed() empty StreamOptions blocks per-call overrides | Not Incorporated. Already dispositioned as out-of-scope in R2-5. | -- |
+| SR2-9 | P2 | sort_keys=True reorders JSON keys | Not Incorporated. Informational, Go handles any key order. | -- |
+| SR2-10 | P2 | Embedding baseUrl dead data | Not Incorporated. Duplicate of SR2-3. | -- |
+| SR2-11 | P2 | validate_catalog() checks old structure | Incorporated. Covered by SR2-1 migration note — script validation must update alongside format change. | 3.8 |
+| SR2-12 | P3 | _catalog_is_fresh() forward-compatible | Not Incorporated. No action needed (confirmed correct). | -- |
+| SR2-13 | P3 | lastUpdated unused by Go code | Incorporated. Added note to Section 3.8 key changes that lastUpdated is parsed but unused by Go. | 3.8 |
+| SR2-14 | P2 | embedding_batch.go not listed as CHANGED | Incorporated. Added embedding_batch.go to Section 7 file listing with test file update note. | 7 |
 
 ---
 
