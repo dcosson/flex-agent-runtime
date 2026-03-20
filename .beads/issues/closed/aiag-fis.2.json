@@ -2,7 +2,7 @@
   "id": "aiag-fis.2",
   "title": "Fleet Management: observability metrics instrumentation (Plan 20 gap 1)",
   "description": "Implement fleet observability metrics from Plan 20 §15.1 — fleet_* gauges, counters, and histograms. The fleet control loop and routing code exists at internal/sandbox/control/fleet/ but metrics are not instrumented.\n\nKey deliverables:\n- Fleet pool size, warm pool, healthy instance gauges\n- Provisioning/destruction counters and latency histograms\n- Routing decision metrics\n- Unit tests for metrics emission\n\nReferences:\n- Plan: docs/plans/20-fleet-management.md §15.1",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-fis",
@@ -19,6 +19,16 @@
     "plan-doc=20-fleet-management"
   ],
   "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "P3 fixes verified (commits 27d5b60, 2309ee5). All 3 findings addressed correctly: (1) terminationReasonLabel default→unknown with regression test, (2) provision duration on error paths with test, (3) custom histogram buckets with verification test. All tests pass. Approved for closure.",
+      "created_at": "2026-03-20T12:13:59.886493-07:00"
+    }
+  ],
   "created_at": "2026-03-20T11:03:48.124747-07:00",
-  "updated_at": "2026-03-20T11:59:54.698945-07:00"
+  "updated_at": "2026-03-20T12:14:15.396912-07:00",
+  "closed_at": "2026-03-20T12:14:15.396912-07:00",
+  "close_reason": "Reviewed and approved, P3 fixes incorporated"
 }

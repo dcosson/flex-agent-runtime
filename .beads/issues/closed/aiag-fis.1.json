@@ -1,0 +1,40 @@
+{
+  "id": "aiag-fis.1",
+  "title": "External Testing: stubserver Docker compose + fault injection (Plan 17 §12)",
+  "description": "Implement Plan 17 Section 12 — the standalone stubserver binary with Docker compose integration and fault injection test variants. Sections 1-11 are complete (cmd/stubserver/, internal/ai/testutil/stubserver/). This is the remaining gap from Partial signoff.\n\nKey deliverables:\n- Docker compose setup for stubserver\n- Fault injection test variants\n- Integration with existing stubserver code\n\nReferences:\n- Plan: docs/plans/17-external-testing.md §12",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-fis",
+  "dependencies": [
+    {
+      "id": "aiag-fis",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=17-external-testing"
+  ],
+  "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "All §12 deliverables already implemented: Docker infrastructure (Dockerfile.stubserver, docker-compose.e2e.yaml, cmd/stubserver/main.go), fixtures (8 files in testdata/fixtures/), stubserver-backed Tier 1 tests (stubserver_test.go with multi-turn, auth, simple response), fault injection variants (F1-F4, F6, retry sequence), embedding stubserver tests (3 providers × 6 fault modes), and JSON fault server (stubserver_json.go). All 37 tier1 tests pass.",
+      "created_at": "2026-03-20T12:03:35.064565-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — approved. 0 findings. All §12 deliverables verified as already implemented. See docs/reviews/aiag-fis.1-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-20T12:13:56.534869-07:00"
+    }
+  ],
+  "created_at": "2026-03-20T11:03:40.491707-07:00",
+  "updated_at": "2026-03-20T12:13:56.536318-07:00",
+  "closed_at": "2026-03-20T12:03:35.32321-07:00",
+  "close_reason": "Closed"
+}

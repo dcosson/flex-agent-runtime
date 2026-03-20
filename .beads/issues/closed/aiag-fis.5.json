@@ -2,7 +2,7 @@
   "id": "aiag-fis.5",
   "title": "TLA+ Agent Spec: add completion signoff (Plan 21b)",
   "description": "Add completion signoff to 21-agent-tlaplus-spec.md. The TLA+ specs exist at specs/agent_loop.tla and specs/agent_loop_service.tla but the plan doc has no signoff section. Verify specs match the plan, run TLC model checker, and add signoff.\n\nReferences:\n- Plan: docs/plans/21-agent-tlaplus-spec.md\n- Code: specs/agent_loop.tla, specs/agent_loop_service.tla",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-fis",
@@ -19,6 +19,16 @@
     "plan-doc=21-agent-tlaplus-spec"
   ],
   "assignee": "reviewer-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Completion signoff added (c3ffc9a). All 3 layers verified: Layer 1 single-session model covers all 10 safety + 4 liveness properties, Layer 2 service model covers Close() drain + capacity + wg consistency, Layer 3 fork independence by structural proof. TLC configs exist and TTrace files confirm prior runs.",
+      "created_at": "2026-03-20T12:03:31.087279-07:00"
+    }
+  ],
   "created_at": "2026-03-20T11:04:00.979884-07:00",
-  "updated_at": "2026-03-20T11:59:54.719478-07:00"
+  "updated_at": "2026-03-20T12:03:36.594001-07:00",
+  "closed_at": "2026-03-20T12:03:36.594001-07:00",
+  "close_reason": "Closed"
 }
