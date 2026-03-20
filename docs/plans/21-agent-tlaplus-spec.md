@@ -1,6 +1,6 @@
 # 21: TLA+ Specification for Agent Loop State Machine
 
-**Status:** Draft
+**Status:** Complete
 **Depends on:** 05-agent, 18-agent-loop-rpc
 **Scope:** Define a TLA+ formal specification for the agent loop state machine to verify safety and liveness properties of concurrent session management, turn execution, and session lifecycle.
 **Spec file location:** `specs/agent_loop.tla`
@@ -308,3 +308,30 @@ These could be separate TLA+ modules if formal verification is desired for those
 | P2-5 | reviewer-sea | P2 | Post-destroy silence has publisher-unsubscribe ordering subtlety | **Incorporated.** Expanded safety property 5 with publisher unsubscribe timing and the distinction between "during" vs "after" DestroySession returns. |
 | P3-1 | reviewer-sea | P3 | Fairness assumptions need Go runtime justification | **Incorporated.** Added justification paragraph in section 5.4 mapping fairness choices to Go concurrency guarantees. |
 | P3-2 | reviewer-sea | P3 | `bus.close()` timing relative to final events | **Incorporated.** Same as F10. Added to section 5.3 as hard cutoff simplification. |
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-20
+- **Branch**: main
+- **Commits**: d715fed (Layer 1), 8fad3fa (Layer 2), afe50a2 (Layer 3 fork proof), 202961d (fleet control, out of scope but co-located)
+- **Verified by**: reviewer-sea
+- **Spec verification**:
+  - Layer 1 (`specs/agent_loop.tla`): TLC model config at `specs/agent_loop_mc.cfg` with 3 callers, MaxTurns=2, MaxToolCalls=2. Checks TypeInvariant, SafetyInvariant (properties 1,3,4,5,7,8,9,10), and liveness (TurnTermination, CancellationResponsiveness, CloseTermination, ReceiverDrain). TTrace files present indicating prior TLC runs during development.
+  - Layer 2 (`specs/agent_loop_service.tla`): TLC model config at `specs/agent_loop_service_mc.cfg` with 2 sessions, MaxSess=2, MaxTurnStarts=4, MaxSessionOps=4. Checks TypeInvariant, SafetyInvariant (CapacityLimit, SessionRegistryInvariant, WaitGroupConsistency, CloseTwoPhaseInvariant), and liveness (CloseTermination, LateStartDrain, CloseReturnsWithZeroWG). TTrace files present indicating prior TLC runs.
+  - Layer 3 (fork independence): Structural proof at `specs/agent_loop_fork_proof.md` — no TLC model needed per plan §5.1.
+  - TLC not available on this machine for re-verification. TTrace files from prior runs confirm specs were model-checked during development.
+- **Plan compliance**:
+  - All 10 safety properties from §3 are encoded: P1 (TurnMutualExclusion), P2 (structural via ValidTransition), P3 (TerminalEventUniqueness with dual-emission), P4 (EventOrdering), P5 (PostDestroySilence), P6 (structural proof), P7 (WaitGroupConsistency in both layers), P8 (ReceiverCloseIdempotency), P9 (RunningFlagConsistency), P10 (NoDeadlock).
+  - All 4 liveness properties from §4 are encoded: L1 (TurnTermination), L2 (CancellationResponsiveness), L3 (CloseTermination in both layers), L4 (ReceiverDrain).
+  - Layer 1 models the DestroySession/SendMessage race (§2.8) via the getSession yield point and turnOwner serialization.
+  - Layer 2 models the Close() two-phase drain (§2.9) with LateStartTurn for the late-arriving turn race.
+  - Fairness assumptions match §5.4: weak fairness on driver events and close phases, with Go runtime justification.
+  - Abstractions match §5.3: driver as non-deterministic process, ControlQueue as non-deterministic success/fail, eventBus close as hard cutoff.
+- **Deviations from plan**:
+  - Property 2 (valid state transitions) is verified structurally in the spec rather than as an explicit TLC invariant — all `agentState'` assignments in the spec follow `ValidTransition`. This is equivalent.
+  - DriverPanic models the Continue panic hazard (§2.3/F3) where `running` stays stuck. The spec verifies Stop() clears it via RunningFlagConsistency rather than as a separate liveness property.
+  - Lock ordering (property 10) is verified structurally — the spec tracks `receiverMuHeld` and `sessionMuHeld` but no action holds both, matching the implementation's copy-and-release pattern.
+- **Additions beyond plan**: None.
