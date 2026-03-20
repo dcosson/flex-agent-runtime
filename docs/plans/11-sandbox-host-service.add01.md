@@ -1502,15 +1502,15 @@ Seam review completed with 5 findings (1 P1, 2 P2, 2 P3). All 5 incorporated int
 
 | Field | Value |
 |-------|-------|
-| **Status** | Partially Complete (Local + Native only; remote providers deferred to Batch 6) |
-| **Date** | 2026-03-15 |
+| **Status** | Complete |
+| **Date** | 2026-03-20 |
 | **Branch** | main |
-| **Commit** | c20ced1 |
-| **Verified by** | claude-opus-4-6 |
+| **Commit** | 75412a5 |
+| **Verified by** | reviewer-sea |
 
 ### Scope of Verification
 
-Only `LocalEnvironment` and `NativeSandboxEnvironment` implementations were verified, per instruction. Remote provider implementations (E2B, Daytona, Fly.io -- plan sections 5.3, 5.4, 5.5) are deferred to Batch 6.
+All five `ExecutionEnvironment` implementations verified: `LocalEnvironment`, `NativeSandboxEnvironment`, `E2BSandboxEnvironment`, `DaytonaSandboxEnvironment`, `FlySandboxEnvironment`. All 7 environment packages pass tests (`go test ./internal/sandbox/environment/...`).
 
 ### Implementation Checklist
 
@@ -1519,35 +1519,38 @@ Only `LocalEnvironment` and `NativeSandboxEnvironment` implementations were veri
 | §3.1 | `ExecutionEnvironment` interface | DONE | All 9 methods match plan in `environment.go` |
 | §3.2 | Shared types (`SessionConfig`, `SnapshotInfo`, `SessionState`, type aliases) | DONE | Match plan in `types.go` |
 | §3.3 | Error sentinels (`ErrCapabilityNotSupported`, `ErrNotActive`, `ErrUnavailable`, `ErrSessionLimitReached`) | DONE | Match plan in `errors.go`; extra `ErrSessionNotFound` exists |
-| §3.4 | Concurrency contract | DONE | `atomic.Bool` for Local, `atomic.Bool` + server-delegated state for Native |
+| §3.4 | Concurrency contract | DONE | `atomic.Bool` for Local, `atomic.Bool` + server-delegated state for Native, `sync.RWMutex` with write-lock lifecycle for E2B/Daytona/Fly |
 | §4 | Capabilities struct + 5 constants | DONE | Match plan in `capabilities.go` |
 | §5.1 | `LocalEnvironment` | DONE | All methods implemented correctly |
 | §5.2 | `NativeSandboxEnvironment` | DONE | All RPC mappings, streaming, state query, snapshot/rollback |
-| §5.3 | `E2BSandboxEnvironment` | DEFERRED | Batch 6 |
-| §5.4 | `DaytonaSandboxEnvironment` | DEFERRED | Batch 6 |
-| §5.5 | `FlySandboxEnvironment` | DEFERRED | Batch 6 |
+| §5.3 | `E2BSandboxEnvironment` | DONE | REST API provider with mock HTTP tests. Reviewed aiag-0dou.2 |
+| §5.4 | `DaytonaSandboxEnvironment` | DONE | REST API provider with mock HTTP tests. Reviewed aiag-0dou.3 |
+| §5.5 | `FlySandboxEnvironment` | DONE | Machines API + SSH execution with pluggable executor. Reviewed aiag-0dou.4 |
 | §7.3 | Remove `ToolBackend`, `SandboxBackend`, `SandboxToolClient` | DONE | All removed from codebase |
-| §7.4 | Agent loop migration (Phase 4) | NOT STARTED | Agent loop does not yet reference `ExecutionEnvironment` |
-| §7.5 | `IsFileOp()` helper in `classify.go` | NOT IMPLEMENTED | Only needed by remote environments (Batch 6) |
-| §9.4 | Implementation guide / architecture doc updates | NOT STARTED | Planned for Phase 4 (agent loop migration) |
+| §7.4 | Agent loop migration (Phase 4) | DONE | `EnvironmentTools` callback in `DriverConfig`, bridge in `internal/tools/envtools`. Reviewed aiag-0dou.1 |
+| §7.5 | `IsFileOp()` helper in `classify.go` | DONE | Routes read_file/write_file/edit_file/grep/glob. Reviewed aiag-0dou.1 |
+| §9.4 | Implementation guide / architecture doc updates | NOT STARTED | Deferred -- no bead created yet |
+| -- | Shared `restapi.Client` extraction | DONE | `internal/sandbox/environment/restapi/` eliminates doJSON/cloneLabels duplication. Reviewed aiag-0dou.6 |
 
 ### Test Harness Verification
 
 | Test ID | Plan Item | Status | Notes |
 |---------|-----------|--------|-------|
-| P1 | Interface completeness | PASS | Local + Native |
-| P2 | State machine consistency | PASS | Local + Native |
-| P3 | Tool execution determinism | PASS | Local + Native |
-| P4 | Capabilities are static | PASS | Local + Native |
+| P1 | Interface completeness | PASS | All 5 environments |
+| P2 | State machine consistency | PASS | All 5 environments |
+| P3 | Tool execution determinism | PASS | All 5 environments |
+| P4 | Capabilities are static | PASS | All 5 environments |
 | P5 | NativeSandbox parity | PASS | Compared via mock service |
-| F1 | RPC failure handling | PASS | Stream open + recv failure (Native only; remote deferred) |
+| F1 | RPC failure handling | PASS | Stream open + recv failure (Native) |
 | F2 | Create failure recovery | PASS | |
 | F3 | Context cancellation | PASS | |
 | F4 | Response type mapping errors | PASS | |
-| F5 | SSH failure (Fly) | DEFERRED | Batch 6 |
-| O1-O3 | Remote wire format goldens | DEFERRED | Batch 6 |
+| F5 | SSH failure (Fly) | PASS | 4 error types + context timeout. Reviewed aiag-0dou.5 |
+| O1 | E2B wire format golden | PASS | Create, command, read, pause/resume payloads verified. Reviewed aiag-0dou.5 |
+| O2 | Daytona wire format golden | PASS | Create, command, read payloads verified. Reviewed aiag-0dou.5 |
+| O3 | Fly wire format golden | PASS | Machine create, suspend/start, destroy sequence verified. Reviewed aiag-0dou.5 |
 | O4 | Native type mapping golden | PASS | |
-| C1 | Compliance suite | PASS | Local + Native |
+| C1 | Compliance suite | PASS | All 5 environments |
 | B1 | Environment selection latency | PASS | |
 | B2 | Native adapter overhead | PASS | |
 | B3 | Capability check latency | PASS | |
@@ -1556,29 +1559,41 @@ Only `LocalEnvironment` and `NativeSandboxEnvironment` implementations were veri
 | ST2 | Concurrent tool execution (100 calls) | PASS | |
 | ST3 | Rapid environment switching (20 envs) | PASS | |
 | ST4 | Session limit enforcement | PASS | |
-| SEC1 | SessionID validation | PASS | Local + Native |
+| SEC1 | API key handling | PASS | All 3 remote providers: Bearer token in header, not in URL/error. Reviewed aiag-0dou.5 |
 | SEC2 | Path traversal sanitization | PASS | Local |
-| SEC3-4 | API key / SSH key handling | DEFERRED | Batch 6 |
+| SEC3 | Tool parameter sanitization | PASS | Fly shell quoting + E2B/Daytona command pass-through. Reviewed aiag-0dou.5 |
+| SEC4 | SSH key handling | PASS | No key material leak, pinned host key enforced. Reviewed aiag-0dou.5 |
 | E2E1 | LocalEnvironment full cycle | PASS | Covered by compliance + unit tests |
 | E2E2 | NativeSandbox full cycle | PASS | Covered by compliance + unit tests |
-| E2E3-E2E5 | Remote environment E2E | DEFERRED | Batch 6 |
+| E2E3 | E2B full cycle with mock | PASS | Create, read, bash+progress, snapshot rejection, pause, resume, destroy. Reviewed aiag-0dou.5 |
+| E2E4 | Environment fallback behavior | PASS | Destroy+recreate path with call counting. Reviewed aiag-0dou.5 |
+| E2E5 | Environment transparency | PASS | All 5 providers exercise read_file + bash with consistent ToolResponse. Reviewed aiag-0dou.5 |
 
 ### Exit Criteria Status
 
 | Criterion | Status | Measurement |
 |-----------|--------|-------------|
 | Property tests pass (100+ iterations) | PASS | P1-P5 all pass |
-| Fault injection -- no panics, no goroutine leaks | PASS | F1-F4 pass |
-| Golden tests match wire formats | PARTIAL | O4 passes; O1-O3 deferred (remote) |
-| Compliance suite passes for all implementations | PARTIAL | Local + Native pass; remote deferred |
+| Fault injection -- no panics, no goroutine leaks | PASS | F1-F5 pass |
+| Golden tests match wire formats | PASS | O1-O4 all pass |
+| Compliance suite passes for all implementations | PASS | All 5 environments pass |
 | Benchmark < 1us overhead for Native adapter | PASS | B2 confirms |
 | Stress tests pass with -race | PASS | ST1-ST4 |
-| E2E full lifecycle | PARTIAL | E2E1-E2E2 pass; E2E3-E2E5 deferred |
+| E2E full lifecycle | PASS | E2E1-E2E5 all pass |
 | NativeSandbox parity with direct SandboxClient | PASS | P5 + unit tests |
-| 85%+ coverage on environment packages | PASS | 95.6% (Local: 95.2%, Native: 95.7%) |
+| 85%+ coverage on environment packages | PASS | 95.6%+ across all packages |
 
 ### Gaps Surfaced
 
-1. **Agent loop migration (Phase 4)** -- `internal/agent` does not yet use `ExecutionEnvironment`. The `ToolBackend` and related interfaces have been removed, but the agent loop wiring to the new interface is not yet done. This is expected per the plan's phased implementation sequence.
-2. **`IsFileOp()` helper** -- Not implemented. Only needed by remote environments (E2B/Daytona/Fly), which are deferred to Batch 6.
-3. **Implementation guide / architecture doc updates** -- Plan §9.4 calls for updates during Phase 4. Not yet done since Phase 4 has not started.
+1. **Implementation guide / architecture doc updates** -- Plan §9.4 calls for documentation updates. No bead created yet.
+
+### Review Trail
+
+| Bead | Review | Verdict | Key Findings |
+|------|--------|---------|--------------|
+| aiag-0dou.1 | R1 reviewer-sea | Approved with revisions | P2: IsFileOp name mismatch (fixed e52074c) |
+| aiag-0dou.2 | R1 reviewer-sea | Approved with revisions | P1: TOCTOU race (fixed 4ce3a70), P2: missing test (fixed) |
+| aiag-0dou.3 | R1 reviewer-sea | Approved with revisions | P2: doJSON duplication (fixed aiag-0dou.6) |
+| aiag-0dou.4 | R1 reviewer-sea | Not approved → fixed | P1: heredoc injection (fixed e09340e), P1: edit_file non-functional (fixed e09340e), P2: volume leak (fixed e09340e) |
+| aiag-0dou.5 | R1 reviewer-sea | Approved | 3 P3s only |
+| aiag-0dou.6 | R1 reviewer-sea | Approved | 0 findings |
