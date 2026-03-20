@@ -1457,7 +1457,7 @@ All metrics use the `fleet_` prefix and are exposed via the standard metrics reg
 - `fleet_destroy_sandbox_total{result}` -- DestroySandbox calls by result (success, error)
 - `fleet_provisions_total{result}` -- LaunchInstance calls by result (success, timeout, error)
 - `fleet_terminations_total{reason}` -- TerminateInstance calls by reason (scale_down, unhealthy, drain_timeout, shutdown)
-- `fleet_health_checks_total{result}` -- HealthCheck calls by result (healthy, degraded, unhealthy, error)
+- `fleet_health_checks_total{result}` -- HealthCheck calls by result (healthy, error)
 - `fleet_session_reconciliations_total{direction}` -- session count corrections by direction (up, down)
 - `fleet_drain_recoveries_total` -- instances recovered from Draining to Ready
 - `fleet_claim_slot_rollbacks_total` -- claim-slot rollbacks due to RPC failure
