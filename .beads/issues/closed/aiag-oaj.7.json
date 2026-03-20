@@ -2,7 +2,7 @@
   "id": "aiag-oaj.7",
   "title": "Draft 08-agent-tools-e2e",
   "description": "Draft plan doc for agent + local tools E2E tests.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-oaj",
@@ -45,5 +45,7 @@
     }
   ],
   "created_at": "2026-03-12T14:19:54.778065-07:00",
-  "updated_at": "2026-03-12T14:37:26.4197-07:00"
+  "updated_at": "2026-03-20T10:18:10.093603-07:00",
+  "closed_at": "2026-03-20T10:18:10.093602-07:00",
+  "close_reason": "Audit: all plan docs exist, reviewed, approved, signoff complete"
 }

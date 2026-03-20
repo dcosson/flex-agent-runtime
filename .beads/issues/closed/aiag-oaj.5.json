@@ -2,7 +2,7 @@
   "id": "aiag-oaj.5",
   "title": "Draft 06-built-in-tools",
   "description": "Draft plan doc + test harness for built-in tools (read, write, edit, bash, grep, glob, git). ToolBackend interface.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-oaj",
@@ -45,5 +45,7 @@
     }
   ],
   "created_at": "2026-03-12T14:19:54.712041-07:00",
-  "updated_at": "2026-03-12T14:29:03.463259-07:00"
+  "updated_at": "2026-03-20T10:18:10.084156-07:00",
+  "closed_at": "2026-03-20T10:18:10.084156-07:00",
+  "close_reason": "Audit: all plan docs exist, reviewed, approved, signoff complete"
 }
