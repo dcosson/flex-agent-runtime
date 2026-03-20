@@ -106,17 +106,25 @@ type AgentTool struct {
 ```
 
 **Critical contract:**
-- The agent loop treats tools as pure interface calls. It does not know or care whether a `LocalBackend` or `SandboxBackend` handles execution — that is hidden behind tool construction by the factories.
-- Both `NewLocalTools` and `NewSandboxTools` (plan 06 §3.2) must return tools with the same names, schemas, and behavioral semantics. Only execution placement differs.
+- The agent loop treats tools as pure interface calls. It does not know or care whether tools execute locally or are dispatched through an `ExecutionEnvironment` — that is hidden behind tool construction by the factories.
+- Both `NewLocalTools` and environment-backed tools (via `envtools.ToolsFunc`) must produce tools with the same names, schemas, and behavioral semantics. Only execution placement differs.
 
-### 1.6 ToolBackend (plan 06)
+### 1.6 ExecutionEnvironment (plan 11.add01)
 
 ```go
-// Package: internal/tools
-// Plan: 06-built-in-tools §3.1
+// Package: internal/sandbox/environment
+// Plan: 11-sandbox-host-service.add01
 
-type ToolBackend interface {
+type ExecutionEnvironment interface {
+    Create(ctx context.Context, config SessionConfig) error
     ExecuteTool(ctx context.Context, req ToolRequest, onProgress func(ToolProgress)) (*ToolResponse, error)
+    Pause(ctx context.Context) error
+    Resume(ctx context.Context) error
+    Destroy(ctx context.Context) error
+    State() SessionState
+    Capabilities() Capabilities
+    CreateSnapshot(ctx context.Context, name string) (*SnapshotInfo, error)
+    Rollback(ctx context.Context, snapshotID string) error
 }
 
 type ToolRequest struct {
@@ -124,13 +132,11 @@ type ToolRequest struct {
     ToolName   string
     ToolCallID string
     Params     map[string]any
-    Resources  *ResourceSpec
 }
 
 type ToolResponse struct {
-    Content    []ai.ContentBlock
-    SnapshotID string  // empty for LocalBackend
-    ExitCode   *int
+    Content  []ai.ContentBlock
+    ExitCode *int
 }
 
 type ToolProgress struct {
@@ -139,13 +145,14 @@ type ToolProgress struct {
 }
 ```
 
-**Implementers:** `LocalBackend` (in-process), `SandboxBackend` (RPC client to sandbox host).
+**Implementers:** `NativeSandboxEnvironment` (RPC to ZFS+gVisor sandbox host), `E2BSandboxEnvironment` (E2B REST API), `DaytonaSandboxEnvironment` (Daytona REST API), `FlySandboxEnvironment` (Fly Machines API + SSH).
 
 **Critical contract:**
-- `onProgress` is used for Tier 2 tools (bash) to stream incremental output. Tier 1 tools are fast enough to skip progress callbacks. **`SandboxBackend` must accept and propagate `onProgress`** — it uses server-streaming RPC (`ExecuteToolStream`) to receive progress chunks from the sandbox host and forwards them to the callback. Each streamed message is either a progress chunk or the final response.
-- `SandboxBackend` propagates `ToolCallID` in both request and response for end-to-end traceability. The server echoes it back.
-- **`SnapshotID` propagation:** The full chain is `SandboxHostService.ExecuteToolResponse.SnapshotID` → RPC stream → `SandboxBackend` → `ToolResponse.SnapshotID`. Per-tool snapshots are opt-in via `config.PerToolSnapshots` on the sandbox host. When enabled, snapshots are named `tool-{toolCallID}-{timestamp}`. `SnapshotID` is empty when per-tool snapshots are disabled (the default) — per-turn snapshots via `TurnComplete` are the primary mechanism.
-- Tier classification is centralized via a `ClassifyTool` function shared across all backends. Do not implement independent classifiers.
+- `ExecuteTool` routes requests via `IsFileOp(toolName)` — file operations (`read_file`, `write_file`, `edit_file`, `grep`, `glob`) use filesystem endpoints; command operations use command execution endpoints.
+- `onProgress` is used for streaming incremental output (e.g., bash command output). Providers that support streaming propagate progress; others may deliver all output in the final response.
+- `Capabilities()` declares what each provider supports (pause/resume, snapshots, rollback). Unsupported operations return `ErrCapabilityNotSupported`.
+- All REST API providers share `internal/sandbox/environment/restapi.Client` for HTTP/JSON operations, avoiding code duplication.
+- The agent loop connects to `ExecutionEnvironment` via `DriverConfig.EnvironmentTools` callback and the `internal/tools/envtools` bridge package, resolving the circular import between `agent`, `tools`, and `environment`.
 
 ### 1.7 RuntimeController (architecture doc)
 
@@ -411,17 +418,23 @@ Run():
 10. Return ContainerResult
 ```
 
-### 2.5 RPC SandboxBackend Lifecycle
+### 2.5 ExecutionEnvironment Session Lifecycle
 
 ```
-1. CreateSession succeeds → sessionID returned
-2. Construct SandboxBackend(client, sessionID)
-3. Pass SandboxBackend to agent loop as ToolBackend
-4. Each ExecuteTool is an independent unary RPC (no persistent stream)
-5. On PauseSession: discard SandboxBackend
-6. On ResumeSession: create NEW SandboxBackend with same sessionID
-7. On DestroySession: discard SandboxBackend (no cleanup RPC needed)
+1. Select provider → construct ExecutionEnvironment (e.g., NewE2BSandboxEnvironment, NewDaytonaSandboxEnvironment)
+2. env.Create(ctx, SessionConfig{...}) → session active
+3. Wire tools: envtools.ToolsFunc(env) → pass to DriverConfig.EnvironmentTools
+4. Each env.ExecuteTool dispatches via provider API (REST, RPC+SSH, etc.)
+5. env.Pause(ctx) → session paused (if provider supports it; otherwise ErrCapabilityNotSupported)
+6. env.Resume(ctx) → session active again
+7. env.Destroy(ctx) → session terminated, resources freed
 ```
+
+Provider-specific notes:
+- **Native**: RPC to sandbox host; supports full lifecycle including ZFS snapshots
+- **E2B**: REST API; supports pause/resume and snapshots
+- **Daytona**: REST API; no pause/resume or snapshots
+- **Fly**: REST API + SSH; stop/start for pause/resume, machine images for snapshots
 
 ---
 
@@ -532,11 +545,11 @@ if result.Status == StatusExited && result.ExitCode == 137 {
 
 The seam review caught three cases where connected components had interface definitions that had drifted out of sync:
 
-1. **ToolBackend signature drift (P1):** Plan 06 defined `ToolBackend.ExecuteTool` with an `onProgress` callback, but plan 13's `SandboxBackend` implementation omitted it. The `SandboxBackend` must accept `onProgress` and use server-streaming RPC (`ExecuteToolStream`) to forward progress from the sandbox host.
+1. **ToolBackend signature drift (P1):** *(Historical — ToolBackend replaced by ExecutionEnvironment in plan 11.add01.)* Plan 06 defined `ToolBackend.ExecuteTool` with an `onProgress` callback, but plan 13's `SandboxBackend` implementation omitted it. The `ExecutionEnvironment` interface includes `onProgress` in `ExecuteTool`, resolving this drift.
 
-2. **Snapshot metadata gap (P1):** Plan 06's `ToolResponse` includes `SnapshotID`, but plan 11's `ExecuteToolResponse` did not. The `SnapshotID` must flow through the entire chain: `SandboxHostService` → RPC response → `SandboxBackend` → `ToolResponse`. Per-tool snapshots are opt-in (`config.PerToolSnapshots`); when disabled, `SnapshotID` is empty.
+2. **Snapshot metadata gap (P1):** *(Historical — resolved by ExecutionEnvironment.)* Plan 06's `ToolResponse` included `SnapshotID`, but plan 11's `ExecuteToolResponse` did not. In the `ExecutionEnvironment` model, snapshots are handled via the dedicated `CreateSnapshot` method rather than being embedded in tool responses. Per-tool snapshots are opt-in on providers that support them.
 
-3. **RPC idempotency mismatch (P2):** Plan 13 claimed `CreateSession`, `PauseSession`, and `ResumeSession` were "naturally idempotent", but plan 11's state machine returns errors for invalid state transitions (e.g., pausing an already-paused session returns `failed_precondition`). These methods are **state-guarded**, not naturally idempotent. Callers must handle state errors rather than blindly retrying.
+3. **RPC idempotency mismatch (P2):** Plan 13 claimed `CreateSession`, `PauseSession`, and `ResumeSession` were "naturally idempotent", but plan 11's state machine returns errors for invalid state transitions (e.g., pausing an already-paused session returns `failed_precondition`). These methods are **state-guarded**, not naturally idempotent. Callers must handle state errors rather than blindly retrying. The `ExecutionEnvironment` interface preserves this behavior — `Pause`/`Resume` return `ErrCapabilityNotSupported` or state errors as appropriate.
 
 **How to avoid:** When implementing one side of a seam, always read the connected plan's interface definition. Verify method signatures, parameter lists, response fields, and error semantics match exactly. The Seam Reference Table (§5) maps every connected pair.
 
@@ -550,16 +563,20 @@ Connected component pairs with the interface at each boundary. Reference these w
 |-------------|-------------|-----------|----------|----------|
 | `internal/ai` (Provider) | `internal/agent` (NativeDriver) | `ai.StreamSimple/Stream → EventStream` | 01 §5.1 | 05 §5.1 |
 | `internal/ai` (types) | `internal/tools` (tool schemas) | `ai.Tool`, `ai.ContentBlock` | 01 §3.5 | 06 §3.1 |
-| `internal/agent` (AgentTool) | `internal/tools` (factories) | `[]agent.AgentTool` via `NewLocalTools/NewSandboxTools` | 05 §3.3 | 06 §3.2 |
+| `internal/agent` (AgentTool) | `internal/tools` (factories) | `[]agent.AgentTool` via `NewLocalTools` | 05 §3.3 | 06 §3.2 |
+| `internal/agent` (DriverConfig) | `internal/sandbox/environment` | `DriverConfig.EnvironmentTools` callback via `envtools.ToolsFunc` | 05 §3.3 | 11.add01 §5.1 |
 | `internal/agent` (events) | `internal/rpc` (event stream) | `AgentEvent → AgentEventSender/Receiver` | 05 §3.4 | 13 §4.2 |
 | `internal/agent` (Agent) | RuntimeController | `Agent.Start/Stop/Subscribe`, `Session` | 05 §7.1 | arch doc |
-| `internal/agent` (turn boundary) | `internal/sandbox` (snapshots) | `turn_completed` event → `TurnComplete()` | 05 §5.5 | 11 §4.5 |
-| `internal/tools` (ToolBackend) | `internal/sandbox` (service) | `ToolBackend.ExecuteTool(onProgress) → SandboxHostService.ExecuteTool` + `SnapshotID` propagation | 06 §3.1 | 11 §3.1 |
-| `internal/tools` (SandboxBackend) | `internal/rpc` (client) | `SandboxBackend → ExecuteToolStream` (server-streaming RPC for progress + final response) | 06 §5.2 | 13 §6 |
+| `internal/agent` (turn boundary) | `internal/sandbox/environment` | `turn_completed` event → `CreateSnapshot()` | 05 §5.5 | 11.add01 §4 |
+| `internal/sandbox/environment` | `internal/sandbox/environment/native` | `ExecutionEnvironment` → RPC to `SandboxHostService` | 11.add01 §4 | 11 §3.1 |
+| `internal/sandbox/environment` | `internal/sandbox/environment/e2b` | `ExecutionEnvironment` → E2B REST API | 11.add01 §4 | 11.add01 §6 |
+| `internal/sandbox/environment` | `internal/sandbox/environment/daytona` | `ExecutionEnvironment` → Daytona REST API | 11.add01 §4 | 11.add01 §7 |
+| `internal/sandbox/environment` | `internal/sandbox/environment/fly` | `ExecutionEnvironment` → Fly Machines API + SSH | 11.add01 §4 | 11.add01 §8 |
+| RuntimeController | `internal/sandbox/environment` | `ExecutionEnvironment` lifecycle (Create/Pause/Resume/Destroy) | arch doc | 11.add01 §4 |
 | `internal/rpc` (server) | `internal/sandbox` (service) | `RPC server → SandboxHostService` methods | 13 §5 | 11 §3.1 |
 | `internal/sandbox` (service) | `internal/sandbox/zfs` | `ZFSManager` interface | 11 §2.1 | 09-zfs §3.1 |
 | `internal/sandbox` (service) | `internal/sandbox/gvisor` | `GVisorManager` interface | 11 §2.1 | 10 §4.1 |
-| `internal/sandbox` (tier routing) | `internal/tools` (classifier) | Shared `ClassifyTool` function | 11 §router | 06 §5.3 |
+| `internal/sandbox` (tier routing) | `internal/tools` (classifier) | Shared `ClassifyTool` / `IsFileOp` function | 11 §router | 06 §5.3 |
 | `internal/tools/codeinterp` | `internal/tools` (tool catalog) | `discover → describe → invoke` via tool factories | 07 §5.2 | 06 §3.2 |
 | `internal/tools/codeinterp` | `internal/ai` (Provider) | `llm_call/llm_batch` → `ai.StreamSimple` | 07 §5.3 | 01 §5.1 |
 | `internal/termmux` | `internal/agent` (driver adapters) | `TermmuxDriverAdapter → AgentDriver` | 09-tmux §3 | 05 §3.2 |
@@ -569,23 +586,33 @@ Connected component pairs with the interface at each boundary. Reference these w
 ### 5.1 Import Flow (No Circular Dependencies)
 
 ```
-internal/ai/sse          → stdlib only
-internal/ai/models       → embedded JSON
-internal/ai              → internal/ai/sse, internal/ai/models
-internal/ai/provider/*   → internal/ai, internal/ai/sse
-internal/agent           → internal/ai, internal/termmux (adapter files only)
-internal/tools           → internal/ai, internal/agent (AgentTool type only)
-internal/tools/codeinterp → internal/tools, internal/ai
-internal/sandbox/zfs     → stdlib only
-internal/sandbox/gvisor  → stdlib, OCI spec libs, otel
-internal/sandbox         → internal/sandbox/zfs, internal/sandbox/gvisor, internal/tools, internal/ai
-internal/rpc             → internal/sandbox, internal/agent, internal/tools
-internal/termmux         → stdlib, otel (does NOT import internal/agent)
-cmd/sandbox-host         → internal/sandbox, internal/rpc
-tests/integration/                → all internal packages
+internal/ai/sse                     → stdlib only
+internal/ai/models                  → embedded JSON
+internal/ai                         → internal/ai/sse, internal/ai/models
+internal/ai/provider/*              → internal/ai, internal/ai/sse
+internal/agent                      → internal/ai, internal/termmux (adapter files only)
+internal/tools                      → internal/ai, internal/agent (AgentTool type only)
+internal/tools/codeinterp           → internal/tools, internal/ai
+internal/sandbox/environment        → internal/ai (for content types in ToolResponse)
+internal/sandbox/environment/restapi → stdlib only (net/http, encoding/json)
+internal/sandbox/environment/e2b    → internal/sandbox/environment, .../restapi
+internal/sandbox/environment/daytona → internal/sandbox/environment, .../restapi
+internal/sandbox/environment/fly    → internal/sandbox/environment, .../restapi
+internal/sandbox/environment/native → internal/sandbox/environment, internal/rpc (client)
+internal/tools/envtools             → internal/agent, internal/tools, internal/sandbox/environment
+internal/sandbox/zfs                → stdlib only
+internal/sandbox/gvisor             → stdlib, OCI spec libs, otel
+internal/sandbox                    → internal/sandbox/zfs, internal/sandbox/gvisor, internal/tools, internal/ai
+internal/rpc                        → internal/sandbox, internal/agent, internal/tools
+internal/termmux                    → stdlib, otel (does NOT import internal/agent)
+cmd/sandbox-host                    → internal/sandbox, internal/rpc
+tests/integration/                  → all internal packages
 ```
 
-**Hard rule:** `internal/ai` must NEVER import `internal/agent`. `internal/termmux` must NEVER import `internal/agent`. The dependency flows downward.
+**Hard rules:**
+- `internal/ai` must NEVER import `internal/agent`. `internal/termmux` must NEVER import `internal/agent`. The dependency flows downward.
+- `internal/agent` must NEVER import `internal/sandbox/environment` (circular via `tools`). Use `internal/tools/envtools` bridge package instead.
+- `internal/sandbox/environment` must NEVER import `internal/tools` or `internal/agent` (it defines its own `ToolRequest`/`ToolResponse` types).
 
 ---
 

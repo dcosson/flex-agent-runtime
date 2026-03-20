@@ -64,15 +64,18 @@ type RuntimeController interface {
 
   > **Session ID disambiguation**: Our runtime Session has its own ID, assigned by the RuntimeController. This is distinct from any driver-native session ID (e.g., Claude Code's own session ID, Codex's session ID). We track the driver's native session ID as a field within our Session struct for correlation and debugging, but our Session ID is the authoritative identifier used throughout the system for snapshots, rollback, pause/resume, and RuntimeController state management.
 
-- **ToolBackend** — Two modes:
-  - `LocalBackend` — Executes tools on the machine the agent is running on. Used in All Local and Agent in Sandbox (tools are local to that sandbox).
-  - `SandboxBackend` — Dispatches tool calls via RPC to Tool Call Sandbox infrastructure. Used in Tools in Sandbox.
-- **Session Sandbox** — The container/environment where an entire agent process runs in the Agent in Sandbox placement. The agent's tools use LocalBackend (they're local to the sandbox). Long-lived for the duration of the session.
-- **Tool Call Sandbox** — The ZFS + gVisor infrastructure that executes individual tool calls in the Tools in Sandbox placement. Per-call container lifecycle. The SandboxBackend dispatches to this infrastructure via RPC.
+- **ExecutionEnvironment** — The unified interface (`internal/sandbox/environment.ExecutionEnvironment`) for managing sandbox sessions and executing tools remotely. Implementations:
+  - `NativeSandboxEnvironment` — Delegates to the ZFS + gVisor sandbox host service via RPC. Used for self-hosted Tool Call Sandbox infrastructure.
+  - `E2BSandboxEnvironment` — REST API client for E2B cloud sandboxes. Supports pause/resume and snapshots.
+  - `DaytonaSandboxEnvironment` — REST API client for Daytona workspace environments.
+  - `FlySandboxEnvironment` — Fly Machines API + SSH for Fly.io-hosted sandboxes. Supports snapshots via machine image creation.
+  - For **All Local** and **Agent in Sandbox** placements, tools use local execution (no ExecutionEnvironment needed — tools run in-process).
+- **Session Sandbox** — The container/environment where an entire agent process runs in the Agent in Sandbox placement. The agent's tools run locally within the sandbox. Long-lived for the duration of the session.
+- **Tool Call Sandbox** — Infrastructure that executes individual tool calls remotely. Per-call or per-session lifecycle depending on the provider. The `ExecutionEnvironment` interface abstracts provider differences.
 
 ### Design Principles
 
-- **Clean layering with interface seams**: Each component communicates through Go interfaces. The same Agent interface works regardless of whether the underlying AgentDriver is our NativeDriver or a 3rd party CLI driver. Likewise, tools call `AgentTool.Execute()` and don't know or care whether a `LocalBackend` or `SandboxBackend` handles execution.
+- **Clean layering with interface seams**: Each component communicates through Go interfaces. The same Agent interface works regardless of whether the underlying AgentDriver is our NativeDriver or a 3rd party CLI driver. Likewise, tools call `AgentTool.Execute()` and don't know or care whether execution is local or dispatched through an `ExecutionEnvironment` provider.
 - **Go idioms**: Interfaces for extensibility, channels for streaming, `context.Context` for cancellation, explicit error handling, `internal/` for encapsulation.
 - **Streaming-first**: All LLM interactions stream events through Go channels. All tool executions report progress through callbacks. Event subscribers see everything in real time.
 - **Provider-pluggable / Tool-pluggable**: New LLM providers and new tools are added by implementing interfaces, not modifying core code.
@@ -82,20 +85,20 @@ type RuntimeController interface {
 
 ## Placement Modes
 
-The key architectural question is where the agent lives relative to its tools. The `AgentTool` interface is the seam — `LocalBackend` and `SandboxBackend` implement the same interface. In All Local and Tools in Sandbox, the RuntimeController can be local or remote (shown as a dashed line); in Agent in Sandbox it's necessarily remote.
+The key architectural question is where the agent lives relative to its tools. For local execution, tools run in-process. For remote execution, the `ExecutionEnvironment` interface abstracts provider differences (Native/ZFS, E2B, Daytona, Fly). In All Local and Tools in Sandbox, the RuntimeController can be local or remote (shown as a dashed line); in Agent in Sandbox it's necessarily remote.
 
 ```mermaid
 graph LR
     subgraph "All Local"
-        RC1[RuntimeController] -.->|local or remote| M1[Agent Loop + Tools<br/>LocalBackend]
+        RC1[RuntimeController] -.->|local or remote| M1[Agent Loop + Tools<br/>Local Execution]
     end
 
     subgraph "Agent in Sandbox (Session Sandbox)"
-        RC2[RuntimeController] -->|RPC| M2A[Agent + Tools<br/>LocalBackend<br/>in Session Sandbox]
+        RC2[RuntimeController] -->|RPC| M2A[Agent + Tools<br/>Local Execution<br/>in Session Sandbox]
     end
 
     subgraph "Tools in Sandbox (Tool Call Sandbox)"
-        RC3[RuntimeController] -.->|local or remote| M3A[Agent Loop] -->|SandboxBackend| M3B[Tools on<br/>Tool Call Sandbox host]
+        RC3[RuntimeController] -.->|local or remote| M3A[Agent Loop] -->|ExecutionEnvironment| M3B[Tools on<br/>Remote Provider<br/>Native/E2B/Daytona/Fly]
     end
 
     style M1 fill:#e8f5e9
@@ -109,11 +112,11 @@ graph LR
 
 **All Local** — like running a TUI agent such as Claude Code. Everything runs locally, tools execute on the local computer, no sandbox.
 
-**Agent in Sandbox** — the agent and its tools run together inside a Session Sandbox. Tools use `LocalBackend` (local to that sandbox). The sandbox can stay alive for the full session or be paused between turns — the disk (ZFS dataset) is persistent, so session state survives pause/resume. Primary path for 3rd party drivers (ClaudeCodeDriver, CodexDriver run inside the Session Sandbox).
+**Agent in Sandbox** — the agent and its tools run together inside a Session Sandbox. Tools execute locally within that sandbox (no `ExecutionEnvironment` needed). The sandbox can stay alive for the full session or be paused between turns — the disk (ZFS dataset) is persistent, so session state survives pause/resume. Primary path for 3rd party drivers (ClaudeCodeDriver, CodexDriver run inside the Session Sandbox).
 
-**Tools in Sandbox** — agent loop runs on a separate machine. Sandboxes are spun up per tool call (or per turn) and paused in between, using lightweight fast-booting containers (gVisor) with persistent disk (ZFS). Tool calls are dispatched via RPC using `SandboxBackend` to Tool Call Sandbox hosts.
+**Tools in Sandbox** — agent loop runs on a separate machine. Tool calls are dispatched through an `ExecutionEnvironment` provider. For self-hosted infrastructure, the `NativeSandboxEnvironment` uses ZFS + gVisor with per-tool-call containers and persistent disk. For cloud providers, `E2BSandboxEnvironment`, `DaytonaSandboxEnvironment`, or `FlySandboxEnvironment` manage remote sandboxes via their respective APIs.
 
-> **Meta-tools (Code Interpreter):** The Starlark-based Code Interpreter has two layers: the Starlark interpreter that runs the script, and the tool calls the script makes (via `invoke()`). The interpreter itself can run either with the agent loop or with the tools. When a script calls `invoke("bash", ...)` or `invoke("read_file", ...)`, those inner tool calls dispatch through whichever backend the placement mode uses (LocalBackend or SandboxBackend).
+> **Meta-tools (Code Interpreter):** The Starlark-based Code Interpreter has two layers: the Starlark interpreter that runs the script, and the tool calls the script makes (via `invoke()`). The interpreter itself can run either with the agent loop or with the tools. When a script calls `invoke("bash", ...)` or `invoke("read_file", ...)`, those inner tool calls dispatch through whichever execution path the placement mode uses (local execution or `ExecutionEnvironment` provider).
 
 ---
 
@@ -194,7 +197,7 @@ graph TB
         end
 
         subgraph "Tools Layer (internal/tools)"
-            tooliface[AgentTool Interface<br/>LocalBackend +<br/>SandboxBackend]
+            tooliface[AgentTool Interface<br/>Local Execution +<br/>ExecutionEnvironment]
 
             subgraph "Built-in Tools"
                 readtool[Read File]
@@ -449,57 +452,58 @@ func (a *Agent) Abort()
 
 ### 3. Built-in Tools (`internal/tools`)
 
-Core coding tools that implement the `AgentTool` interface. Each tool has two backends: **`LocalBackend`** (direct filesystem/process execution — used in All Local and Agent in Sandbox where the agent runs on the same machine as the tools) and **`SandboxBackend`** (RPC dispatch to Tool Call Sandbox infrastructure — used in Tools in Sandbox).
+Core coding tools that implement the `AgentTool` interface. Tools have two execution paths: **local execution** (direct filesystem/process calls — used in All Local and Agent in Sandbox where the agent runs on the same machine as the tools) and **remote execution via `ExecutionEnvironment`** (dispatched through a provider — Native/ZFS, E2B, Daytona, or Fly — used in Tools in Sandbox).
 
 #### Tool Catalog
 
-| Tool | Description | Tier | Local Backend | Sandbox Backend |
-|------|-------------|------|---------------|-----------------|
-| `read_file` | Read file contents with optional offset/limit | 1 | `os.ReadFile` | Go function on ZFS dataset |
-| `write_file` | Write/overwrite file | 1 | `os.WriteFile` | Go function on ZFS dataset |
-| `edit_file` | Exact string replacement in files | 1 | In-memory read-modify-write | Go function on ZFS dataset |
-| `bash` | Execute shell commands with timeout | 2 | `exec.Command` with PTY | gVisor container with ZFS bind mount |
-| `grep` | Ripgrep-style content search | 1 | Embedded ripgrep or Go implementation | Go function on ZFS dataset |
-| `glob` | File pattern matching | 1 | `filepath.Glob` / `doublestar` | Go function on ZFS dataset |
-| `git_*` | Git operations (status, diff, commit, etc.) | 1/2 | `exec.Command("git", ...)` | Depends on operation |
+| Tool | Description | Tier | Local Execution | Remote (ExecutionEnvironment) |
+|------|-------------|------|-----------------|-------------------------------|
+| `read_file` | Read file contents with optional offset/limit | 1 | `os.ReadFile` | File op via provider API |
+| `write_file` | Write/overwrite file | 1 | `os.WriteFile` | File op via provider API |
+| `edit_file` | Exact string replacement in files | 1 | In-memory read-modify-write | File op via provider API |
+| `bash` | Execute shell commands with timeout | 2 | `exec.Command` with PTY | Command execution via provider API |
+| `grep` | Ripgrep-style content search | 1 | Embedded ripgrep or Go implementation | File op via provider API |
+| `glob` | File pattern matching | 1 | `filepath.Glob` / `doublestar` | File op via provider API |
+| `git_*` | Git operations (status, diff, commit, etc.) | 1/2 | `exec.Command("git", ...)` | Command execution via provider API |
 
-#### ToolBackend Interface
+#### ExecutionEnvironment Interface
 
 ```go
-// ToolBackend abstracts where tool execution happens.
-// LocalBackend implements this for direct execution (All Local, Agent in Sandbox).
-// SandboxBackend implements this as an RPC client stub (Tools in Sandbox).
-type ToolBackend interface {
-    // ExecuteTool dispatches a tool call and returns the result.
-    // The backend handles tier selection, container lifecycle, and snapshots.
-    ExecuteTool(ctx context.Context, req ToolRequest) (*ToolResponse, error)
-}
-
-type ToolRequest struct {
-    SessionID  string
-    ToolName   string
-    ToolCallID string
-    Params     map[string]any
-    Resources  *ResourceSpec  // nil for Tier 1 (auto-detected), set for Tier 2
-}
-
-type ToolResponse struct {
-    Content    []ai.ContentBlock
-    SnapshotID string  // empty for LocalBackend
-    ExitCode   *int    // for bash tool
-}
-
-type ResourceSpec struct {
-    CPUs   int
-    MemMB  int
-    TimeoutSec int
+// Package: internal/sandbox/environment
+//
+// ExecutionEnvironment abstracts remote sandbox session lifecycle and tool execution.
+// Implementations: NativeSandboxEnvironment (ZFS+gVisor via RPC),
+//                  E2BSandboxEnvironment, DaytonaSandboxEnvironment, FlySandboxEnvironment.
+type ExecutionEnvironment interface {
+    Create(ctx context.Context, config SessionConfig) error
+    ExecuteTool(ctx context.Context, req ToolRequest, onProgress func(ToolProgress)) (*ToolResponse, error)
+    Pause(ctx context.Context) error
+    Resume(ctx context.Context) error
+    Destroy(ctx context.Context) error
+    State() SessionState
+    Capabilities() Capabilities
+    CreateSnapshot(ctx context.Context, name string) (*SnapshotInfo, error)
+    Rollback(ctx context.Context, snapshotID string) error
 }
 ```
 
-#### LocalBackend Tool Factory
+Provider capabilities vary — `Capabilities()` declares what each provider supports. Unsupported operations return `ErrCapabilityNotSupported`. Tool requests are routed via `IsFileOp()` to classify tools as file operations (`read_file`, `write_file`, `edit_file`, `grep`, `glob`) vs command operations for provider-specific dispatch.
+
+#### ExecutionEnvironment Providers
+
+| Provider | Package | Pause/Resume | Snapshots | Transport |
+|----------|---------|--------------|-----------|-----------|
+| Native (ZFS+gVisor) | `internal/sandbox/environment/native` | Yes | Yes (ZFS) | RPC to sandbox host |
+| E2B | `internal/sandbox/environment/e2b` | Yes | Yes | REST API |
+| Daytona | `internal/sandbox/environment/daytona` | No | No | REST API |
+| Fly | `internal/sandbox/environment/fly` | Yes (stop/start) | Yes (machine images) | REST API + SSH |
+
+All providers share `internal/sandbox/environment/restapi.Client` for HTTP/JSON operations.
+
+#### Local Tool Factory
 
 ```go
-// NewLocalTools creates the built-in tool set using LocalBackend.
+// NewLocalTools creates the built-in tool set for local execution.
 // Used in All Local and Agent in Sandbox (tools are local to sandbox).
 // rootDir constrains all file operations to a directory.
 func NewLocalTools(rootDir string, opts LocalToolsOptions) []agent.AgentTool
@@ -512,15 +516,18 @@ type LocalToolsOptions struct {
 }
 ```
 
-#### SandboxBackend Tool Factory
+#### Environment Tool Bridge
 
 ```go
-// NewSandboxTools creates the built-in tool set using SandboxBackend.
-// All tool calls are dispatched via RPC to Tool Call Sandbox infrastructure (Tools in Sandbox).
-func NewSandboxTools(client rpc.SandboxClient, sessionID string) []agent.AgentTool
+// Package: internal/tools/envtools
+//
+// Bridge package resolving the circular import between agent, tools, and environment.
+// Returns a callback for DriverConfig.EnvironmentTools that lazily resolves
+// tools backed by an ExecutionEnvironment.
+func ToolsFunc(env environment.ExecutionEnvironment) func() []agent.AgentTool
 ```
 
-Both factories return `[]agent.AgentTool` — the Agent (and its AgentDriver) doesn't know or care which factory was used.
+Both local tools and environment-backed tools produce `[]agent.AgentTool` — the Agent (and its AgentDriver) doesn't know or care which path was used.
 
 ### 4. Code Interpreter Meta-Tool (`internal/tools/codeinterp`)
 
@@ -1156,6 +1163,18 @@ graph TD
     RPC --> Sandbox
     Agent --> TermMux[internal/termmux]
 
+    AI --> Env[internal/sandbox/environment]
+    Tools --> Env
+    Env --> EnvNative[environment/native]
+    Env --> EnvE2B[environment/e2b]
+    Env --> EnvDaytona[environment/daytona]
+    Env --> EnvFly[environment/fly]
+    Env --> EnvRestAPI[environment/restapi]
+    EnvNative --> RPC
+    Tools --> EnvTools[internal/tools/envtools]
+    EnvTools --> Env
+    EnvTools --> Agent
+
     PubAI[ai/] -.->|re-exports| AI
     PubAgent[agent/] -.->|re-exports| Agent
     PubTools[tools/] -.->|re-exports| Tools
@@ -1174,6 +1193,13 @@ graph TD
     style Sandbox fill:#fce4ec
     style RPC fill:#f5f5f5
     style TermMux fill:#f0f4c3
+    style Env fill:#f3e5f5
+    style EnvNative fill:#f3e5f5
+    style EnvE2B fill:#f3e5f5
+    style EnvDaytona fill:#f3e5f5
+    style EnvFly fill:#f3e5f5
+    style EnvRestAPI fill:#f3e5f5
+    style EnvTools fill:#fff3e0
 ```
 
 **Rules:**
@@ -1181,10 +1207,14 @@ graph TD
 - `internal/agent` imports `internal/ai` and `internal/termmux` (for AgentDriver implementations: NativeDriver uses ai directly, ClaudeCodeDriver/CodexDriver use termmux)
 - `internal/tools` imports `internal/ai` and `internal/agent` (for `AgentTool`)
 - `internal/tools/codeinterp` imports `internal/ai` and `internal/agent`
-- `internal/sandbox` imports `internal/tools` (for `ToolBackend`)
+- `internal/tools/envtools` imports `internal/agent`, `internal/tools`, and `internal/sandbox/environment` (bridge package resolving circular import)
+- `internal/sandbox/environment` imports `internal/ai` (for content types in `ToolResponse`)
+- `internal/sandbox/environment/*` (e2b, daytona, fly) import `internal/sandbox/environment` and `internal/sandbox/environment/restapi`
+- `internal/sandbox/environment/native` imports `internal/sandbox/environment` and `internal/rpc` (RPC client)
+- `internal/sandbox` imports `internal/sandbox/zfs`, `internal/sandbox/gvisor`, `internal/tools`, `internal/ai`
 - `internal/rpc` imports `internal/ai`, `internal/agent`, `internal/tools`, `internal/sandbox`
 - `internal/termmux` imports `internal/agent` (for `AgentEvent` types, `SessionLogConverter`)
-- Nothing imports `internal/rpc` except `cmd/sandbox-host` and test packages
+- Nothing imports `internal/rpc` except `cmd/sandbox-host`, `internal/sandbox/environment/native`, and test packages
 - The public packages (`ai/`, `agent/`, `tools/`) are thin re-export layers
 
 ---
