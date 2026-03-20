@@ -1,0 +1,27 @@
+{
+  "id": "aiag-fis.4",
+  "title": "Fleet Management: integration test suite (Plan 20 gap 3)",
+  "description": "Implement the fleet-specific integration test suite from Plan 20 §11.2. Should be build-tag gated. The fleet code has unit tests but no integration test suite exercising the full control loop with provisioning, routing, and lifecycle.\n\nKey deliverables:\n- Build-tag gated integration test suite\n- Control loop integration scenarios\n- Provisioning + routing end-to-end tests\n- Mock AWS/SSM backends for test isolation\n\nReferences:\n- Plan: docs/plans/20-fleet-management.md §11.2\n- Code: internal/sandbox/control/fleet/",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-fis",
+  "dependencies": [
+    {
+      "id": "aiag-fis",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-fis.3",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=20-fleet-management"
+  ],
+  "created_at": "2026-03-20T11:03:54.312251-07:00",
+  "updated_at": "2026-03-20T11:03:54.312251-07:00"
+}
