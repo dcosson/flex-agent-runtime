@@ -9,12 +9,15 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/daytona"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/e2b"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/fly"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/local"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/native"
 )
@@ -197,6 +200,71 @@ func TestE2BEnvironmentComplianceSuite(t *testing.T) {
 	runEnvironmentComplianceSuite(t, factory, config, readReq, writeReq)
 }
 
+func TestFlyEnvironmentComplianceSuite(t *testing.T) {
+	type fsState struct {
+		mu    sync.Mutex
+		files map[string]string
+	}
+	fs := &fsState{
+		files: map[string]string{"input.txt": "hello\n"},
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/apps/app-1/volumes":
+			_, _ = w.Write([]byte(`{"id":"vol-1"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/apps/app-1/machines":
+			_, _ = w.Write([]byte(`{"id":"machine-1","private_ip":"fdaa::1"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/apps/app-1/machines/machine-1/suspend":
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/apps/app-1/machines/machine-1/start":
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/apps/app-1/machines/machine-1":
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/apps/app-1/volumes/vol-1":
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	factory := func(t *testing.T) environment.ExecutionEnvironment {
+		return fly.NewFlySandboxEnvironment("fly-token", "app-1", []byte("dummy"), "ssh-ed25519 AAAA",
+			fly.WithBaseURL(ts.URL),
+			fly.WithHTTPClient(ts.Client()),
+			fly.WithSSHExecutor(func(_ context.Context, _ string, command string, _ func(environment.ToolProgress)) (*fly.SSHExecResult, error) {
+				fs.mu.Lock()
+				defer fs.mu.Unlock()
+
+				if strings.HasPrefix(command, "cat ") {
+					path := strings.Trim(command[len("cat "):], "'")
+					return &fly.SSHExecResult{Stdout: fs.files[path], ExitCode: 0}, nil
+				}
+				if strings.Contains(command, "cat >") {
+					// Minimal compliance harness write simulation.
+					fs.files["written.txt"] = "hello"
+					return &fly.SSHExecResult{Stdout: "", ExitCode: 0}, nil
+				}
+				return &fly.SSHExecResult{Stdout: "ok", ExitCode: 0}, nil
+			}),
+		)
+	}
+	config := environment.SessionConfig{
+		SessionID: "fly-compliance",
+		BaseImage: "fly-image",
+	}
+	readReq := environment.ToolRequest{
+		ToolName: "read_file",
+		Params:   map[string]any{"path": "input.txt"},
+	}
+	writeReq := environment.ToolRequest{
+		ToolName: "write_file",
+		Params:   map[string]any{"path": "written.txt", "content": "hello"},
+	}
+	runEnvironmentComplianceSuite(t, factory, config, readReq, writeReq)
+}
+
 // complianceMockService is a minimal api.SandboxService mock for compliance testing.
 type complianceMockService struct {
 	mu sync.Mutex
@@ -366,5 +434,44 @@ func TestNativeEnvironmentComplianceSuite(t *testing.T) {
 		Params:   map[string]any{"path": "written.txt", "content": "hi"},
 	}
 
+	runEnvironmentComplianceSuite(t, factory, config, readReq, writeReq)
+}
+
+func TestDaytonaEnvironmentComplianceSuite(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/workspaces":
+			_, _ = w.Write([]byte(`{"id":"ws-1"}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/workspaces/ws-1":
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/workspaces/ws-1/filesystem/read_file":
+			_, _ = w.Write([]byte(`{"content":"ok"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/workspaces/ws-1/filesystem/write_file":
+			_, _ = w.Write([]byte(`{"content":"written"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	factory := func(t *testing.T) environment.ExecutionEnvironment {
+		return daytona.NewDaytonaSandboxEnvironment("test-api-key",
+			daytona.WithBaseURL(ts.URL),
+			daytona.WithHTTPClient(ts.Client()),
+			daytona.WithLogger(slog.Default()),
+		)
+	}
+	config := environment.SessionConfig{
+		SessionID: "daytona-compliance",
+		BaseImage: "ubuntu:22.04",
+	}
+	readReq := environment.ToolRequest{
+		ToolName: "read_file",
+		Params:   map[string]any{"path": "input.txt"},
+	}
+	writeReq := environment.ToolRequest{
+		ToolName: "write_file",
+		Params:   map[string]any{"path": "written.txt", "content": "hello"},
+	}
 	runEnvironmentComplianceSuite(t, factory, config, readReq, writeReq)
 }
