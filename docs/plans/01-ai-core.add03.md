@@ -5,7 +5,7 @@
 **Depends on:** 01-ai-core (core types, registries), [01-ai-core.add01](./01-ai-core.add01.md) (embedding types)
 **Depended on by:** Future provider plans, agent runtime configuration
 **Implements:** API client type / provider separation, provider registry refactor, fallback/custom provider mechanism, catalog restructuring
-**Reviews incorporated:** R1A (Reviewer A), R1B (Reviewer B), R2, SR (Seam Review), SR2 (Seam Review 2) -- see disposition tables at end
+**Reviews incorporated:** R1A (Reviewer A), R1B (Reviewer B), R2, SR (Seam Review), SR2 (Seam Review 2), R3-CL (concierge-leaf, lore-garden downstream consumer) -- see disposition tables at end
 
 ---
 
@@ -562,6 +562,9 @@ func Stream(ctx context.Context, model Model, llmCtx Context, opts StreamOptions
     cfg, err := GetProviderConfig(model.Provider)
     if err != nil {
         return errorStream(err)
+    }
+    if cfg.APIClientType == "" {
+        return errorStream(fmt.Errorf("provider %q does not support chat completions (no apiClientType configured); it may be an embedding-only provider", model.Provider))
     }
     client, err := GetAPIClient(cfg.APIClientType)
     if err != nil {
@@ -1161,7 +1164,50 @@ ai.RegisterCustomProvider(ai.CustomProviderConfig{
 })
 ```
 
-**StreamOptions.Headers callers:** All callers constructing `StreamOptions` with `Headers` must update from `map[string]string` to `map[string][]string`. Use `grep -rn 'Headers:.*map\[string\]string'` or `grep -rn 'Headers.*map\[string\]string'` across the codebase to catch all call sites that need updating.
+**Callers that override a catalog provider's base URL:** Some downstream callers (e.g., lore-garden) register a standard provider like `anthropic` but with a custom `BaseURL` from their config file (for corporate proxies, staging environments, etc.). Under the new model, use `RegisterCustomProvider` with the **same name** as the catalog provider to overwrite it:
+
+```go
+// Old: anthropic with custom base URL
+anthropic.Register(anthropic.Config{
+    APIKey:  apiKey,
+    BaseURL: "https://my-anthropic-proxy.example.com",
+}, "lore-garden")
+
+// New: overwrite the catalog "anthropic" provider with a custom base URL
+ai.RegisterCustomProvider(ai.CustomProviderConfig{
+    ProviderConfig: ai.ProviderConfig{
+        Name:          "anthropic",                    // same name as catalog entry -- overwrites it
+        APIClientType: "anthropic-messages",
+        BaseURL:       "https://my-anthropic-proxy.example.com",
+        KeyEnvVars:    []string{"ANTHROPIC_API_KEY"},  // keep standard env var
+    },
+})
+// Models registered under "anthropic" in the catalog continue to work
+// because GetModel("anthropic", modelID) is keyed by provider name.
+```
+
+Note: this only needs to happen when the caller has a non-empty custom base URL. If using the standard endpoint, no override is needed -- the catalog provider config is used as-is.
+
+**Callers that inject API keys programmatically (e.g., from Vault/secrets managers):** The standard flow resolves keys from env vars listed in `ProviderConfig.KeyEnvVars`. If the operator retrieves keys at runtime from a secrets manager (not stored in env vars), use `RegisterCustomProvider` with the `APIKey` field:
+
+```go
+// Key retrieved from Vault at startup
+vaultKey := fetchKeyFromVault("anthropic-api-key")
+
+ai.RegisterCustomProvider(ai.CustomProviderConfig{
+    ProviderConfig: ai.ProviderConfig{
+        Name:          "anthropic",
+        APIClientType: "anthropic-messages",
+        BaseURL:       "https://api.anthropic.com",
+        KeyEnvVars:    []string{"ANTHROPIC_API_KEY"},
+    },
+    APIKey: vaultKey, // takes precedence over env var lookup
+})
+```
+
+Alternatively, callers can pass a per-call API key via `StreamOptions.APIKey`, which takes highest precedence in the resolution chain (opts > direct > env > empty).
+
+**StreamOptions.Headers callers:** All callers constructing `StreamOptions` with `Headers` must update from `map[string]string` to `map[string][]string`. Use `grep -rn 'Headers:.*map\[string\]string'` or `grep -rn 'Headers.*map\[string\]string'` across the codebase to catch all call sites that need updating. Also check `Model.Headers` and `EmbeddingModel.Headers` usages -- these change to `map[string][]string` as well.
 
 **sourceID cleanup migration:** Tests that currently use sourceID-based bulk cleanup:
 ```go
@@ -1185,6 +1231,8 @@ The demo CLIs (`demos/llm-demo`, `demos/embedding-demo`) update their provider r
 ### 4.4 Model Registry Migration
 
 The model registry's outer key changes from a loose grouping (e.g., `"anthropic"`, `"openai"`) to a strict provider name that must match a registered `ProviderConfig`. The `GetModel(provider, modelID)` signature remains the same, but the `provider` parameter now means "registered provider name".
+
+**Model scoping:** Models are scoped to their exact provider name. If a caller registers a custom provider with a different name (e.g., `"my-anthropic-proxy"`) and registers models under that name, those models are NOT accessible via `GetModel("anthropic", modelID)`. Callers looking up models (including for pricing via `Model.Cost`) on a custom provider must use the custom provider name. If a caller overwrites a catalog provider by registering a custom provider with the same name (e.g., `"anthropic"`), the catalog models registered under that name remain accessible -- only the provider config changes.
 
 ### 4.5 AssistantMessage Changes
 
@@ -1633,3 +1681,22 @@ Review incorporated: `docs/plans/01-ai-core.add03-sr2-review.md` (SR2 agent). Re
 8. **AC8:** `make check && make test` pass clean with no warnings.
 9. **AC9:** Multi-valued headers (e.g., Anthropic beta headers) are correctly sent via `Add` semantics, not `Set`.
 10. **AC10:** `PricingKnown` field correctly distinguishes catalog models (true) from custom models (false by default).
+
+---
+
+## 11a. R3-CL Review Disposition (concierge-leaf, lore-garden downstream consumer)
+
+Review incorporated: `docs/plans/01-ai-core.add03-r1-review-concierge.md`. Review file retained for reference.
+
+| ID | Sev | Title | Disposition | Section(s) Updated |
+|----|-----|-------|-------------|-------------------|
+| C-1 | P0 | lore-garden Register() API breaks -- custom BaseURL migration missing | Incorporated. Added concrete migration example for callers that override a catalog provider's base URL using RegisterCustomProvider with the same name. | 4.2 |
+| C-2 | P1 | lore-garden Register() passes explicit API keys from Vault | Incorporated. Added migration example for callers that inject API keys programmatically (Vault/secrets managers) via RegisterCustomProvider with APIKey field. Also noted StreamOptions.APIKey as per-call alternative. | 4.2 |
+| C-3 | P1 | Python script still emits api/baseUrl per model entry | Not Incorporated. Already tracked by SR2-1/SR2-2 disposition. The script refactor is noted as required in Section 3.8; detailed script pseudocode is deferred to implementation since the script is a build tool, not runtime code. |  |
+| C-4 | P1 | Embedding model baseUrl still emitted by Python script | Not Incorporated. Duplicate of SR2-3; already tracked in SR2 disposition. |  |
+| C-5 | P2 | GetModel() model scoping semantics tighten | Incorporated. Added model scoping note to Section 4.4 explaining that models are scoped to exact provider name, and overwriting a catalog provider preserves model access. | 4.4 |
+| C-6 | P2 | PricingKnown not on EmbeddingModel / cost semantics | Not Incorporated. Embedding cost calculation is out of scope per prior SR2-8 disposition. PricingKnown is already specified on EmbeddingModel in Section 3.11. |  |
+| C-7 | P2 | Model.Headers type change breaks downstream compilation | Incorporated. Added Model.Headers and EmbeddingModel.Headers to the grep migration note in Section 4.2 alongside StreamOptions.Headers. | 4.2 |
+| C-8 | P2 | GetProviders() removed without replacement | Not Incorporated. ListProviderConfigs() returns provider names; callers needing full configs can call GetProviderConfig() per name. No downstream callers found that iterate provider capabilities. |  |
+| C-9 | P3 | Cohere provider has no apiClientType -- confusing error | Incorporated. Added empty-apiClientType guard in Stream() with clear error message ("does not support chat completions"). | 3.7 |
+| C-10 | P3 | ClearProviderConfigs lock ordering comment missing | Not Incorporated. Informational; lock ordering already documented per SR-6. |  |
