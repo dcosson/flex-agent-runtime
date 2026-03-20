@@ -77,19 +77,28 @@ func (f *FleetSandboxControl) phaseHealthCheck(ctx context.Context) {
 			continue
 		}
 
+		hcStart := time.Now()
 		result, err := client.HealthCheck(ctx)
+		f.metrics.observeHealthCheckDuration(time.Since(hcStart))
 
 		mi.mu.Lock()
 		if err != nil {
 			mi.ConsecutiveHealthFailures++
 			mi.ConsecutiveHealthSuccesses = 0
+			f.metrics.healthChecksTotal.WithLabelValues("error").Inc()
 		} else {
 			mi.ConsecutiveHealthFailures = 0
 			mi.ConsecutiveHealthSuccesses++
+			f.metrics.healthChecksTotal.WithLabelValues("healthy").Inc()
 
 			// Reconcile session count (section 4.1.3).
 			remoteCount := int64(result.SessionCount)
 			if remoteCount != mi.SessionCount {
+				direction := "down"
+				if remoteCount > mi.SessionCount {
+					direction = "up"
+				}
+				f.metrics.reconciliationsTotal.WithLabelValues(direction).Inc()
 				f.logger.Warn("session count reconciled",
 					"instance_id", mi.InstanceID,
 					"local", mi.SessionCount, "remote", remoteCount)
@@ -140,6 +149,7 @@ func (f *FleetSandboxControl) phaseHandleUnhealthy() {
 				mi.DrainReason = ""
 				mi.DrainStarted = time.Time{}
 				mi.IdleSince = f.clock.Now()
+				f.metrics.drainRecoveriesTotal.Inc()
 				f.logger.Info("health-drained instance recovered",
 					"instance_id", mi.InstanceID)
 			}
@@ -309,6 +319,9 @@ func (f *FleetSandboxControl) phaseDrainCompletion(ctx context.Context) {
 					"instance_id", instanceID, "sessions", sessions)
 				f.metrics.terminationsTotal.WithLabelValues(terminationReasonLabel(drainReason, true)).Inc()
 				if err := f.provisioner.TerminateInstance(ctx, instanceID); err == nil {
+					if !drainStarted.IsZero() {
+						f.metrics.observeDrainDuration(f.clock.Now().Sub(drainStarted))
+					}
 					mi.mu.Lock()
 					mi.State = InstanceTerminating
 					mi.mu.Unlock()
@@ -323,6 +336,9 @@ func (f *FleetSandboxControl) phaseDrainCompletion(ctx context.Context) {
 				err := f.provisioner.TerminateInstance(ctx, instanceID)
 				mi.mu.Lock()
 				if err == nil {
+					if !drainStarted.IsZero() {
+						f.metrics.observeDrainDuration(f.clock.Now().Sub(drainStarted))
+					}
 					mi.State = InstanceTerminating
 					toRemove = append(toRemove, instanceID)
 				} else {

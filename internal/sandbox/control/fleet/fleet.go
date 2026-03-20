@@ -110,6 +110,7 @@ func (f *FleetSandboxControl) CreateSandbox(ctx context.Context, req control.Cre
 	if f.closed.Load() {
 		return nil, ErrFleetClosed
 	}
+	start := time.Now()
 	defer f.updateMetricsSnapshot()
 
 	const maxAttempts = 3
@@ -117,6 +118,8 @@ func (f *FleetSandboxControl) CreateSandbox(ctx context.Context, req control.Cre
 		mi, err := f.selectAndClaim()
 		if err == ErrNoCapacity {
 			if provErr := f.provisionInstance(ctx); provErr != nil {
+				f.metrics.createSandboxTotal.WithLabelValues("no_capacity").Inc()
+				f.metrics.observeCreateSandboxDuration(time.Since(start))
 				return nil, ErrNoCapacity
 			}
 			continue
@@ -132,6 +135,9 @@ func (f *FleetSandboxControl) CreateSandbox(ctx context.Context, req control.Cre
 			mi.mu.Lock()
 			_ = mi.ReleaseSession()
 			mi.mu.Unlock()
+			f.metrics.createSandboxTotal.WithLabelValues("error").Inc()
+			f.metrics.claimSlotRollbacksTotal.Inc()
+			f.metrics.observeCreateSandboxDuration(time.Since(start))
 			return nil, rpcErr
 		}
 
@@ -140,9 +146,13 @@ func (f *FleetSandboxControl) CreateSandbox(ctx context.Context, req control.Cre
 			mi.mu.Lock()
 			_ = mi.ReleaseSession()
 			mi.mu.Unlock()
+			f.metrics.createSandboxTotal.WithLabelValues("error").Inc()
+			f.metrics.observeCreateSandboxDuration(time.Since(start))
 			return nil, fmt.Errorf("fleet: encode sandbox ID: %w", encErr)
 		}
 
+		f.metrics.createSandboxTotal.WithLabelValues("success").Inc()
+		f.metrics.observeCreateSandboxDuration(time.Since(start))
 		return &control.CreateSandboxResponse{
 			SandboxID:    fleetID,
 			Address:      fmt.Sprintf("%s:%d", mi.IP, f.config.SandboxHostPort),
@@ -150,6 +160,8 @@ func (f *FleetSandboxControl) CreateSandbox(ctx context.Context, req control.Cre
 		}, nil
 	}
 
+	f.metrics.createSandboxTotal.WithLabelValues("no_capacity").Inc()
+	f.metrics.observeCreateSandboxDuration(time.Since(start))
 	return nil, ErrNoCapacity
 }
 
@@ -291,9 +303,11 @@ func (f *FleetSandboxControl) DestroySandbox(ctx context.Context, sandboxID stri
 			}
 			mi.mu.Unlock()
 		}
+		f.metrics.destroySandboxTotal.WithLabelValues("error").Inc()
 		return rpcErr
 	}
 
+	f.metrics.destroySandboxTotal.WithLabelValues("success").Inc()
 	return nil
 }
 
@@ -507,10 +521,13 @@ func (f *FleetSandboxControl) updateMetricsSnapshot() {
 
 	f.mu.RLock()
 	total := len(f.instances)
-	var warm int
-	var healthy int
+	var warm, healthy int
+	var sessions int64
+	stateCounts := make(map[InstanceState]int)
 	for _, mi := range f.instances {
 		mi.mu.RLock()
+		stateCounts[mi.State]++
+		sessions += mi.SessionCount
 		if mi.State == InstanceReady && mi.SessionCount == 0 {
 			warm++
 		}
@@ -525,6 +542,14 @@ func (f *FleetSandboxControl) updateMetricsSnapshot() {
 	f.metrics.warmPoolSize.Set(float64(warm))
 	f.metrics.healthyInstances.Set(float64(healthy))
 	f.metrics.pendingProvisions.Set(float64(f.pendingLaunches.Load()))
+	f.metrics.sessionsTotal.Set(float64(sessions))
+
+	for _, s := range []InstanceState{
+		InstanceProvisioning, InstanceReady, InstanceActive,
+		InstanceDraining, InstanceTerminating,
+	} {
+		f.metrics.instancesByState.WithLabelValues(string(s)).Set(float64(stateCounts[s]))
+	}
 }
 
 func terminationReasonLabel(reason DrainReason, timedOut bool) string {
