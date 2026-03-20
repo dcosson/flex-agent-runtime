@@ -22,7 +22,6 @@ type (
 	EventType             = internal.EventType
 	AssistantMessageEvent = internal.AssistantMessageEvent
 	EventStream           = internal.EventStream
-	Provider              = internal.Provider
 	Model                 = internal.Model
 	ModelCost             = internal.ModelCost
 	ModelCompat           = internal.ModelCompat
@@ -34,6 +33,12 @@ type (
 	ProviderError         = internal.ProviderError
 	ProviderErrorCode     = internal.ProviderErrorCode
 	ToolCallIDNormalizer  = internal.ToolCallIDNormalizer
+	APIClient             = internal.APIClient
+	EmbeddingAPIClient    = internal.EmbeddingAPIClient
+	ProviderConfig        = internal.ProviderConfig
+	ProviderEndpoint      = internal.ProviderEndpoint
+	CustomProviderConfig  = internal.CustomProviderConfig
+	CustomModelOpts       = internal.CustomModelOpts
 )
 
 const (
@@ -84,11 +89,6 @@ const (
 
 var (
 	NewEventStream               = internal.NewEventStream
-	RegisterProvider             = internal.RegisterProvider
-	GetProvider                  = internal.GetProvider
-	GetProviders                 = internal.GetProviders
-	UnregisterProviders          = internal.UnregisterProviders
-	ClearProviders               = internal.ClearProviders
 	RegisterModel                = internal.RegisterModel
 	GetModel                     = internal.GetModel
 	GetModels                    = internal.GetModels
@@ -110,6 +110,20 @@ var (
 	MillisToTime                 = internal.MillisToTime
 	UnmarshalArguments           = internal.UnmarshalArguments
 	UnmarshalArgumentsFromReader = internal.UnmarshalArgumentsFromReader
+	RegisterAPIClient            = internal.RegisterAPIClient
+	GetAPIClient                 = internal.GetAPIClient
+	ClearAPIClients              = internal.ClearAPIClients
+	RegisterEmbeddingAPIClient   = internal.RegisterEmbeddingAPIClient
+	GetEmbeddingAPIClient        = internal.GetEmbeddingAPIClient
+	ClearEmbeddingAPIClients     = internal.ClearEmbeddingAPIClients
+	RegisterProviderConfig       = internal.RegisterProviderConfig
+	GetProviderConfig            = internal.GetProviderConfig
+	ListProviderConfigs          = internal.ListProviderConfigs
+	UnregisterProviderConfig     = internal.UnregisterProviderConfig
+	ClearProviderConfigs         = internal.ClearProviderConfigs
+	ResolveEndpoint              = internal.ResolveEndpoint
+	RegisterCustomProvider       = internal.RegisterCustomProvider
+	RegisterCustomModel          = internal.RegisterCustomModel
 )
 
 const LargeArgumentThreshold = internal.LargeArgumentThreshold

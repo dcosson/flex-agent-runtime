@@ -27,7 +27,7 @@ type StreamOptions struct {
 	APIKey          string
 	SessionID       string
 	CacheRetention  CacheRetention
-	Headers         map[string]string
+	Headers         map[string][]string
 	MaxRetryDelayMs int
 	Metadata        map[string]any
 	OnPayload       func(payload any)
@@ -49,7 +49,7 @@ type ThinkingBudgets struct {
 }
 
 // BuildBaseOptions converts SimpleStreamOptions into StreamOptions.
-func BuildBaseOptions(model Model, opts *SimpleStreamOptions, apiKey string) StreamOptions {
+func BuildBaseOptions(model Model, opts *SimpleStreamOptions) StreamOptions {
 	var so StreamOptions
 	if opts != nil {
 		so = opts.StreamOptions
@@ -57,9 +57,6 @@ func BuildBaseOptions(model Model, opts *SimpleStreamOptions, apiKey string) Str
 	if so.MaxTokens == nil {
 		maxTok := minInt(model.MaxTokens, 32000)
 		so.MaxTokens = &maxTok
-	}
-	if apiKey != "" && so.APIKey == "" {
-		so.APIKey = apiKey
 	}
 	return so
 }

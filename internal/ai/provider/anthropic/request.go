@@ -44,7 +44,6 @@ func buildRequest(model ai.Model, llmCtx ai.Context, opts ai.StreamOptions, thin
 		Thinking:  thinking,
 		Stream:    true,
 		Metadata:  opts.Metadata,
-		Headers:   opts.Headers,
 	}, nil
 }
 

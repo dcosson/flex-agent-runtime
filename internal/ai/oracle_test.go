@@ -1036,7 +1036,6 @@ func TestO1_TransformMessagesVsTypeScript(t *testing.T) {
 				Name:          tc.TargetModel.Name,
 				API:           tc.TargetModel.API,
 				Provider:      tc.TargetModel.Provider,
-				BaseURL:       tc.TargetModel.BaseURL,
 				Reasoning:     tc.TargetModel.Reasoning,
 				Input:         tc.TargetModel.Input,
 				Cost:          ModelCost{Input: tc.TargetModel.Cost.Input, Output: tc.TargetModel.Cost.Output, CacheRead: tc.TargetModel.Cost.CacheRead, CacheWrite: tc.TargetModel.Cost.CacheWrite},

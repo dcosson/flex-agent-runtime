@@ -30,12 +30,14 @@ type ToolCallSpec struct {
 // pre-defined sequence of responses. Each call to Stream/StreamSimple
 // returns the next entry in the script. If calls exceed the script length,
 // the last entry is repeated.
+//
+// Implements ai.APIClient.
 type ScriptedProvider struct {
-	api     string
-	mu      sync.Mutex
-	script  []ScriptEntry
-	calls   int
-	CallLog []ScriptedProviderCall
+	clientType string
+	mu         sync.Mutex
+	script     []ScriptEntry
+	calls      int
+	CallLog    []ScriptedProviderCall
 
 	// Gates allows blocking specific provider calls until signaled.
 	// Key is the 0-based call index. The provider will wait on the channel
@@ -50,21 +52,21 @@ type ScriptedProviderCall struct {
 	SystemPrompt string
 }
 
-// NewScriptedProvider creates a fake provider with the given API name and script.
-func NewScriptedProvider(api string, script []ScriptEntry) *ScriptedProvider {
+// NewScriptedProvider creates a fake provider with the given client type and script.
+func NewScriptedProvider(clientType string, script []ScriptEntry) *ScriptedProvider {
 	return &ScriptedProvider{
-		api:    api,
-		script: script,
+		clientType: clientType,
+		script:     script,
 	}
 }
 
-func (p *ScriptedProvider) API() string { return p.api }
+func (p *ScriptedProvider) ClientType() string { return p.clientType }
 
-func (p *ScriptedProvider) Stream(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions) *ai.EventStream {
+func (p *ScriptedProvider) Stream(ctx context.Context, _ ai.ProviderEndpoint, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions) *ai.EventStream {
 	return p.streamNext(ctx, llmCtx)
 }
 
-func (p *ScriptedProvider) StreamSimple(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.SimpleStreamOptions) *ai.EventStream {
+func (p *ScriptedProvider) StreamSimple(ctx context.Context, _ ai.ProviderEndpoint, model ai.Model, llmCtx ai.Context, opts ai.SimpleStreamOptions) *ai.EventStream {
 	return p.streamNext(ctx, llmCtx)
 }
 
@@ -178,7 +180,7 @@ func buildMessage(entry ScriptEntry) ai.AssistantMessage {
 	}
 }
 
-// UniqueAPI returns a unique API name for test isolation.
+// UniqueAPI returns a unique API client type name for test isolation.
 var apiCounter int
 var apiMu sync.Mutex
 
@@ -187,4 +189,15 @@ func UniqueAPI(prefix string) string {
 	defer apiMu.Unlock()
 	apiCounter++
 	return fmt.Sprintf("%s-%d", prefix, apiCounter)
+}
+
+// RegisterScriptedProvider is a test helper that registers a ScriptedProvider
+// as an APIClient with a matching ProviderConfig, and returns cleanup functions.
+// The providerName is used for both the ProviderConfig name and the Model.Provider field.
+func RegisterScriptedProvider(provider *ScriptedProvider, providerName string) {
+	ai.RegisterAPIClient(provider)
+	ai.RegisterProviderConfig(ai.ProviderConfig{
+		Name:          providerName,
+		APIClientType: provider.ClientType(),
+	})
 }

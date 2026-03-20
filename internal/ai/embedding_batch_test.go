@@ -10,13 +10,14 @@ import (
 func TestBatchEmbedNoSplit(t *testing.T) {
 	calls := 0
 	model := EmbeddingModel{ID: "m", MaxBatchSize: 10}
-	resp, err := BatchEmbed(context.Background(), func(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	ep := ProviderEndpoint{ProviderName: "test"}
+	resp, err := BatchEmbed(context.Background(), func(ctx context.Context, _ ProviderEndpoint, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		calls++
 		return &EmbeddingResponse{
 			Embeddings: []Embedding{{Index: 0, Values: []float32{1}}},
 			Usage:      EmbeddingUsage{Tokens: 7, Cost: 0.1},
 		}, nil
-	}, model, EmbeddingRequest{Texts: []string{"a"}})
+	}, ep, model, EmbeddingRequest{Texts: []string{"a"}})
 	if err != nil {
 		t.Fatalf("BatchEmbed err: %v", err)
 	}
@@ -30,16 +31,17 @@ func TestBatchEmbedNoSplit(t *testing.T) {
 
 func TestBatchEmbedSplitOrderProgress(t *testing.T) {
 	model := EmbeddingModel{ID: "m", MaxBatchSize: 2}
+	ep := ProviderEndpoint{ProviderName: "test"}
 	texts := []string{"t0", "t1", "t2", "t3", "t4"}
 	progress := make([][2]int, 0)
 
-	resp, err := BatchEmbed(context.Background(), func(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	resp, err := BatchEmbed(context.Background(), func(ctx context.Context, _ ProviderEndpoint, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		emb := make([]Embedding, len(req.Texts))
 		for i := range req.Texts {
 			emb[i] = Embedding{Index: i, Values: []float32{float32(len(req.Texts)), float32(i)}}
 		}
 		return &EmbeddingResponse{Embeddings: emb, Usage: EmbeddingUsage{Tokens: len(req.Texts)}}, nil
-	}, model, EmbeddingRequest{Texts: texts, OnProgress: func(completed, total int) {
+	}, ep, model, EmbeddingRequest{Texts: texts, OnProgress: func(completed, total int) {
 		progress = append(progress, [2]int{completed, total})
 	}})
 	if err != nil {
@@ -65,7 +67,8 @@ func TestBatchEmbedSplitOrderProgress(t *testing.T) {
 func TestBatchEmbedPartialResultsOnError(t *testing.T) {
 	baseErr := &ProviderError{Code: ErrRateLimit, Provider: "mock", Message: "slow down"}
 	model := EmbeddingModel{ID: "m", MaxBatchSize: 2}
-	resp, err := BatchEmbed(context.Background(), func(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	ep := ProviderEndpoint{ProviderName: "test"}
+	resp, err := BatchEmbed(context.Background(), func(ctx context.Context, _ ProviderEndpoint, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		if len(req.Texts) == 1 {
 			return nil, baseErr
 		}
@@ -73,7 +76,7 @@ func TestBatchEmbedPartialResultsOnError(t *testing.T) {
 			Embeddings: []Embedding{{Index: 0, Values: []float32{1}}, {Index: 1, Values: []float32{2}}},
 			Usage:      EmbeddingUsage{Tokens: 2},
 		}, nil
-	}, model, EmbeddingRequest{Texts: []string{"a", "b", "c"}})
+	}, ep, model, EmbeddingRequest{Texts: []string{"a", "b", "c"}})
 	if err == nil {
 		t.Fatal("expected error")
 	}

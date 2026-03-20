@@ -61,9 +61,8 @@ func stubModel(apiName string) ai.Model {
 // provider. Returns the agent, a cleanup function, and a channel that receives
 // events. The agent is ready to receive a Prompt() call.
 type stubAgentEnv struct {
-	Agent    *agent.Agent
-	Model    ai.Model
-	Provider *anthropic.Provider
+	Agent *agent.Agent
+	Model ai.Model
 
 	mu     sync.Mutex
 	events []agent.AgentEvent
@@ -73,15 +72,26 @@ func newStubAgentEnv(t *testing.T, stubURL string, workspaceRoot string) *stubAg
 	t.Helper()
 
 	apiName := "anthropic-messages"
-	sourceID := "stub-e2e-" + t.Name()
-	provider := anthropic.New(anthropic.Config{
-		BaseURL: stubURL,
-		APIKey:  "test-key-stub-e2e",
-	})
-	ai.RegisterProvider(provider, sourceID)
-	t.Cleanup(func() { ai.UnregisterProviders(sourceID) })
+	providerName := "stub-e2e-" + t.Name()
+
+	// Register the stateless API client.
+	anthropic.Register(anthropic.ClientConfig{})
+
+	// Register a custom provider with direct API key and stub base URL.
+	if err := ai.RegisterCustomProvider(ai.CustomProviderConfig{
+		ProviderConfig: ai.ProviderConfig{
+			Name:          providerName,
+			APIClientType: apiName,
+			BaseURL:       stubURL,
+		},
+		APIKey: "test-key-stub-e2e",
+	}); err != nil {
+		t.Fatalf("register custom provider: %v", err)
+	}
+	t.Cleanup(func() { ai.UnregisterProviderConfig(providerName) })
 
 	model := stubModel(apiName)
+	model.Provider = providerName
 	agentTools := tools.NewLocalTools(workspaceRoot, tools.LocalToolsOptions{})
 
 	driver := agent.NewNativeDriver(agent.DriverConfig{
@@ -93,9 +103,8 @@ func newStubAgentEnv(t *testing.T, stubURL string, workspaceRoot string) *stubAg
 	a.SetSession(&agent.Session{ID: "stub-e2e-" + t.Name()})
 
 	env := &stubAgentEnv{
-		Agent:    a,
-		Model:    model,
-		Provider: provider,
+		Agent: a,
+		Model: model,
 	}
 	a.Subscribe(func(evt agent.AgentEvent) {
 		env.mu.Lock()

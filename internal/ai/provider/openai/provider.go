@@ -2,7 +2,6 @@ package openai
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/dcosson/flex-agent-runtime/internal/ai"
@@ -10,49 +9,57 @@ import (
 
 const (
 	apiName        = "openai-completions"
-	defaultBaseURL = "https://api.openai.com/v1"
 	defaultTimeout = 60 * time.Second
 )
 
-// Config controls OpenAI provider construction.
+// ClientConfig controls OpenAI client construction.
+type ClientConfig struct {
+	HTTPClient *http.Client
+}
+
+// Client implements ai.APIClient for the OpenAI Chat Completions protocol.
+// It is stateless — base URL and API key come from ProviderEndpoint per-call.
+type Client struct {
+	httpClient *http.Client
+}
+
+// NewClient constructs an OpenAI protocol client.
+func NewClient(cfg ClientConfig) *Client {
+	client := cfg.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: defaultTimeout}
+	}
+	return &Client{httpClient: client}
+}
+
+// ClientType returns the API client type identifier.
+func (c *Client) ClientType() string {
+	return apiName
+}
+
+// Register creates a Client and registers it as an API client.
+func Register(cfg ClientConfig) *Client {
+	c := NewClient(cfg)
+	ai.RegisterAPIClient(c)
+	return c
+}
+
+// Config holds test-friendly configuration for constructing a ProviderEndpoint.
 type Config struct {
 	HTTPClient *http.Client
 	BaseURL    string
 	APIKey     string
 }
 
-// Provider implements ai.Provider for OpenAI Chat Completions API.
-type Provider struct {
-	client  *http.Client
-	baseURL string
-	apiKey  string
-}
-
-// New constructs an OpenAI provider with sane defaults.
-func New(cfg Config) *Provider {
-	client := cfg.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: defaultTimeout}
-	}
-	baseURL := strings.TrimSpace(cfg.BaseURL)
+// EndpointFromConfig creates a ProviderEndpoint from Config for testing.
+func EndpointFromConfig(cfg Config) ai.ProviderEndpoint {
+	baseURL := cfg.BaseURL
 	if baseURL == "" {
-		baseURL = defaultBaseURL
+		baseURL = "https://api.openai.com/v1"
 	}
-	return &Provider{
-		client:  client,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  cfg.APIKey,
+	return ai.ProviderEndpoint{
+		ProviderName: "openai",
+		BaseURL:      baseURL,
+		APIKey:       cfg.APIKey,
 	}
-}
-
-// API returns the provider API identifier.
-func (p *Provider) API() string {
-	return apiName
-}
-
-// Register constructs and registers the OpenAI provider in ai registry.
-func Register(cfg Config, sourceID string) *Provider {
-	p := New(cfg)
-	ai.RegisterProvider(p, sourceID)
-	return p
 }

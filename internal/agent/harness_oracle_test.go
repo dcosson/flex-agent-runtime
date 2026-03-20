@@ -12,18 +12,19 @@ import (
 )
 
 func TestO1_NativeVsAdapterEventParity(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
 
-	const apiName = "agent-o1-parity"
-	prov := &scriptedProvider{api: apiName, responses: []ai.AssistantMessage{{
+	const provName = "agent-o1-parity"
+	const clientType = "agent-o1-parity-client"
+	prov := &scriptedProvider{clientType: clientType, responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
 		Timestamp:  ai.TimeToMillis(time.Now()),
 	}}}
-	ai.RegisterProvider(prov, apiName)
+	registerTestProvider(prov, provName)
 
-	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: apiName, Provider: "test", MaxTokens: 1024}})
+	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: clientType, Provider: provName, MaxTokens: 1024}})
 	nativeAgent := New(driver)
 	nativeAgent.SetSession(&Session{ID: "parity-s1"})
 

@@ -7,16 +7,16 @@ import (
 	"testing"
 )
 
-type mockEmbeddingProvider struct {
-	api string
-	fn  func(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error)
+type mockEmbeddingClient struct {
+	clientType string
+	fn         EmbedFunc
 }
 
-func (m *mockEmbeddingProvider) API() string { return m.api }
+func (m *mockEmbeddingClient) ClientType() string { return m.clientType }
 
-func (m *mockEmbeddingProvider) Embed(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+func (m *mockEmbeddingClient) Embed(ctx context.Context, endpoint ProviderEndpoint, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 	if m.fn != nil {
-		return m.fn(ctx, model, req)
+		return m.fn(ctx, endpoint, model, req)
 	}
 	out := make([]Embedding, len(req.Texts))
 	for i := range req.Texts {
@@ -50,25 +50,25 @@ func TestEmbeddingConstants(t *testing.T) {
 	}
 }
 
-func TestEmbeddingProviderRegistryBasic(t *testing.T) {
-	withIsolatedEmbeddingProviders(t)
-	p := &mockEmbeddingProvider{api: "openai-embeddings"}
-	RegisterEmbeddingProvider(p, "src")
-	got, err := GetEmbeddingProvider("openai-embeddings")
+func TestEmbeddingAPIClientRegistryBasicFromEmbeddingTest(t *testing.T) {
+	withIsolatedEmbeddingClients(t)
+	c := &mockEmbeddingClient{clientType: "openai-embeddings"}
+	RegisterEmbeddingAPIClient(c)
+	got, err := GetEmbeddingAPIClient("openai-embeddings")
 	if err != nil {
-		t.Fatalf("GetEmbeddingProvider err: %v", err)
+		t.Fatalf("GetEmbeddingAPIClient err: %v", err)
 	}
-	if got.API() != p.api {
-		t.Fatalf("unexpected provider api: %q", got.API())
+	if got.ClientType() != c.clientType {
+		t.Fatalf("unexpected client type: %q", got.ClientType())
 	}
-	UnregisterEmbeddingProviders("src")
-	if _, err := GetEmbeddingProvider("openai-embeddings"); err == nil {
-		t.Fatal("expected missing embedding provider after unregister")
+	ClearEmbeddingAPIClients()
+	if _, err := GetEmbeddingAPIClient("openai-embeddings"); err == nil {
+		t.Fatal("expected missing embedding client after clear")
 	}
 }
 
-func TestEmbeddingProviderRegistryConcurrent(t *testing.T) {
-	withIsolatedEmbeddingProviders(t)
+func TestEmbeddingAPIClientRegistryConcurrentFromEmbeddingTest(t *testing.T) {
+	withIsolatedEmbeddingClients(t)
 	const goroutines = 20
 	const ops = 500
 	var wg sync.WaitGroup
@@ -77,16 +77,14 @@ func TestEmbeddingProviderRegistryConcurrent(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < ops; j++ {
-				api := fmt.Sprintf("api-%d", j%7)
-				switch j % 4 {
+				ct := fmt.Sprintf("ct-%d", j%7)
+				switch j % 3 {
 				case 0:
-					RegisterEmbeddingProvider(&mockEmbeddingProvider{api: api}, "src")
+					RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: ct})
 				case 1:
-					_, _ = GetEmbeddingProvider(api)
+					_, _ = GetEmbeddingAPIClient(ct)
 				case 2:
-					UnregisterEmbeddingProviders("src")
-				case 3:
-					ClearEmbeddingProviders()
+					ClearEmbeddingAPIClients()
 				}
 			}
 		}(i)
@@ -94,9 +92,9 @@ func TestEmbeddingProviderRegistryConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
-func TestGetEmbeddingProviderError(t *testing.T) {
-	withIsolatedEmbeddingProviders(t)
-	_, err := GetEmbeddingProvider("missing")
+func TestGetEmbeddingAPIClientError(t *testing.T) {
+	withIsolatedEmbeddingClients(t)
+	_, err := GetEmbeddingAPIClient("missing")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -105,10 +103,10 @@ func TestGetEmbeddingProviderError(t *testing.T) {
 	}
 }
 
-func withIsolatedEmbeddingProviders(t *testing.T) {
+func withIsolatedEmbeddingClients(t *testing.T) {
 	t.Helper()
-	ClearEmbeddingProviders()
-	t.Cleanup(ClearEmbeddingProviders)
+	ClearEmbeddingAPIClients()
+	t.Cleanup(ClearEmbeddingAPIClients)
 }
 
 func withIsolatedEmbeddingModels(t *testing.T) {
@@ -120,5 +118,20 @@ func withIsolatedEmbeddingModels(t *testing.T) {
 		for _, m := range orig {
 			RegisterEmbeddingModel(m)
 		}
+	})
+}
+
+// registerMockEmbeddingProvider registers both an EmbeddingAPIClient and a ProviderConfig
+// for use in tests that call Embed(). The clientType is used as the EmbeddingAPIClientType
+// in the ProviderConfig, and providerName is the ProviderConfig name (matching model.Provider).
+func registerMockEmbeddingProvider(t *testing.T, clientType, providerName string, fn EmbedFunc) {
+	t.Helper()
+	RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: clientType, fn: fn})
+	RegisterProviderConfig(ProviderConfig{
+		Name:                   providerName,
+		EmbeddingAPIClientType: clientType,
+	})
+	t.Cleanup(func() {
+		UnregisterProviderConfig(providerName)
 	})
 }

@@ -3,17 +3,16 @@ package anthropic
 import "encoding/json"
 
 type wireRequest struct {
-	Model     string            `json:"model"`
-	MaxTokens int               `json:"max_tokens"`
-	TopP      *float64          `json:"top_p,omitempty"`
-	TopK      *int              `json:"top_k,omitempty"`
-	Messages  []wireMessage     `json:"messages"`
-	System    string            `json:"system,omitempty"`
-	Tools     []wireTool        `json:"tools,omitempty"`
-	Thinking  *wireThinking     `json:"thinking,omitempty"`
-	Stream    bool              `json:"stream"`
-	Metadata  map[string]any    `json:"metadata,omitempty"`
-	Headers   map[string]string `json:"-"`
+	Model     string         `json:"model"`
+	MaxTokens int            `json:"max_tokens"`
+	TopP      *float64       `json:"top_p,omitempty"`
+	TopK      *int           `json:"top_k,omitempty"`
+	Messages  []wireMessage  `json:"messages"`
+	System    string         `json:"system,omitempty"`
+	Tools     []wireTool     `json:"tools,omitempty"`
+	Thinking  *wireThinking  `json:"thinking,omitempty"`
+	Stream    bool           `json:"stream"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
 type wireThinking struct {

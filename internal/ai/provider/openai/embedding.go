@@ -14,49 +14,41 @@ import (
 
 const embeddingAPIName = "openai-embeddings"
 
-// EmbeddingProvider implements ai.EmbeddingProvider for OpenAI-compatible APIs.
-type EmbeddingProvider struct {
-	client  *http.Client
-	baseURL string
-	apiKey  string
+// EmbeddingClient implements ai.EmbeddingAPIClient for OpenAI-compatible embedding APIs.
+// It is stateless — base URL and API key come from ProviderEndpoint per-call.
+type EmbeddingClient struct {
+	httpClient *http.Client
 }
 
-var _ ai.EmbeddingProvider = (*EmbeddingProvider)(nil)
+var _ ai.EmbeddingAPIClient = (*EmbeddingClient)(nil)
 
-// NewEmbedding constructs an OpenAI embedding provider with sane defaults.
-func NewEmbedding(cfg Config) *EmbeddingProvider {
+// NewEmbeddingClient constructs an OpenAI embedding client.
+func NewEmbeddingClient(cfg ClientConfig) *EmbeddingClient {
 	client := cfg.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: defaultTimeout}
 	}
-	baseURL := strings.TrimSpace(cfg.BaseURL)
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-	return &EmbeddingProvider{
-		client:  client,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  cfg.APIKey,
-	}
+	return &EmbeddingClient{httpClient: client}
 }
 
-func (p *EmbeddingProvider) API() string {
+// ClientType returns the embedding API client type identifier.
+func (c *EmbeddingClient) ClientType() string {
 	return embeddingAPIName
 }
 
-// RegisterEmbedding constructs and registers the OpenAI embedding provider.
-func RegisterEmbedding(cfg Config, sourceID string) *EmbeddingProvider {
-	p := NewEmbedding(cfg)
-	ai.RegisterEmbeddingProvider(p, sourceID)
-	return p
+// RegisterEmbeddingClient creates and registers the OpenAI embedding API client.
+func RegisterEmbeddingClient(cfg ClientConfig) *EmbeddingClient {
+	c := NewEmbeddingClient(cfg)
+	ai.RegisterEmbeddingAPIClient(c)
+	return c
 }
 
 // Embed dispatches embedding requests with shared batch-splitting behavior.
-func (p *EmbeddingProvider) Embed(ctx context.Context, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
-	return ai.BatchEmbed(ctx, p.embedSingle, model, req)
+func (c *EmbeddingClient) Embed(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
+	return ai.BatchEmbed(ctx, c.embedSingle, endpoint, model, req)
 }
 
-func (p *EmbeddingProvider) embedSingle(ctx context.Context, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
+func (c *EmbeddingClient) embedSingle(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
 	wireReq := embeddingRequestWire{
 		Model: model.ID,
 		Input: append([]string(nil), req.Texts...),
@@ -74,17 +66,17 @@ func (p *EmbeddingProvider) embedSingle(ctx context.Context, model ai.EmbeddingM
 		return nil, fmt.Errorf("marshal embedding request: %w", err)
 	}
 
-	endpoint := strings.TrimRight(p.resolveBaseURL(model), "/") + "/embeddings"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	url := strings.TrimRight(endpoint.BaseURL, "/") + "/embeddings"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("build embedding request: %w", err)
 	}
 	httpReq.Header.Set("content-type", "application/json")
-	if p.apiKey != "" {
-		httpReq.Header.Set("authorization", "Bearer "+p.apiKey)
+	if endpoint.APIKey != "" {
+		httpReq.Header.Set("authorization", "Bearer "+endpoint.APIKey)
 	}
 
-	resp, err := p.client.Do(httpReq)
+	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -126,11 +118,4 @@ func (p *EmbeddingProvider) embedSingle(ctx context.Context, model ai.EmbeddingM
 			Tokens: wireResp.Usage.TotalTokens,
 		},
 	}, nil
-}
-
-func (p *EmbeddingProvider) resolveBaseURL(model ai.EmbeddingModel) string {
-	if b := strings.TrimSpace(model.BaseURL); b != "" {
-		return b
-	}
-	return p.baseURL
 }

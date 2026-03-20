@@ -6,7 +6,7 @@ import (
 )
 
 // BatchEmbed splits large embedding requests across provider max batch size.
-func BatchEmbed(ctx context.Context, embedFn EmbedFunc, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+func BatchEmbed(ctx context.Context, embedFn EmbedFunc, endpoint ProviderEndpoint, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 	if embedFn == nil {
 		return nil, fmt.Errorf("embed function is required")
 	}
@@ -18,7 +18,7 @@ func BatchEmbed(ctx context.Context, embedFn EmbedFunc, model EmbeddingModel, re
 		}
 	}
 	if len(req.Texts) <= batchSize {
-		return embedFn(ctx, model, req)
+		return embedFn(ctx, endpoint, model, req)
 	}
 
 	allEmbeddings := make([]Embedding, 0, len(req.Texts))
@@ -37,7 +37,7 @@ func BatchEmbed(ctx context.Context, embedFn EmbedFunc, model EmbeddingModel, re
 		batchReq.Texts = req.Texts[start:end]
 		batchReq.OnProgress = nil
 
-		resp, err := embedFn(ctx, model, batchReq)
+		resp, err := embedFn(ctx, endpoint, model, batchReq)
 		if err != nil {
 			return &EmbeddingResponse{Embeddings: allEmbeddings, Model: model.ID, Usage: usage}, fmt.Errorf("embed batch [%d:%d] failed: %w", start, end, err)
 		}

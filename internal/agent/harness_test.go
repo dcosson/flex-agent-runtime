@@ -14,23 +14,23 @@ import (
 	"pgregory.net/rapid"
 )
 
-type panicProvider struct{ api string }
+type panicProvider struct{ ct string }
 
-func (p *panicProvider) API() string { return p.api }
-func (p *panicProvider) Stream(context.Context, ai.Model, ai.Context, ai.StreamOptions) *ai.EventStream {
+func (p *panicProvider) ClientType() string { return p.ct }
+func (p *panicProvider) Stream(context.Context, ai.ProviderEndpoint, ai.Model, ai.Context, ai.StreamOptions) *ai.EventStream {
 	panic("provider stream panic")
 }
-func (p *panicProvider) StreamSimple(context.Context, ai.Model, ai.Context, ai.SimpleStreamOptions) *ai.EventStream {
+func (p *panicProvider) StreamSimple(context.Context, ai.ProviderEndpoint, ai.Model, ai.Context, ai.SimpleStreamOptions) *ai.EventStream {
 	panic("provider stream panic")
 }
 
-type weirdEventProvider struct{ api string }
+type weirdEventProvider struct{ ct string }
 
-func (p *weirdEventProvider) API() string { return p.api }
-func (p *weirdEventProvider) Stream(context.Context, ai.Model, ai.Context, ai.StreamOptions) *ai.EventStream {
+func (p *weirdEventProvider) ClientType() string { return p.ct }
+func (p *weirdEventProvider) Stream(context.Context, ai.ProviderEndpoint, ai.Model, ai.Context, ai.StreamOptions) *ai.EventStream {
 	return p.stream()
 }
-func (p *weirdEventProvider) StreamSimple(context.Context, ai.Model, ai.Context, ai.SimpleStreamOptions) *ai.EventStream {
+func (p *weirdEventProvider) StreamSimple(context.Context, ai.ProviderEndpoint, ai.Model, ai.Context, ai.SimpleStreamOptions) *ai.EventStream {
 	return p.stream()
 }
 func (p *weirdEventProvider) stream() *ai.EventStream {
@@ -48,15 +48,15 @@ func (p *weirdEventProvider) stream() *ai.EventStream {
 }
 
 type slowProvider struct {
-	api   string
+	ct    string
 	delay time.Duration
 }
 
-func (p *slowProvider) API() string { return p.api }
-func (p *slowProvider) Stream(context.Context, ai.Model, ai.Context, ai.StreamOptions) *ai.EventStream {
+func (p *slowProvider) ClientType() string { return p.ct }
+func (p *slowProvider) Stream(context.Context, ai.ProviderEndpoint, ai.Model, ai.Context, ai.StreamOptions) *ai.EventStream {
 	return p.stream()
 }
-func (p *slowProvider) StreamSimple(context.Context, ai.Model, ai.Context, ai.SimpleStreamOptions) *ai.EventStream {
+func (p *slowProvider) StreamSimple(context.Context, ai.ProviderEndpoint, ai.Model, ai.Context, ai.SimpleStreamOptions) *ai.EventStream {
 	return p.stream()
 }
 func (p *slowProvider) stream() *ai.EventStream {
@@ -86,19 +86,19 @@ func waitForState(t *testing.T, a *Agent, st AgentState, timeout time.Duration) 
 }
 
 func TestP1_StateTransitionValidity(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
 	// Shared provider across rapid iterations is intentional; this property only
 	// validates state-transition legality, not content differences by iteration.
-	prov := &scriptedProvider{api: "agent-p1", responses: []ai.AssistantMessage{{
+	prov := &scriptedProvider{clientType: "agent-p1-client", responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
 		Timestamp:  ai.TimeToMillis(time.Now()),
 	}}}
-	ai.RegisterProvider(prov, "agent-p1")
+	registerTestProvider(prov, "agent-p1")
 
 	rapid.Check(t, func(rt *rapid.T) {
-		driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-p1", Provider: "test", MaxTokens: 1024}})
+		driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-p1-client", Provider: "agent-p1", MaxTokens: 1024}})
 		agent := New(driver)
 		agent.SetSession(&Session{ID: "runtime-p1", DriverSessionID: "driver-p1"})
 
@@ -151,18 +151,18 @@ func TestP1_StateTransitionValidity(t *testing.T) {
 }
 
 func TestP2_FollowUpFIFOPreservation(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
 
-	prov := &scriptedProvider{api: "agent-p2", responses: []ai.AssistantMessage{{
+	prov := &scriptedProvider{clientType: "agent-p2-client", responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
 		Timestamp:  ai.TimeToMillis(time.Now()),
 	}}}
-	ai.RegisterProvider(prov, "agent-p2")
+	registerTestProvider(prov, "agent-p2")
 
 	rapid.Check(t, func(rt *rapid.T) {
-		driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-p2", Provider: "test", MaxTokens: 1024}})
+		driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-p2-client", Provider: "agent-p2", MaxTokens: 1024}})
 		agent := New(driver)
 		agent.SetSession(&Session{ID: "runtime-p2"})
 
@@ -205,18 +205,18 @@ func TestP2_FollowUpFIFOPreservation(t *testing.T) {
 }
 
 func TestP3_SnapshotTriggerCardinality(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
 
-	prov := &scriptedProvider{api: "agent-p3", responses: []ai.AssistantMessage{{
+	prov := &scriptedProvider{clientType: "agent-p3-client", responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
 		Timestamp:  ai.TimeToMillis(time.Now()),
 	}}}
-	ai.RegisterProvider(prov, "agent-p3")
+	registerTestProvider(prov, "agent-p3")
 
 	rapid.Check(t, func(rt *rapid.T) {
-		driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-p3", Provider: "test", MaxTokens: 1024}})
+		driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-p3-client", Provider: "agent-p3", MaxTokens: 1024}})
 		agent := New(driver)
 		agent.SetSession(&Session{ID: "runtime-p3"})
 
@@ -275,20 +275,20 @@ func TestP3_SnapshotTriggerCardinality(t *testing.T) {
 }
 
 func TestP4_SessionIDAuthority(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
-	prov := &scriptedProvider{api: "agent-p4", responses: []ai.AssistantMessage{{
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
+	prov := &scriptedProvider{clientType: "agent-p4-client", responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
 		Timestamp:  ai.TimeToMillis(time.Now()),
 	}}}
-	ai.RegisterProvider(prov, "agent-p4")
+	registerTestProvider(prov, "agent-p4")
 
 	rapid.Check(t, func(rt *rapid.T) {
 		runtimeID := rapid.StringMatching(`[a-z]{6}`).Draw(rt, "runtime-id")
 		driverID := runtimeID + "-driver"
 
-		driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-p4", Provider: "test", MaxTokens: 1024}})
+		driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-p4-client", Provider: "agent-p4", MaxTokens: 1024}})
 		agent := New(driver)
 		agent.SetSession(&Session{ID: runtimeID, DriverSessionID: driverID})
 
@@ -316,11 +316,13 @@ func TestP4_SessionIDAuthority(t *testing.T) {
 }
 
 func TestP5_AbortIdempotency(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
-	ai.RegisterProvider(&slowProvider{api: "agent-p5", delay: 80 * time.Millisecond}, "agent-p5")
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
+	slowProv := &slowProvider{ct: "agent-p5-client", delay: 80 * time.Millisecond}
+	ai.RegisterAPIClient(slowProv)
+	ai.RegisterProviderConfig(ai.ProviderConfig{Name: "agent-p5", APIClientType: slowProv.ClientType()})
 
-	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-p5", Provider: "test", MaxTokens: 1024}})
+	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-p5-client", Provider: "agent-p5", MaxTokens: 1024}})
 	agent := New(driver)
 	agent.SetSession(&Session{ID: "runtime-p5"})
 
@@ -342,11 +344,13 @@ func TestP5_AbortIdempotency(t *testing.T) {
 }
 
 func TestF1_ProviderStreamPanicRecovery(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
-	ai.RegisterProvider(&panicProvider{api: "agent-f1"}, "agent-f1")
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
+	panicProv := &panicProvider{ct: "agent-f1-client"}
+	ai.RegisterAPIClient(panicProv)
+	ai.RegisterProviderConfig(ai.ProviderConfig{Name: "agent-f1", APIClientType: panicProv.ClientType()})
 
-	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-f1", Provider: "test", MaxTokens: 1024}})
+	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-f1-client", Provider: "agent-f1", MaxTokens: 1024}})
 	agent := New(driver)
 	agent.SetSession(&Session{ID: "runtime-f1"})
 
@@ -376,10 +380,10 @@ func TestF1_ProviderStreamPanicRecovery(t *testing.T) {
 }
 
 func TestF2_ToolHangAndTimeoutRecovery(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
 
-	prov := &scriptedProvider{api: "agent-f2", responses: []ai.AssistantMessage{
+	prov := &scriptedProvider{clientType: "agent-f2-client", responses: []ai.AssistantMessage{
 		{
 			Content:    []ai.ContentBlock{&ai.ToolCall{ID: "tc-1", Name: "hang", Arguments: map[string]any{}}},
 			StopReason: ai.StopReasonToolUse,
@@ -391,7 +395,7 @@ func TestF2_ToolHangAndTimeoutRecovery(t *testing.T) {
 			Timestamp:  ai.TimeToMillis(time.Now()),
 		},
 	}}
-	ai.RegisterProvider(prov, "agent-f2")
+	registerTestProvider(prov, "agent-f2")
 
 	tool := AgentTool{
 		Tool: ai.Tool{Name: "hang"},
@@ -401,7 +405,7 @@ func TestF2_ToolHangAndTimeoutRecovery(t *testing.T) {
 		},
 	}
 
-	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-f2", Provider: "test", MaxTokens: 1024}, Tools: []AgentTool{tool}})
+	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-f2-client", Provider: "agent-f2", MaxTokens: 1024}, Tools: []AgentTool{tool}})
 	agent := New(driver)
 	agent.SetSession(&Session{ID: "runtime-f2"})
 
@@ -430,11 +434,13 @@ func TestF2_ToolHangAndTimeoutRecovery(t *testing.T) {
 }
 
 func TestF4_MalformedProviderEventIgnored(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
-	ai.RegisterProvider(&weirdEventProvider{api: "agent-f4"}, "agent-f4")
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
+	weirdProv := &weirdEventProvider{ct: "agent-f4-client"}
+	ai.RegisterAPIClient(weirdProv)
+	ai.RegisterProviderConfig(ai.ProviderConfig{Name: "agent-f4", APIClientType: weirdProv.ClientType()})
 
-	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-f4", Provider: "test", MaxTokens: 1024}})
+	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-f4-client", Provider: "agent-f4", MaxTokens: 1024}})
 	agent := New(driver)
 	agent.SetSession(&Session{ID: "runtime-f4"})
 
@@ -445,11 +451,13 @@ func TestF4_MalformedProviderEventIgnored(t *testing.T) {
 }
 
 func TestF5_ConcurrentControlStorms(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
-	ai.RegisterProvider(&slowProvider{api: "agent-f5", delay: 50 * time.Millisecond}, "agent-f5")
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
+	slowProv := &slowProvider{ct: "agent-f5-client", delay: 50 * time.Millisecond}
+	ai.RegisterAPIClient(slowProv)
+	ai.RegisterProviderConfig(ai.ProviderConfig{Name: "agent-f5", APIClientType: slowProv.ClientType()})
 
-	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-f5", Provider: "test", MaxTokens: 1024}})
+	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-f5-client", Provider: "agent-f5", MaxTokens: 1024}})
 	agent := New(driver)
 	agent.SetSession(&Session{ID: "runtime-f5"})
 	if err := agent.Prompt(context.Background(), "storm"); err != nil {
@@ -476,16 +484,16 @@ func TestF5_ConcurrentControlStorms(t *testing.T) {
 }
 
 func TestO2_ReplayOracleStateMetrics(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
-	prov := &scriptedProvider{api: "agent-o2", responses: []ai.AssistantMessage{{
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
+	prov := &scriptedProvider{clientType: "agent-o2-client", responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
 		Timestamp:  ai.TimeToMillis(time.Now()),
 	}}}
-	ai.RegisterProvider(prov, "agent-o2")
+	registerTestProvider(prov, "agent-o2")
 
-	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-o2", Provider: "test", MaxTokens: 1024}})
+	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-o2-client", Provider: "agent-o2", MaxTokens: 1024}})
 	agent := New(driver)
 	agent.SetSession(&Session{ID: "runtime-o2"})
 
@@ -518,16 +526,16 @@ func TestO2_ReplayOracleStateMetrics(t *testing.T) {
 }
 
 func TestS2_ControlBoundarySteeringAppliedNextTurn(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
-	prov := &scriptedProvider{api: "agent-s2", responses: []ai.AssistantMessage{{
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
+	prov := &scriptedProvider{clientType: "agent-s2-client", responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
 		Timestamp:  ai.TimeToMillis(time.Now()),
 	}}}
-	ai.RegisterProvider(prov, "agent-s2")
+	registerTestProvider(prov, "agent-s2")
 
-	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-s2", Provider: "test", MaxTokens: 1024}})
+	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-s2-client", Provider: "agent-s2", MaxTokens: 1024}})
 	agent := New(driver)
 	agent.SetSession(&Session{ID: "runtime-s2"})
 
@@ -557,16 +565,16 @@ func TestST3_BurstFollowUpStress(t *testing.T) {
 	if testing.Short() {
 		t.Skip("stress test skipped in short mode")
 	}
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
-	prov := &scriptedProvider{api: "agent-st3", responses: []ai.AssistantMessage{{
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
+	prov := &scriptedProvider{clientType: "agent-st3-client", responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
 		Timestamp:  ai.TimeToMillis(time.Now()),
 	}}}
-	ai.RegisterProvider(prov, "agent-st3")
+	registerTestProvider(prov, "agent-st3")
 
-	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-st3", Provider: "test", MaxTokens: 1024}})
+	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-st3-client", Provider: "agent-st3", MaxTokens: 1024}})
 	agent := New(driver)
 	agent.SetSession(&Session{ID: "runtime-st3"})
 
@@ -580,18 +588,18 @@ func TestST3_BurstFollowUpStress(t *testing.T) {
 }
 
 func TestSEC1_EventPayloadNoAPIKeyLeak(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
 	secret := "sk-test-very-secret"
-	prov := &scriptedProvider{api: "agent-sec1", responses: []ai.AssistantMessage{{
+	prov := &scriptedProvider{clientType: "agent-sec1-client", responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
 		Timestamp:  ai.TimeToMillis(time.Now()),
 	}}}
-	ai.RegisterProvider(prov, "agent-sec1")
+	registerTestProvider(prov, "agent-sec1")
 
 	driver := NewNativeDriver(DriverConfig{
-		Model:   ai.Model{ID: "m", API: "agent-sec1", Provider: "test", MaxTokens: 1024},
+		Model:   ai.Model{ID: "m", API: "agent-sec1-client", Provider: "agent-sec1", MaxTokens: 1024},
 		Options: ai.SimpleStreamOptions{StreamOptions: ai.StreamOptions{APIKey: secret}},
 	})
 	agent := New(driver)
@@ -622,9 +630,9 @@ func TestSEC1_EventPayloadNoAPIKeyLeak(t *testing.T) {
 }
 
 func TestSEC2_ToolResultBoundarySafety(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
-	prov := &scriptedProvider{api: "agent-sec2", responses: []ai.AssistantMessage{
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
+	prov := &scriptedProvider{clientType: "agent-sec2-client", responses: []ai.AssistantMessage{
 		{
 			Content:    []ai.ContentBlock{&ai.ToolCall{ID: "tc-1", Name: "unsafe", Arguments: map[string]any{}}},
 			StopReason: ai.StopReasonToolUse,
@@ -636,7 +644,7 @@ func TestSEC2_ToolResultBoundarySafety(t *testing.T) {
 			Timestamp:  ai.TimeToMillis(time.Now()),
 		},
 	}}
-	ai.RegisterProvider(prov, "agent-sec2")
+	registerTestProvider(prov, "agent-sec2")
 
 	tool := AgentTool{
 		Tool: ai.Tool{Name: "unsafe"},
@@ -647,7 +655,7 @@ func TestSEC2_ToolResultBoundarySafety(t *testing.T) {
 		},
 	}
 
-	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-sec2", Provider: "test", MaxTokens: 1024}, Tools: []AgentTool{tool}})
+	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-sec2-client", Provider: "agent-sec2", MaxTokens: 1024}, Tools: []AgentTool{tool}})
 	agent := New(driver)
 	agent.SetSession(&Session{ID: "runtime-sec2"})
 	if err := agent.Prompt(context.Background(), "go"); err != nil {
@@ -683,16 +691,16 @@ func TestSEC2_ToolResultBoundarySafety(t *testing.T) {
 }
 
 func TestSEC3_DriverNativeIDTrustBoundary(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
-	prov := &scriptedProvider{api: "agent-sec3", responses: []ai.AssistantMessage{{
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
+	prov := &scriptedProvider{clientType: "agent-sec3-client", responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
 		Timestamp:  ai.TimeToMillis(time.Now()),
 	}}}
-	ai.RegisterProvider(prov, "agent-sec3")
+	registerTestProvider(prov, "agent-sec3")
 
-	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-sec3", Provider: "test", MaxTokens: 1024}})
+	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "agent-sec3-client", Provider: "agent-sec3", MaxTokens: 1024}})
 	agent := New(driver)
 	runtimeID := "runtime-auth-id"
 	agent.SetSession(&Session{ID: runtimeID, DriverSessionID: "driver-spoof-id"})

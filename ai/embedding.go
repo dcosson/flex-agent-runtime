@@ -9,7 +9,6 @@ type (
 	EmbeddingUsage    = internal.EmbeddingUsage
 	EmbeddingTaskType = internal.EmbeddingTaskType
 	EmbeddingEncoding = internal.EmbeddingEncoding
-	EmbeddingProvider = internal.EmbeddingProvider
 	EmbeddingModel    = internal.EmbeddingModel
 	EmbeddingCost     = internal.EmbeddingCost
 	EmbedFunc         = internal.EmbedFunc
@@ -34,10 +33,6 @@ const (
 var (
 	Embed                         = internal.Embed
 	BatchEmbed                    = internal.BatchEmbed
-	RegisterEmbeddingProvider     = internal.RegisterEmbeddingProvider
-	GetEmbeddingProvider          = internal.GetEmbeddingProvider
-	UnregisterEmbeddingProviders  = internal.UnregisterEmbeddingProviders
-	ClearEmbeddingProviders       = internal.ClearEmbeddingProviders
 	RegisterEmbeddingModel        = internal.RegisterEmbeddingModel
 	GetEmbeddingModel             = internal.GetEmbeddingModel
 	ListEmbeddingModels           = internal.ListEmbeddingModels

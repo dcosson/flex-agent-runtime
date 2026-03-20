@@ -11,10 +11,10 @@ import (
 	"github.com/dcosson/flex-agent-runtime/internal/tools/codeinterp/datastore"
 )
 
-type fakeProvider struct{ api string }
+type fakeProvider struct{ clientType string }
 
-func (p *fakeProvider) API() string { return p.api }
-func (p *fakeProvider) Stream(context.Context, ai.Model, ai.Context, ai.StreamOptions) *ai.EventStream {
+func (p *fakeProvider) ClientType() string { return p.clientType }
+func (p *fakeProvider) Stream(_ context.Context, _ ai.ProviderEndpoint, _ ai.Model, _ ai.Context, _ ai.StreamOptions) *ai.EventStream {
 	es := ai.NewEventStream()
 	go func() {
 		defer es.Close()
@@ -31,8 +31,8 @@ func (p *fakeProvider) Stream(context.Context, ai.Model, ai.Context, ai.StreamOp
 	}()
 	return es
 }
-func (p *fakeProvider) StreamSimple(context.Context, ai.Model, ai.Context, ai.SimpleStreamOptions) *ai.EventStream {
-	return p.Stream(context.Background(), ai.Model{}, ai.Context{}, ai.StreamOptions{})
+func (p *fakeProvider) StreamSimple(_ context.Context, _ ai.ProviderEndpoint, _ ai.Model, _ ai.Context, _ ai.SimpleStreamOptions) *ai.EventStream {
+	return p.Stream(context.Background(), ai.ProviderEndpoint{}, ai.Model{}, ai.Context{}, ai.StreamOptions{})
 }
 
 func testCatalog() []agent.AgentTool {
@@ -119,9 +119,12 @@ def main(args):
 }
 
 func TestRuntimeLLMCallAndBatch(t *testing.T) {
-	ai.ClearProviders()
-	defer ai.ClearProviders()
-	ai.RegisterProvider(&fakeProvider{api: "fake-api"}, "codeinterp-test")
+	ai.ClearAPIClients()
+	ai.ClearProviderConfigs()
+	defer ai.ClearAPIClients()
+	defer ai.ClearProviderConfigs()
+	ai.RegisterAPIClient(&fakeProvider{clientType: "fake-api"})
+	ai.RegisterProviderConfig(ai.ProviderConfig{Name: "fake", APIClientType: "fake-api"})
 	model := ai.Model{ID: "m1", API: "fake-api", Provider: "fake", MaxTokens: 2048}
 	ai.RegisterModel(model)
 

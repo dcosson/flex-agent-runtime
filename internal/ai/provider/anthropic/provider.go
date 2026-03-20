@@ -15,7 +15,40 @@ const (
 	defaultTimeout = 60 * time.Second
 )
 
-// Config controls Anthropic provider construction.
+// ClientConfig controls Anthropic client construction.
+type ClientConfig struct {
+	HTTPClient *http.Client
+}
+
+// Client implements ai.APIClient for the Anthropic Messages API.
+// It is stateless — base URL, API key, version, and beta headers come from
+// ProviderEndpoint per-call.
+type Client struct {
+	httpClient *http.Client
+}
+
+// NewClient constructs an Anthropic protocol client.
+func NewClient(cfg ClientConfig) *Client {
+	client := cfg.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: defaultTimeout}
+	}
+	return &Client{httpClient: client}
+}
+
+// ClientType returns the API client type identifier.
+func (c *Client) ClientType() string {
+	return apiName
+}
+
+// Register creates a Client and registers it as an API client.
+func Register(cfg ClientConfig) *Client {
+	c := NewClient(cfg)
+	ai.RegisterAPIClient(c)
+	return c
+}
+
+// Config holds test-friendly configuration for constructing a ProviderEndpoint.
 type Config struct {
 	HTTPClient  *http.Client
 	BaseURL     string
@@ -24,46 +57,38 @@ type Config struct {
 	BetaHeaders []string
 }
 
-// Provider implements ai.Provider for Anthropic Messages API.
-type Provider struct {
-	client      *http.Client
-	baseURL     string
-	apiKey      string
-	version     string
-	betaHeaders []string
-}
-
-// New constructs an Anthropic provider with sane defaults.
-func New(cfg Config) *Provider {
-	client := cfg.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: defaultTimeout}
-	}
+// EndpointFromConfig creates a ProviderEndpoint from Config for testing.
+func EndpointFromConfig(cfg Config) ai.ProviderEndpoint {
 	baseURL := strings.TrimSpace(cfg.BaseURL)
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
+	baseURL = strings.TrimRight(baseURL, "/")
+
 	version := strings.TrimSpace(cfg.Version)
 	if version == "" {
 		version = defaultVersion
 	}
-	return &Provider{
-		client:      client,
-		baseURL:     strings.TrimRight(baseURL, "/"),
-		apiKey:      cfg.APIKey,
-		version:     version,
-		betaHeaders: append([]string(nil), cfg.BetaHeaders...),
+
+	ep := ai.ProviderEndpoint{
+		ProviderName:     "anthropic",
+		BaseURL:          baseURL,
+		APIKey:           cfg.APIKey,
+		ProviderSpecific: map[string]string{"apiVersion": version},
 	}
-}
 
-// API returns the ai.Provider API key.
-func (p *Provider) API() string {
-	return apiName
-}
+	// Convert BetaHeaders to multi-valued header
+	if len(cfg.BetaHeaders) > 0 {
+		var betas []string
+		for _, b := range cfg.BetaHeaders {
+			if strings.TrimSpace(b) != "" {
+				betas = append(betas, b)
+			}
+		}
+		if len(betas) > 0 {
+			ep.Headers = map[string][]string{"anthropic-beta": betas}
+		}
+	}
 
-// Register constructs and registers the Anthropic provider in ai registry.
-func Register(cfg Config, sourceID string) *Provider {
-	p := New(cfg)
-	ai.RegisterProvider(p, sourceID)
-	return p
+	return ep
 }

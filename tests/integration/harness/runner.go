@@ -140,18 +140,18 @@ func Run(t *testing.T, scenario Scenario) *ScenarioResult {
 
 	// Register isolated provider
 	api := testutil.UniqueAPI("e2e")
-	sourceID := "e2e-" + t.Name()
+	providerName := "e2e-" + t.Name()
 	provider := testutil.NewScriptedProvider(api, scenario.Script)
 	if scenario.ProviderGates != nil {
 		provider.Gates = scenario.ProviderGates
 	}
-	ai.RegisterProvider(provider, sourceID)
+	testutil.RegisterScriptedProvider(provider, providerName)
 	t.Cleanup(func() {
-		ai.UnregisterProviders(sourceID)
+		ai.UnregisterProviderConfig(providerName)
 	})
 
 	// Build tools
-	agentModel := ai.Model{ID: "e2e-model", API: api, Provider: "e2e", MaxTokens: 4096}
+	agentModel := ai.Model{ID: "e2e-model", API: api, Provider: providerName, MaxTokens: 4096}
 	agentTools := tools.NewLocalTools(root, tools.LocalToolsOptions{})
 	agentTools = append(agentTools, scenario.ExtraTools...)
 	agentTools = configureCodeInterpTool(agentModel, agentTools)

@@ -93,13 +93,17 @@ func BenchmarkB6_DataStoreThroughput(b *testing.B) {
 
 func registerBenchModel(b *testing.B) ai.Model {
 	b.Helper()
-	ai.ClearProviders()
-	b.Cleanup(ai.ClearProviders)
+	ai.ClearAPIClients()
+	ai.ClearProviderConfigs()
+	b.Cleanup(ai.ClearAPIClients)
+	b.Cleanup(ai.ClearProviderConfigs)
 	id := atomic.AddUint64(&harnessSeq, 1)
-	api := fmt.Sprintf("codeinterp-bench-%d", id)
-	p := &harnessProvider{api: api, inTokens: 1, outTokens: 1, costUSD: 0.001}
-	ai.RegisterProvider(p, api)
-	m := ai.Model{ID: fmt.Sprintf("bench-%d", id), API: api, Provider: "harness", MaxTokens: 4096}
+	clientType := fmt.Sprintf("codeinterp-bench-%d", id)
+	providerName := fmt.Sprintf("bench-provider-%d", id)
+	p := &harnessProvider{clientType: clientType, inTokens: 1, outTokens: 1, costUSD: 0.001}
+	ai.RegisterAPIClient(p)
+	ai.RegisterProviderConfig(ai.ProviderConfig{Name: providerName, APIClientType: clientType})
+	m := ai.Model{ID: fmt.Sprintf("bench-%d", id), API: clientType, Provider: providerName, MaxTokens: 4096}
 	ai.RegisterModel(m)
 	return m
 }

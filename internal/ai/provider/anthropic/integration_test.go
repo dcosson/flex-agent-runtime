@@ -19,11 +19,12 @@ func TestIntegrationAnthropicSmoke(t *testing.T) {
 		t.Fatalf("GetModel: %v", err)
 	}
 
-	p := New(Config{APIKey: key})
+	p := NewClient(ClientConfig{})
+	ep := EndpointFromConfig(Config{APIKey: key})
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	es := p.Stream(ctx, model, ai.Context{
+	es := p.Stream(ctx, ep, model, ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "Say hello in one short sentence."}}}},
 	}, ai.StreamOptions{})
 	msg, err := es.Drain()

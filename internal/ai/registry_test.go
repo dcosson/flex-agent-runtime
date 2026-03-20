@@ -8,10 +8,13 @@ import (
 	"time"
 )
 
-type mockProvider struct{ api string }
+// mockStreamingAPIClient is a mock APIClient that returns a simple response.
+type mockStreamingAPIClient struct {
+	clientType string
+}
 
-func (m *mockProvider) API() string { return m.api }
-func (m *mockProvider) Stream(_ context.Context, _ Model, _ Context, _ StreamOptions) *EventStream {
+func (m *mockStreamingAPIClient) ClientType() string { return m.clientType }
+func (m *mockStreamingAPIClient) Stream(_ context.Context, _ ProviderEndpoint, _ Model, _ Context, _ StreamOptions) *EventStream {
 	es := NewEventStream()
 	go func() {
 		defer es.Close()
@@ -19,33 +22,17 @@ func (m *mockProvider) Stream(_ context.Context, _ Model, _ Context, _ StreamOpt
 	}()
 	return es
 }
-func (m *mockProvider) StreamSimple(_ context.Context, _ Model, _ Context, _ SimpleStreamOptions) *EventStream {
-	return m.Stream(context.Background(), Model{}, Context{}, StreamOptions{})
-}
-
-func TestProviderRegistryBasic(t *testing.T) {
-	ClearProviders()
-	p := &mockProvider{api: "x"}
-	RegisterProvider(p, "src")
-	got, err := GetProvider("x")
-	if err != nil {
-		t.Fatalf("GetProvider err: %v", err)
-	}
-	if got.API() != "x" {
-		t.Fatalf("unexpected provider")
-	}
-	if len(GetProviders()) != 1 {
-		t.Fatalf("expected 1 provider")
-	}
-	UnregisterProviders("src")
-	if _, err := GetProvider("x"); err == nil {
-		t.Fatalf("expected missing provider after unregister")
-	}
+func (m *mockStreamingAPIClient) StreamSimple(_ context.Context, _ ProviderEndpoint, _ Model, _ Context, _ SimpleStreamOptions) *EventStream {
+	return m.Stream(context.Background(), ProviderEndpoint{}, Model{}, Context{}, StreamOptions{})
 }
 
 // P9: registry thread-safety under concurrent operations.
 func TestRegistryConcurrentAccess(t *testing.T) {
-	ClearProviders()
+	ClearAPIClients()
+	ClearProviderConfigs()
+	t.Cleanup(ClearAPIClients)
+	t.Cleanup(ClearProviderConfigs)
+
 	const goroutines = 50
 	const ops = 1000
 
@@ -55,16 +42,19 @@ func TestRegistryConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < ops; j++ {
-				api := fmt.Sprintf("api-%d", id%10)
-				switch j % 4 {
+				ct := fmt.Sprintf("ct-%d", id%10)
+				pn := fmt.Sprintf("pn-%d", id%10)
+				switch j % 5 {
 				case 0:
-					RegisterProvider(&mockProvider{api: api}, "test")
+					RegisterAPIClient(&mockAPIClient{clientType: ct})
 				case 1:
-					_, _ = GetProvider(api)
+					_, _ = GetAPIClient(ct)
 				case 2:
-					_ = GetProviders()
+					RegisterProviderConfig(ProviderConfig{Name: pn, APIClientType: ct})
 				case 3:
-					UnregisterProviders("test")
+					_, _ = GetProviderConfig(pn)
+				case 4:
+					UnregisterProviderConfig(pn)
 				}
 			}
 		}(i)
@@ -74,7 +64,11 @@ func TestRegistryConcurrentAccess(t *testing.T) {
 
 // S2: stress registry under contention for a bounded duration.
 func TestRegistryStressContention(t *testing.T) {
-	ClearProviders()
+	ClearAPIClients()
+	ClearProviderConfigs()
+	t.Cleanup(ClearAPIClients)
+	t.Cleanup(ClearProviderConfigs)
+
 	deadline := time.Now().Add(750 * time.Millisecond)
 	var wg sync.WaitGroup
 
@@ -84,10 +78,12 @@ func TestRegistryStressContention(t *testing.T) {
 			defer wg.Done()
 			n := 0
 			for time.Now().Before(deadline) {
-				api := fmt.Sprintf("p-%d-%d", id, n%8)
-				RegisterProvider(&mockProvider{api: api}, "stress")
-				_, _ = GetProvider(api)
-				_ = GetProviders()
+				ct := fmt.Sprintf("ct-%d-%d", id, n%8)
+				pn := fmt.Sprintf("pn-%d-%d", id, n%8)
+				RegisterAPIClient(&mockAPIClient{clientType: ct})
+				RegisterProviderConfig(ProviderConfig{Name: pn, APIClientType: ct})
+				_, _ = GetAPIClient(ct)
+				_, _ = GetProviderConfig(pn)
 				n++
 			}
 		}(g)
@@ -96,9 +92,15 @@ func TestRegistryStressContention(t *testing.T) {
 }
 
 func TestStreamEntryPoints(t *testing.T) {
-	ClearProviders()
-	RegisterProvider(&mockProvider{api: "anthropic-messages"}, "test")
-	model := Model{API: "anthropic-messages"}
+	ClearAPIClients()
+	ClearProviderConfigs()
+	t.Cleanup(ClearAPIClients)
+	t.Cleanup(ClearProviderConfigs)
+
+	RegisterAPIClient(&mockStreamingAPIClient{clientType: "anthropic-messages"})
+	RegisterProviderConfig(ProviderConfig{Name: "anthropic", APIClientType: "anthropic-messages"})
+
+	model := Model{API: "anthropic-messages", Provider: "anthropic"}
 	msg, err := Complete(context.Background(), model, Context{}, StreamOptions{})
 	if err != nil {
 		t.Fatalf("Complete err: %v", err)
@@ -107,7 +109,7 @@ func TestStreamEntryPoints(t *testing.T) {
 		t.Fatalf("unexpected model: %q", msg.Model)
 	}
 
-	missing := Model{API: "missing"}
+	missing := Model{API: "missing", Provider: "missing-provider"}
 	es := Stream(context.Background(), missing, Context{}, StreamOptions{})
 	_, err = es.Drain()
 	if err == nil {

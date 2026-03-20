@@ -37,11 +37,11 @@ func BenchmarkB2_DeltaAllocations(b *testing.B) {
 	fixture := textFixture("a", "b", "c", "d", "e")
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
 	ctx := ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		es := p.Stream(context.Background(), testModel(), ctx, ai.StreamOptions{})
+		es := p.Stream(context.Background(), ep, testModel(), ctx, ai.StreamOptions{})
 		if _, err := es.Drain(); err != nil {
 			b.Fatalf("stream err: %v", err)
 		}
@@ -72,13 +72,13 @@ func BenchmarkB4_StreamOverhead(b *testing.B) {
 	fixture := textFixture("a", "b", "c", "d", "e", "f", "g", "h", "i", "j")
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
 	ctx := ai.Context{Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "x"}}}}}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		start := time.Now()
-		es := p.Stream(context.Background(), testModel(), ctx, ai.StreamOptions{})
+		es := p.Stream(context.Background(), ep, testModel(), ctx, ai.StreamOptions{})
 		if _, err := es.Drain(); err != nil {
 			b.Fatalf("stream err: %v", err)
 		}

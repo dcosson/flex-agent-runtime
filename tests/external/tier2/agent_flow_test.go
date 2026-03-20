@@ -131,18 +131,25 @@ func TestDockerAgentFlow_StubserverRoundTrip(t *testing.T) {
 	defer mustDestroySession(t, sbox, sessionID)
 
 	rt := &fixtureSelectorTransport{}
-	provider := anthropic.New(anthropic.Config{
+	anthropic.Register(anthropic.ClientConfig{
 		HTTPClient: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: rt,
 		},
-		BaseURL: stubserverURL(),
-		APIKey:  "tier2-stub-key",
 	})
 
-	sourceID := "tier2-agent-flow-" + t.Name()
-	ai.RegisterProvider(provider, sourceID)
-	defer ai.UnregisterProviders(sourceID)
+	providerName := "tier2-agent-flow-" + t.Name()
+	if err := ai.RegisterCustomProvider(ai.CustomProviderConfig{
+		ProviderConfig: ai.ProviderConfig{
+			Name:          providerName,
+			APIClientType: "anthropic-messages",
+			BaseURL:       stubserverURL(),
+		},
+		APIKey: "tier2-stub-key",
+	}); err != nil {
+		t.Fatalf("register custom provider: %v", err)
+	}
+	defer ai.UnregisterProviderConfig(providerName)
 
 	executeFn := func(ctx context.Context, req tools.ToolRequest, _ func(tools.ToolProgress)) (*tools.ToolResponse, error) {
 		resp, err := sbox.ExecuteTool.CallUnary(ctx, connect.NewRequest(&api.ExecuteToolRequest{
@@ -170,7 +177,7 @@ func TestDockerAgentFlow_StubserverRoundTrip(t *testing.T) {
 		Model: ai.Model{
 			ID:        "claude-sonnet-4-20250514",
 			API:       "anthropic-messages",
-			Provider:  "anthropic",
+			Provider:  providerName,
 			MaxTokens: 4096,
 		},
 		Tools:        tools.NewEnvironmentTools(executeFn),

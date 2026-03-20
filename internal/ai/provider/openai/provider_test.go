@@ -11,6 +11,14 @@ import (
 	"github.com/dcosson/flex-agent-runtime/internal/ai/testutil/stubserver"
 )
 
+func testEndpoint(baseURL, apiKey string) ai.ProviderEndpoint {
+	return ai.ProviderEndpoint{ProviderName: "openai", BaseURL: baseURL, APIKey: apiKey}
+}
+
+func testClientAndEndpoint(baseURL, apiKey string) (*Client, ai.ProviderEndpoint) {
+	return NewClient(ClientConfig{}), testEndpoint(baseURL, apiKey)
+}
+
 func testModel() ai.Model {
 	return ai.Model{
 		ID:        "gpt-4o",
@@ -278,8 +286,8 @@ func TestStreamTextFixture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 	msg, err := es.Drain()
@@ -312,8 +320,8 @@ func TestStreamToolCallFixture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 	msg, err := es.Drain()
@@ -348,8 +356,8 @@ func TestStreamMultiToolCallFixture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 	msg, err := es.Drain()
@@ -383,8 +391,8 @@ func TestStreamReasoningFixture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.Stream(context.Background(), reasoningModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.Stream(context.Background(), ep, reasoningModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 	msg, err := es.Drain()
@@ -414,8 +422,8 @@ func TestHTTPErrorClassification(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "bad"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "bad")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hello"}}}},
 	}, ai.StreamOptions{})
 	_, err := es.Drain()
@@ -429,8 +437,8 @@ func TestStreamSimpleReasoningEffortMapping(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k"})
-	es := p.StreamSimple(context.Background(), reasoningModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.StreamSimple(context.Background(), ep, reasoningModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.SimpleStreamOptions{
 		Reasoning: ai.ThinkingHigh,
@@ -457,8 +465,8 @@ func TestStreamRequestCapture(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "test-key"})
-	es := p.Stream(context.Background(), testModel(), ai.Context{
+	p, ep := testClientAndEndpoint(srv.URL, "test-key")
+	es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 	}, ai.StreamOptions{})
 	_, _ = es.Drain()

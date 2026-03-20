@@ -57,20 +57,20 @@ type EmbeddingUsage struct {
 
 // EmbeddingModel describes one embedding model entry in catalog/registry.
 type EmbeddingModel struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	API              string            `json:"api"`
-	Provider         string            `json:"provider"`
-	BaseURL          string            `json:"baseUrl"`
-	MaxInputTokens   int               `json:"maxInputTokens"`
-	DefaultDims      int               `json:"defaultDims"`
-	MaxDims          int               `json:"maxDims,omitempty"`
-	MinDims          int               `json:"minDims,omitempty"`
-	MaxBatchSize     int               `json:"maxBatchSize"`
-	SupportsDimCtrl  bool              `json:"supportsDimCtrl"`
-	SupportsTaskType bool              `json:"supportsTaskType"`
-	Cost             EmbeddingCost     `json:"cost"`
-	Headers          map[string]string `json:"headers,omitempty"`
+	ID               string              `json:"id"`
+	Name             string              `json:"name"`
+	API              string              `json:"api"`
+	Provider         string              `json:"provider"`
+	MaxInputTokens   int                 `json:"maxInputTokens"`
+	DefaultDims      int                 `json:"defaultDims"`
+	MaxDims          int                 `json:"maxDims,omitempty"`
+	MinDims          int                 `json:"minDims,omitempty"`
+	MaxBatchSize     int                 `json:"maxBatchSize"`
+	SupportsDimCtrl  bool                `json:"supportsDimCtrl"`
+	SupportsTaskType bool                `json:"supportsTaskType"`
+	Headers          map[string][]string `json:"headers,omitempty"`
+	Cost             EmbeddingCost       `json:"cost"`
+	PricingKnown     bool                `json:"pricingKnown"`
 }
 
 type EmbeddingCost struct {
@@ -78,4 +78,4 @@ type EmbeddingCost struct {
 }
 
 // EmbedFunc performs one provider-specific single-batch embedding call.
-type EmbedFunc func(ctx context.Context, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error)
+type EmbedFunc func(ctx context.Context, endpoint ProviderEndpoint, model EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error)

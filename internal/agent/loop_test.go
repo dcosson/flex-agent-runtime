@@ -10,20 +10,36 @@ import (
 )
 
 type scriptedProvider struct {
-	api       string
-	mu        sync.Mutex
-	responses []ai.AssistantMessage
-	calls     int
+	clientType string
+	mu         sync.Mutex
+	responses  []ai.AssistantMessage
+	calls      int
 }
 
-func (p *scriptedProvider) API() string { return p.api }
+func (p *scriptedProvider) ClientType() string { return p.clientType }
 
-func (p *scriptedProvider) Stream(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions) *ai.EventStream {
+func (p *scriptedProvider) Stream(ctx context.Context, _ ai.ProviderEndpoint, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions) *ai.EventStream {
 	return p.streamOnce()
 }
 
-func (p *scriptedProvider) StreamSimple(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.SimpleStreamOptions) *ai.EventStream {
+func (p *scriptedProvider) StreamSimple(ctx context.Context, _ ai.ProviderEndpoint, model ai.Model, llmCtx ai.Context, opts ai.SimpleStreamOptions) *ai.EventStream {
 	return p.streamOnce()
+}
+
+// registerTestProvider registers a scriptedProvider as both an APIClient and a
+// ProviderConfig so that ai.StreamSimple (used by NativeDriver) can resolve it.
+// providerName is the value that Model.Provider must match.
+func registerTestProvider(prov *scriptedProvider, providerName string) {
+	ai.RegisterAPIClient(prov)
+	ai.RegisterProviderConfig(ai.ProviderConfig{
+		Name:          providerName,
+		APIClientType: prov.ClientType(),
+	})
+}
+
+func clearTestProviders() {
+	ai.ClearAPIClients()
+	ai.ClearProviderConfigs()
 }
 
 func (p *scriptedProvider) streamOnce() *ai.EventStream {
@@ -48,10 +64,10 @@ func (p *scriptedProvider) streamOnce() *ai.EventStream {
 }
 
 func TestNativeDriverToolLoopAndSnapshotBoundary(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
 
-	prov := &scriptedProvider{api: "native-test", responses: []ai.AssistantMessage{
+	prov := &scriptedProvider{clientType: "native-test", responses: []ai.AssistantMessage{
 		{
 			Content:    []ai.ContentBlock{&ai.ToolCall{ID: "tc-1", Name: "read_file", Arguments: map[string]any{"path": "a.txt"}}},
 			StopReason: ai.StopReasonToolUse,
@@ -63,7 +79,7 @@ func TestNativeDriverToolLoopAndSnapshotBoundary(t *testing.T) {
 			Timestamp:  ai.TimeToMillis(time.Now()),
 		},
 	}}
-	ai.RegisterProvider(prov, "agent-loop-test")
+	registerTestProvider(prov, "native-test-prov")
 
 	tool := AgentTool{
 		Tool: ai.Tool{Name: "read_file"},
@@ -74,7 +90,7 @@ func TestNativeDriverToolLoopAndSnapshotBoundary(t *testing.T) {
 	}
 
 	driver := NewNativeDriver(DriverConfig{
-		Model: ai.Model{ID: "test", API: "native-test", Provider: "test", MaxTokens: 1024},
+		Model: ai.Model{ID: "test", API: "native-test", Provider: "native-test-prov", MaxTokens: 1024},
 		Tools: []AgentTool{tool},
 	})
 	agent := New(driver)
@@ -151,17 +167,17 @@ func TestNativeDriverToolLoopAndSnapshotBoundary(t *testing.T) {
 }
 
 func TestNativeDriverFollowUpFIFO(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
 
-	prov := &scriptedProvider{api: "native-followup", responses: []ai.AssistantMessage{{
+	prov := &scriptedProvider{clientType: "native-followup", responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
 		Timestamp:  ai.TimeToMillis(time.Now()),
 	}}}
-	ai.RegisterProvider(prov, "agent-followup-test")
+	registerTestProvider(prov, "native-followup-prov")
 
-	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "native-followup", Provider: "test", MaxTokens: 1024}})
+	driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "m", API: "native-followup", Provider: "native-followup-prov", MaxTokens: 1024}})
 	agent := New(driver)
 	agent.SetSession(&Session{ID: "runtime-fifo"})
 
@@ -212,10 +228,10 @@ func TestNativeDriverFollowUpFIFO(t *testing.T) {
 }
 
 func TestNativeDriverTerminalToolShortCircuit(t *testing.T) {
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
 
-	prov := &scriptedProvider{api: "native-terminal", responses: []ai.AssistantMessage{
+	prov := &scriptedProvider{clientType: "native-terminal", responses: []ai.AssistantMessage{
 		{
 			Content:    []ai.ContentBlock{&ai.ToolCall{ID: "tc-1", Name: "finalize", Arguments: map[string]any{}}},
 			StopReason: ai.StopReasonToolUse,
@@ -227,7 +243,7 @@ func TestNativeDriverTerminalToolShortCircuit(t *testing.T) {
 			Timestamp:  ai.TimeToMillis(time.Now()),
 		},
 	}}
-	ai.RegisterProvider(prov, "agent-terminal-test")
+	registerTestProvider(prov, "native-terminal-prov")
 
 	tool := AgentTool{
 		Tool:     ai.Tool{Name: "finalize"},
@@ -238,7 +254,7 @@ func TestNativeDriverTerminalToolShortCircuit(t *testing.T) {
 	}
 
 	driver := NewNativeDriver(DriverConfig{
-		Model: ai.Model{ID: "m", API: "native-terminal", Provider: "test", MaxTokens: 1024},
+		Model: ai.Model{ID: "m", API: "native-terminal", Provider: "native-terminal-prov", MaxTokens: 1024},
 		Tools: []AgentTool{tool},
 	})
 	agent := New(driver)

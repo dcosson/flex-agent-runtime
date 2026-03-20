@@ -32,8 +32,8 @@ func BenchmarkB1_SSEParsingThroughput(b *testing.B) {
 	b.SetBytes(int64(len(fixture)))
 	for i := 0; i < b.N; i++ {
 		srv := stubserver.New(stubserver.WithFixture(fixture))
-		p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-		es := p.Stream(context.Background(), testModel(), ai.Context{
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 			Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 		}, ai.StreamOptions{})
 		for range es.C {
@@ -131,8 +131,8 @@ func TestSK1_SequentialReplaySoak(t *testing.T) {
 		fixture := fixtures[i%len(fixtures)]
 		srv := stubserver.New(stubserver.WithFixture(fixture))
 
-		p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
-		es := p.Stream(context.Background(), testModel(), ai.Context{
+		p, ep := testClientAndEndpoint(srv.URL, "k")
+		es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 			Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 		}, ai.StreamOptions{})
 		for range es.C {
@@ -170,7 +170,7 @@ func TestSK2_ConcurrentStreamStress(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
 
 	var wg sync.WaitGroup
 	var successCount, errorCount atomic.Int32
@@ -179,7 +179,7 @@ func TestSK2_ConcurrentStreamStress(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			es := p.Stream(context.Background(), testModel(), ai.Context{
+			es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 				Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 			}, ai.StreamOptions{})
 			for range es.C {
@@ -219,7 +219,7 @@ func TestSK3_ToolCallStress(t *testing.T) {
 	srv := stubserver.New(stubserver.WithFixture(fixture))
 	defer srv.Close()
 
-	p := New(Config{BaseURL: srv.URL, APIKey: "k", Version: "v1beta"})
+	p, ep := testClientAndEndpoint(srv.URL, "k")
 
 	var wg sync.WaitGroup
 	var successCount, errorCount atomic.Int32
@@ -228,7 +228,7 @@ func TestSK3_ToolCallStress(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			es := p.Stream(context.Background(), testModel(), ai.Context{
+			es := p.Stream(context.Background(), ep, testModel(), ai.Context{
 				Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 			}, ai.StreamOptions{})
 

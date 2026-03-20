@@ -7,13 +7,13 @@ import (
 
 // Cohere supports embeddings only.
 type (
-	Config            = internal.Config
-	EmbeddingProvider = internal.EmbeddingProvider
+	ClientConfig    = internal.ClientConfig
+	EmbeddingClient = internal.EmbeddingClient
 )
 
 var (
-	NewEmbedding      = internal.NewEmbedding
-	RegisterEmbedding = internal.RegisterEmbedding
+	NewEmbeddingClient      = internal.NewEmbeddingClient
+	RegisterEmbeddingClient = internal.RegisterEmbeddingClient
 )
 
 func Capabilities() provider.CapabilitySet {

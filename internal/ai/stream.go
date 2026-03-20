@@ -2,25 +2,37 @@ package ai
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
-// Stream starts a streaming LLM call using the provider registered for model.API.
+// Stream starts a streaming LLM call.
+// Resolution: model.Provider → ProviderConfig → APIClient + ResolveEndpoint
 func Stream(ctx context.Context, model Model, llmCtx Context, opts StreamOptions) *EventStream {
-	p, err := GetProvider(model.API)
+	cfg, err := GetProviderConfig(model.Provider)
 	if err != nil {
-		return errorStream(err)
+		return errorStream(fmt.Errorf("no provider config for %q: %w", model.Provider, err))
 	}
-	return p.Stream(ctx, model, llmCtx, opts)
+	client, err := GetAPIClient(cfg.APIClientType)
+	if err != nil {
+		return errorStream(fmt.Errorf("no API client for type %q (provider %q): %w", cfg.APIClientType, model.Provider, err))
+	}
+	endpoint := ResolveEndpoint(cfg, opts)
+	return client.Stream(ctx, endpoint, model, llmCtx, opts)
 }
 
 // StreamSimple starts a streaming LLM call with simplified options.
 func StreamSimple(ctx context.Context, model Model, llmCtx Context, opts SimpleStreamOptions) *EventStream {
-	p, err := GetProvider(model.API)
+	cfg, err := GetProviderConfig(model.Provider)
 	if err != nil {
-		return errorStream(err)
+		return errorStream(fmt.Errorf("no provider config for %q: %w", model.Provider, err))
 	}
-	return p.StreamSimple(ctx, model, llmCtx, opts)
+	client, err := GetAPIClient(cfg.APIClientType)
+	if err != nil {
+		return errorStream(fmt.Errorf("no API client for type %q (provider %q): %w", cfg.APIClientType, model.Provider, err))
+	}
+	endpoint := ResolveEndpoint(cfg, opts.StreamOptions)
+	return client.StreamSimple(ctx, endpoint, model, llmCtx, opts)
 }
 
 // Complete makes a blocking LLM call.
