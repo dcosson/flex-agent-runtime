@@ -2,7 +2,7 @@
   "id": "aiag-7fu",
   "title": "API Client / Provider Separation",
   "description": "Implement 01-ai-core.add03: separate API client type (protocol) from provider (service endpoint). Enables multiple providers per protocol, OpenRouter as first-class provider, and custom/fallback providers. Plan: docs/plans/01-ai-core.add03.md",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "epic",
   "dependents": [
@@ -22,5 +22,7 @@
   "created_by": "Danny Cosson",
   "owner": "dcosson@gmail.com",
   "created_at": "2026-03-19T15:16:10.62841-07:00",
-  "updated_at": "2026-03-19T15:16:10.62841-07:00"
+  "updated_at": "2026-03-19T21:48:18.324132-07:00",
+  "closed_at": "2026-03-19T21:48:18.312202-07:00",
+  "close_reason": "Auto-closed: all children completed"
 }

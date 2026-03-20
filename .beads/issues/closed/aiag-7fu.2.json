@@ -2,7 +2,7 @@
   "id": "aiag-7fu.2",
   "title": "Stream/Embed entry points and provider client migration",
   "description": "Refactor stream entry points and migrate all provider implementations from docs/plans/01-ai-core.add03.md.\n\nSections: 3.7, 3.10, 3.11, 4.1, 4.5, 4.6\n\nKey deliverables:\n- Stream() / StreamSimple() two-step resolution: model.Provider → ProviderConfig → APIClient (stream.go) — §3.7\n- Embed() entry point with provider config resolution and EmbeddingAPIClientType derivation (embedding_api.go) — §3.11\n- EmbedFunc signature update to include ProviderEndpoint — §3.11\n- BatchEmbed passes ProviderEndpoint through (embedding_batch.go) — §3.11\n- OpenAI client refactor: Provider → Client implementing APIClient, takes ProviderEndpoint (openai/) — §3.10, §4.1\n- Anthropic client refactor: same pattern, beta headers from endpoint.Headers, apiVersion from ProviderSpecific (anthropic/) — §3.10, §4.1\n- Google client refactor: same pattern, apiVersion as URL path segment from ProviderSpecific (google/) — §3.10, §4.1\n- All embedding provider refactors: EmbeddingProvider → EmbeddingAPIClient, use endpoint.BaseURL, delete resolveBaseURL helpers (openai, google, cohere) — §4.6\n- sendErrorEvent updates to use endpoint.ProviderName — §4.1 step 9\n- AssistantMessage.Provider set from ProviderEndpoint.ProviderName — §4.5\n- Remove old Provider interface and registry.go — §3.12\n- Update all provider package tests for new signatures\n- TestStreamResolution, TestStreamMissingProvider, TestStreamMissingAPIClient — §5.2\n- TestEmbeddingResolution, TestEmbeddingCustomProvider, TestEmbeddingBaseURLFromProvider — §5.2\n- TestMultipleProvidersPerAPIClient, TestMultiValuedHeaders — §5.2\n\nReferences:\n- Plan: docs/plans/01-ai-core.add03.md §3.7, §3.10-3.12, §4.1, §4.5-4.6, §5.2\n- Depends on: Foundation task (types, registries, ResolveEndpoint must exist)",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-7fu",
@@ -24,15 +24,16 @@
   ],
   "created_by": "Danny Cosson",
   "owner": "dcosson@gmail.com",
-  "assignee": "coder-2-sea",
   "comments": [
     {
       "id": 1,
       "author": "Danny Cosson",
-      "text": "Implementation complete. Branch: feat/api-client-provider-sep-stream. All make check and make test pass. Waiting on code review.",
-      "created_at": "2026-03-19T16:43:05.053484-07:00"
+      "text": "R1 review complete — approved with revisions. 7 findings (0 P0, 1 P1, 3 P2, 3 P3). See docs/reviews/aiag-7fu.2-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-19T16:47:20.513064-07:00"
     }
   ],
   "created_at": "2026-03-19T15:16:43.163555-07:00",
-  "updated_at": "2026-03-19T16:43:05.053873-07:00"
+  "updated_at": "2026-03-19T21:48:18.28618-07:00",
+  "closed_at": "2026-03-19T21:48:18.28618-07:00",
+  "close_reason": "Closed"
 }
