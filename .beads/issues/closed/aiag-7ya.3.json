@@ -2,7 +2,7 @@
   "id": "aiag-7ya.3",
   "title": "Core Sandbox Lifecycle -- CreateSandbox, DestroySandbox",
   "description": "Package: internal/sandbox/control/direct/\nPlan references: Plan 19 sections 3.2, 3.3, 9\nRequired reading: docs/plans/00-implementation-guide.md\n\nScope:\n- create.go: Full CreateSandbox implementation\n  - Closing guard with inflightWg tracking\n  - Instance type determination from req.Resources\n  - InstanceConfig construction with tag merging\n  - provisioner.LaunchInstance call\n  - Exponential backoff polling of DescribeInstance until running (2s start, 10s cap, InstanceReadyTimeout)\n  - SSM registration polling via DescribeInstanceInformation\n  - Double-check closing flag before storing state\n  - Orphan prevention: terminate instance if context cancelled or closing set during polling\n  - UserData template rendering\n  - CreateSandboxResponse with direct:{instanceID} format and ip:0 address\n- destroy.go: DestroySandbox implementation\n  - Parse direct: prefix\n  - Look up instance state\n  - Call provisioner.TerminateInstance\n  - Remove from c.instances\n- Concurrency: lock-only-for-map-access pattern (no lock held during AWS API calls), post-API existence checks\n- Unit tests:\n  - CreateSandbox happy path\n  - CreateSandbox with instance type mapping\n  - CreateSandbox with template override\n  - CreateSandbox timeout (ErrInstanceReadyTimeout)\n  - CreateSandbox SSM not ready (ErrSSMUnavailable)\n  - CreateSandbox resources exceed maximum\n  - DestroySandbox happy path\n  - DestroySandbox unknown sandbox (ErrInstanceNotFound)\n\nEstimated size: ~500 lines (implementation + tests)\nDependencies: Task 2 (uses types, errors, helpers, SSMAPI)",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-7ya",
@@ -50,5 +50,7 @@
     }
   ],
   "created_at": "2026-03-18T12:08:08.234119-07:00",
-  "updated_at": "2026-03-18T13:02:38.464797-07:00"
+  "updated_at": "2026-03-20T10:27:13.714906-07:00",
+  "closed_at": "2026-03-20T10:27:13.714906-07:00",
+  "close_reason": "Audit: plan signoff Complete, all code merged, R1 review approved (P3 only)"
 }

@@ -2,7 +2,7 @@
   "id": "aiag-7ya.5",
   "title": "Crash Recovery, Close, Pause/Resume",
   "description": "Package: internal/sandbox/control/direct/\nPlan references: Plan 19 sections 3.7, 3.8, 3.10, 3.11\nRequired reading: docs/plans/00-implementation-guide.md\n\nScope:\n- recover.go: Recover() method\n  - provisioner.ListInstances with tag filter (ManagedBy=flex-agent-runtime, adapter=direct)\n  - Fail-fast if ListInstances fails (constructor returns error)\n  - For each discovered instance: extract flex-sandbox-id tag, read IPs\n  - For running instances: probe PID files via SSM (ls /var/run/flex-agent-*.pid), verify processes via /proc/PID/stat, reconstruct process map\n  - Best-effort SSM probing (individual failures logged, instance tracked with empty process map)\n  - Log recovery summary\n- Wire Recover() into NewDirectSandboxControl constructor (filling in the stub from Task 2)\n- pause.go: PauseSandbox and ResumeSandbox\n  - PauseSandbox: provisioner.StopInstance, mark all processes ProcessExited, update instance state to stopped\n  - ResumeSandbox: provisioner.StartInstance, poll DescribeInstance until running (exponential backoff), update IP addresses, wait for SSM re-registration, update instance state to running, clear process map\n- direct.go updates: Full Close() implementation\n  - Set closing = true under lock\n  - inflightWg.Wait() for in-flight CreateSandbox operations\n  - If TerminateOnClose, terminate all instances\n  - If not, leave instances for crash recovery\n  - Clear internal state\n- Unit tests:\n  - Recover happy path (mock ListInstances returns tagged instances)\n  - Recover with zero instances (clean start)\n  - Recover with ListInstances failure (constructor error)\n  - Recover with SSM probe failure (best-effort, instance tracked without processes)\n  - PauseSandbox happy path (processes marked exited)\n  - ResumeSandbox happy path (IP refreshed)\n  - ResumeSandbox timeout (ErrInstanceReadyTimeout)\n  - Close with TerminateOnClose=true (all instances terminated)\n  - Close with TerminateOnClose=false (instances left running)\n  - Close waits for in-flight CreateSandbox\n  - Close then CreateSandbox returns ErrDirectClosed\n  - Concurrent operations race test (go test -race)\n\nEstimated size: ~600 lines (implementation + tests)\nDependencies: Task 4 (needs process management to test recovery of processes; pause clears process state)",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-7ya",
@@ -44,5 +44,7 @@
     }
   ],
   "created_at": "2026-03-18T12:08:43.613043-07:00",
-  "updated_at": "2026-03-18T13:12:00.143533-07:00"
+  "updated_at": "2026-03-20T10:27:13.732463-07:00",
+  "closed_at": "2026-03-20T10:27:13.732463-07:00",
+  "close_reason": "Audit: plan signoff Complete, all code merged, R1 review approved (P3 only)"
 }

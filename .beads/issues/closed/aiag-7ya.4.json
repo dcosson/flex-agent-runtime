@@ -2,7 +2,7 @@
   "id": "aiag-7ya.4",
   "title": "SSM Process Management -- LaunchProcess, KillProcess, GetProcessStatus",
   "description": "Package: internal/sandbox/control/direct/\nPlan references: Plan 19 sections 3.4, 3.5, 3.6\nRequired reading: docs/plans/00-implementation-guide.md\n\nScope:\n- process.go: All three process management methods\n  - LaunchProcess:\n    - Generate process ID (UUID)\n    - Build daemonized SSM command with buildSSMCommand() (env vars, nohup, PID file, start time tracking)\n    - ssmClient.SendCommand with AWS-RunShellScript\n    - Poll GetCommandInvocation for completion\n    - Read PID and start time from PID file via follow-up SSM command\n    - Health check polling via SSM (curl localhost:PORT/health), exponential backoff (500ms start, 5s cap, ProcessReadyTimeout)\n    - Store processState with PID, start time, port\n    - Return LaunchProcessResponse with ProcessID, Address = instanceIP:PORT\n  - KillProcess:\n    - Parse direct: prefix, look up process\n    - PID recycling guard: check /proc/PID/stat start time via SSM\n    - Send kill -SIGNAL PID via SSM\n    - Clean up PID file via SSM\n    - Update process state to ProcessExited\n  - GetProcessStatus:\n    - Look up process, return immediately if cached ProcessExited\n    - SSM command to check /proc/PID/stat existence + start time\n    - PID recycling detection\n    - Return GetProcessStatusResponse\n- Unit tests:\n  - LaunchProcess happy path\n  - LaunchProcess with env vars (shell escaping verified)\n  - LaunchProcess command failure (ErrProcessLaunchFailed)\n  - LaunchProcess readiness timeout (ErrProcessReadyTimeout)\n  - KillProcess happy path\n  - KillProcess with custom signal\n  - KillProcess PID recycled (ErrProcessNotFound)\n  - GetProcessStatus running (matching start time)\n  - GetProcessStatus exited\n  - GetProcessStatus PID recycled\n\nEstimated size: ~600 lines (implementation + tests)\nDependencies: Task 3 (CreateSandbox must exist to have instances to launch processes on; tests build on create flow)",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-7ya",
@@ -44,5 +44,7 @@
     }
   ],
   "created_at": "2026-03-18T12:08:24.53174-07:00",
-  "updated_at": "2026-03-18T13:04:54.106421-07:00"
+  "updated_at": "2026-03-20T10:27:13.727155-07:00",
+  "closed_at": "2026-03-20T10:27:13.727155-07:00",
+  "close_reason": "Audit: plan signoff Complete, all code merged, R1 review approved (P3 only)"
 }

@@ -2,7 +2,7 @@
   "id": "aiag-0bh",
   "title": "Terminal Mux Implementation",
   "description": "Port terminal multiplexer from h2: SessionManager, VirtualTerminal, PTY management, AgentMonitor, TermmuxDriverAdapter, event normalization, driver adapters (Claude Code, Codex), remote terminal streaming addendum. Plan: docs/plans/09-h2-termmux-port.md + addendum + test harness.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "epic",
   "dependents": [
@@ -30,5 +30,7 @@
     "batch=4"
   ],
   "created_at": "2026-03-13T17:58:43.137519-07:00",
-  "updated_at": "2026-03-13T17:58:43.137519-07:00"
+  "updated_at": "2026-03-20T10:27:14.665679-07:00",
+  "closed_at": "2026-03-20T10:27:14.654147-07:00",
+  "close_reason": "All child tasks complete"
 }

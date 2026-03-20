@@ -2,7 +2,7 @@
   "id": "aiag-7ya",
   "title": "EC2 Direct Adapter",
   "description": "Epic for all plan 19 (EC2 Direct Adapter) implementation work.\n\nPlan document: docs/plans/19-ec2-direct-adapter.md\nRequired reading: docs/plans/00-implementation-guide.md\n\nImplements DirectSandboxControl which manages one EC2 instance per sandbox, using SSM for process management. Provides CreateSandbox, DestroySandbox, LaunchProcess, KillProcess, GetProcessStatus, PauseSandbox, ResumeSandbox, crash recovery, and Close.\n\nIncludes the shared instance/ package (InstanceProvisioner interface + types) used by both plan 19 and plan 20.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "epic",
   "dependents": [
@@ -38,5 +38,7 @@
     "plan-doc=19"
   ],
   "created_at": "2026-03-18T12:07:21.399731-07:00",
-  "updated_at": "2026-03-18T12:07:21.399731-07:00"
+  "updated_at": "2026-03-20T10:27:13.751618-07:00",
+  "closed_at": "2026-03-20T10:27:13.741825-07:00",
+  "close_reason": "All child tasks complete"
 }

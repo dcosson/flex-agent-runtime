@@ -2,7 +2,7 @@
   "id": "aiag-0bh.4",
   "title": "TermMux: Implement StreamTerminal RPC + WebSocket relay",
   "description": "Signoff gap from docs/plans/09-h2-termmux-port.add01.md: implement remote streaming path end-to-end (StreamTerminal server, attach/output/input/resize lifecycle, auth hooks, and browser WebSocket relay). Ensure late-attach scrollback, multi-subscriber safety, and resize semantics are covered by tests.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-0bh",
@@ -21,5 +21,7 @@
   ],
   "assignee": "reviewer-sea",
   "created_at": "2026-03-14T08:05:45.695981-07:00",
-  "updated_at": "2026-03-14T08:29:09.281436-07:00"
+  "updated_at": "2026-03-20T10:27:14.649901-07:00",
+  "closed_at": "2026-03-20T10:27:14.649901-07:00",
+  "close_reason": "Audit: plan signoff Complete, code merged to main"
 }
