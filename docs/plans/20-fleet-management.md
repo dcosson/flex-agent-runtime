@@ -1,6 +1,6 @@
 # 20: EC2 Fleet Management
 
-**Status:** Draft (revised per review feedback)
+**Status:** Complete
 **Depends on:** 18-agent-loop-rpc (SandboxControl interface), 11-sandbox-host-service (sandbox-host HealthCheck RPC), 11-sandbox-host-service.add01 (ExecutionEnvironment interface)
 **Depended on by:** Orchestrator application (future), production-scale native sandbox deployment
 **Scope:** Implement `FleetSandboxControl`, an in-process fleet manager that implements `SandboxControl` by managing a pool of sandbox-host EC2 instances. Provider-agnostic via `InstanceProvisioner` interface with EC2 as the first implementation. Includes fleet control loop (scaling, health, warm pool), capacity-aware routing, and SandboxID-encoded instance routing.
@@ -1589,25 +1589,27 @@ Findings from `docs/plans/20-fleet-management-review-coder-1-sea.md` and `docs/p
 
 ## Completion Signoff
 
-- **Status**: Partial
-- **Date**: 2026-03-18
+- **Status**: Complete
+- **Date**: 2026-03-20
 - **Branch**: main
-- **Verified by**: coder-1-sea
+- **Verified by**: reviewer-sea
+- **Signoff commit**: 7c65786
 - **Completed items**:
   - `InstanceProvisioner` shared contract package implemented in `internal/sandbox/control/instance/` with provider contract tests.
   - `FleetSandboxControl` implemented with claim-slot routing, reconciliation, control loop phases, drain lifecycle, and close semantics.
   - `EC2InstanceProvisioner` implemented under `internal/sandbox/control/fleet/ec2/`.
   - TLA+ artifacts present at `specs/fleet_control.tla` and `specs/fleet_control_mc.cfg`.
   - Extensive unit coverage exists across fleet core, control loop, routing, state machine, sandbox ID, and EC2 provisioner packages.
+  - Section 15.1 metrics fully implemented (aiag-fis.2 + aiag-fis.6): 6 gauges, 8 counters, 4 histograms with full unit test coverage.
+  - FleetStatus API aligned with plan §15.3 (aiag-fis.3): `WarmPoolSize`, `Healthy`, `Closed` fields with per-instance locking.
+  - Build-tag gated integration test suite (aiag-fis.4): 4 scenarios covering full lifecycle, warm pool, unhealthy drain, crash recovery.
   - Verification tests passed:
     - `go test ./internal/sandbox/control/fleet/... ./internal/sandbox/control/instance/... -count=1` — PASS
     - `go test -race ./internal/sandbox/control/fleet/... ./internal/sandbox/control/instance/... -count=1` — PASS
+    - `go test -tags integration ./internal/sandbox/control/fleet/... -count=1` — PASS
 - **Deviations**:
   - [Resolved] `FleetStatus` contract drift vs section 15.3: aligned in aiag-fis.3. Implementation uses `FleetStatus` (not `FleetStatusResponse`) with `int64`/`int32` for atomic-sourced fields and an extra `Closed` field. Plan section 15.3 updated to match.
-  - [Missing] Section 15.1 metrics instrumentation (`fleet_*` gauges/counters/histograms) is not implemented in `internal/sandbox/control/fleet/`.
-  - [Missing] Section 11.2 fleet-specific build-tag integration suite is not implemented under fleet package/test hierarchy.
+  - [Resolved] Section 15.1 metrics instrumentation: fully implemented in aiag-fis.2 (initial 6 metrics) and aiag-fis.6 (remaining 11 metrics). Plan §15.1 health check labels updated to match implementation (healthy/error).
+  - [Resolved] Section 11.2 fleet-specific integration suite: implemented in aiag-fis.4 with build-tag gating and 4 integration scenarios.
   - [Structural] Import flow in section 2.2/12.4 is now more decoupled than documented: fleet core uses injected `FleetNodeClient` factory rather than directly constructing RPC clients.
-- **Outstanding gaps**:
-  - Gap 1: Implement fleet observability metrics from section 15.1 (suggested follow-up bead: `aiag-20-signoff.metrics`).
-  - ~~Gap 2: Align FleetStatus API with section 15.3~~ — resolved by aiag-fis.3.
-  - Gap 3: Add the fleet integration test suite described in section 11.2 (suggested bead: `aiag-20-signoff.integration-tests`).
+- **Outstanding gaps**: None — all gaps resolved.

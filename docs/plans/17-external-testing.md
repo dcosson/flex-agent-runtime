@@ -1,6 +1,6 @@
 # 17: External / End-to-End Testing Plan
 
-**Status:** Partial (Sections 1-11 complete; Section 12 planned, not yet implemented)
+**Status:** Complete
 **Depends on:** 08-agent-tools-e2e, 14-mode3-e2e, 15-mode2-e2e, 16-runtime-test-harness, 11-sandbox-host-service.add01, 11-sandbox-host-service.add02
 **Depended on by:** --
 **Scope:** External E2E testing strategy covering usage examples, Docker-based CI, dedicated host testing, mock-based testing, and CI integration across all placement modes.
@@ -1335,15 +1335,17 @@ These fault scenarios should be added as stubserver-backed variants of the exist
 
 ## Completion Signoff
 
-- **Status:** Partial — Sections 1-11 complete; Section 12 is a planned extension, not yet implemented
-- **Date:** 2026-03-15
-- **Epic:** aiag-q7c
-- **Task:** aiag-q7c.2 (assigned: coder-2-sea, status: closed)
-- **Implementation commits:** dea037b, 37052dc
-- **Code review:** R1 by reviewer-sea, findings incorporated, R2 approved at b42c922
+- **Status:** Complete
+- **Date:** 2026-03-20
+- **Epic:** aiag-q7c, aiag-fis
+- **Tasks:** aiag-q7c.2 (sections 1-11), aiag-fis.1 (section 12 verification)
+- **Implementation commits:** dea037b, 37052dc (sections 1-11); section 12 deliverables landed via aiag-73q
+- **Code review:** R1 by reviewer-sea (sections 1-11), findings incorporated, R2 approved at b42c922; aiag-fis.1 reviewed and approved by reviewer-sea at 442adc6
 - **Branch:** main
+- **Signoff commit:** 7c65786
+- **Verified by:** reviewer-sea
 
-**Scope note:** The deliverables and acceptance criteria below cover Sections 1-11 only. Section 12 (Stubserver-Based E2E Testing) is a planned extension that requires additional implementation work: the `NewHandler()` constructor in the stubserver library, the standalone binary (`cmd/stubserver/main.go`), Docker infrastructure (`Dockerfile.stubserver`, compose service), fixture files, and stubserver-backed test variants. This work is tracked separately and does not affect the completeness of Sections 1-11.
+**Update (2026-03-20):** Section 12 deliverables confirmed fully implemented: Docker infrastructure (`Dockerfile.stubserver`, `docker-compose.e2e.yaml`, `cmd/stubserver/main.go`), fixtures (8 files in `testdata/fixtures/`), stubserver-backed Tier 1 tests (`stubserver_test.go`), fault injection variants (F1-F4, F6, retry sequence), embedding stubserver tests (3 providers × 6 fault modes), JSON fault server (`stubserver_json.go`). All 37 tier1 tests pass. Verified in aiag-fis.1 review.
 
 ### Deliverables Verification
 
