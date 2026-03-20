@@ -35,22 +35,23 @@ func BenchmarkB1EventFanoutThroughput(b *testing.B) {
 }
 
 func BenchmarkB2PromptToFirstDeltaOverhead(b *testing.B) {
-	ai.ClearProviders()
-	b.Cleanup(ai.ClearProviders)
+	clearTestProviders()
+	b.Cleanup(clearTestProviders)
 
-	const apiName = "agent-b2-bench"
-	prov := &scriptedProvider{api: apiName, responses: []ai.AssistantMessage{{
+	const provName = "agent-b2-bench"
+	const clientType = "agent-b2-bench-client"
+	prov := &scriptedProvider{clientType: clientType, responses: []ai.AssistantMessage{{
 		Content:    []ai.ContentBlock{&ai.TextContent{Text: "ok"}},
 		StopReason: ai.StopReasonStop,
 		Timestamp:  ai.TimeToMillis(time.Now()),
 	}}}
-	ai.RegisterProvider(prov, apiName)
+	registerTestProvider(prov, provName)
 
 	overheads := make([]time.Duration, 0, b.N)
 	for i := 0; i < b.N; i++ {
 		directFirstDelta := measureFirstDeltaDirect(prov)
 
-		driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "bench", API: apiName, Provider: "test", MaxTokens: 1024}})
+		driver := NewNativeDriver(DriverConfig{Model: ai.Model{ID: "bench", API: clientType, Provider: provName, MaxTokens: 1024}})
 		agent := New(driver)
 		agent.SetSession(&Session{ID: fmt.Sprintf("bench-b2-%d", i)})
 

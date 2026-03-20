@@ -17,7 +17,7 @@ import (
 )
 
 type harnessProvider struct {
-	api        string
+	clientType string
 	delay      time.Duration
 	fail       bool
 	hang       bool
@@ -27,11 +27,11 @@ type harnessProvider struct {
 	costUSD    float64
 }
 
-func (p *harnessProvider) API() string { return p.api }
-func (p *harnessProvider) Stream(ctx context.Context, m ai.Model, c ai.Context, o ai.StreamOptions) *ai.EventStream {
+func (p *harnessProvider) ClientType() string { return p.clientType }
+func (p *harnessProvider) Stream(ctx context.Context, _ ai.ProviderEndpoint, _ ai.Model, _ ai.Context, _ ai.StreamOptions) *ai.EventStream {
 	return p.stream(ctx)
 }
-func (p *harnessProvider) StreamSimple(ctx context.Context, m ai.Model, c ai.Context, o ai.SimpleStreamOptions) *ai.EventStream {
+func (p *harnessProvider) StreamSimple(ctx context.Context, _ ai.ProviderEndpoint, _ ai.Model, _ ai.Context, _ ai.SimpleStreamOptions) *ai.EventStream {
 	return p.stream(ctx)
 }
 func (p *harnessProvider) stream(ctx context.Context) *ai.EventStream {
@@ -101,16 +101,20 @@ var harnessSeq uint64
 
 func registerHarnessModel(t *testing.T, p *harnessProvider) ai.Model {
 	t.Helper()
-	ai.ClearProviders()
-	t.Cleanup(ai.ClearProviders)
+	ai.ClearAPIClients()
+	ai.ClearProviderConfigs()
+	t.Cleanup(ai.ClearAPIClients)
+	t.Cleanup(ai.ClearProviderConfigs)
 	id := atomic.AddUint64(&harnessSeq, 1)
-	api := fmt.Sprintf("codeinterp-harness-%d", id)
-	p.api = api
-	ai.RegisterProvider(p, api)
+	clientType := fmt.Sprintf("codeinterp-harness-%d", id)
+	providerName := fmt.Sprintf("harness-%d", id)
+	p.clientType = clientType
+	ai.RegisterAPIClient(p)
+	ai.RegisterProviderConfig(ai.ProviderConfig{Name: providerName, APIClientType: clientType})
 	model := ai.Model{
 		ID:        fmt.Sprintf("model-%d", id),
-		API:       api,
-		Provider:  "harness",
+		API:       clientType,
+		Provider:  providerName,
 		MaxTokens: 4096,
 		Cost: ai.ModelCost{
 			Input:  100,
