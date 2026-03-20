@@ -1,0 +1,23 @@
+{
+  "id": "aiag-0dou.6",
+  "title": "Extract shared HTTP/JSON helpers from E2B and Daytona providers",
+  "description": "doJSON, cloneLabels, and the HTTP helper pattern are duplicated across E2B, Daytona, and Fly providers. Extract into a shared package like internal/sandbox/environment/httputil to reduce duplication. P2 from aiag-0dou.3 review.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-0dou",
+  "dependencies": [
+    {
+      "id": "aiag-0dou",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=11-sandbox-host-service-add01"
+  ],
+  "created_at": "2026-03-20T14:18:13.910525-07:00",
+  "updated_at": "2026-03-20T14:18:13.910525-07:00"
+}
