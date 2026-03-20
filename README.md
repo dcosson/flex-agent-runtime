@@ -83,8 +83,7 @@ func init() {
 }
 
 // Embed — API key resolved from OPENAI_API_KEY env var
-model, _ := ai.GetEmbeddingModel("text-embedding-3-small")
-resp, err := ai.Embed(ctx, model, ai.EmbeddingRequest{
+resp, err := ai.Embed(ctx, "text-embedding-3-small", ai.EmbeddingRequest{
     Texts: []string{"hello world", "goodbye world"},
 })
 ```
