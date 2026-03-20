@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/dcosson/flex-agent-runtime/internal/rpc/api"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/e2b"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/local"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/native"
 )
@@ -138,6 +141,59 @@ func TestLocalEnvironmentComplianceSuite(t *testing.T) {
 		Params:   map[string]any{"path": "written.txt", "content": "hi"},
 	}
 
+	runEnvironmentComplianceSuite(t, factory, config, readReq, writeReq)
+}
+
+func TestE2BEnvironmentComplianceSuite(t *testing.T) {
+	type e2bSession struct {
+		state string
+	}
+	sessions := map[string]e2bSession{}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/sandboxes":
+			// Single synthetic sandbox ID is enough for compliance suite.
+			sessions["sb-1"] = e2bSession{state: "active"}
+			_, _ = w.Write([]byte(`{"id":"sb-1"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/sandboxes/sb-1/pause":
+			sessions["sb-1"] = e2bSession{state: "paused"}
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/sandboxes/sb-1/resume":
+			sessions["sb-1"] = e2bSession{state: "active"}
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/sandboxes/sb-1":
+			delete(sessions, "sb-1")
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/sandboxes/sb-1/filesystem/read_file":
+			_, _ = w.Write([]byte(`{"content":"ok"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/sandboxes/sb-1/filesystem/write_file":
+			_, _ = w.Write([]byte(`{"content":"written"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	factory := func(t *testing.T) environment.ExecutionEnvironment {
+		return e2b.NewE2BSandboxEnvironment("test-api-key",
+			e2b.WithBaseURL(ts.URL),
+			e2b.WithHTTPClient(ts.Client()),
+			e2b.WithLogger(slog.Default()),
+		)
+	}
+	config := environment.SessionConfig{
+		SessionID: "e2b-compliance",
+		BaseImage: "template-e2b",
+	}
+	readReq := environment.ToolRequest{
+		ToolName: "read_file",
+		Params:   map[string]any{"path": "input.txt"},
+	}
+	writeReq := environment.ToolRequest{
+		ToolName: "write_file",
+		Params:   map[string]any{"path": "written.txt", "content": "hello"},
+	}
 	runEnvironmentComplianceSuite(t, factory, config, readReq, writeReq)
 }
 
