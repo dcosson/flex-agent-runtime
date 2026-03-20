@@ -98,6 +98,16 @@ func (c *EmbeddingClient) embedSingle(ctx context.Context, endpoint ai.ProviderE
 		return nil, fmt.Errorf("build embedding request: %w", err)
 	}
 	httpReq.Header.Set("content-type", "application/json")
+	for k, vs := range endpoint.Headers {
+		for _, v := range vs {
+			httpReq.Header.Add(k, v)
+		}
+	}
+	for k, vs := range model.Headers {
+		for _, v := range vs {
+			httpReq.Header.Add(k, v)
+		}
+	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {

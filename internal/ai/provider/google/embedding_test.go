@@ -278,3 +278,42 @@ func TestEmbeddingClient_NoDimensionsWhenZero(t *testing.T) {
 		t.Fatal("expected nil outputDimensionality when Dimensions=0")
 	}
 }
+
+func TestEmbeddingClient_HeaderPropagation(t *testing.T) {
+	var seenHeaders http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenHeaders = r.Header.Clone()
+		_ = json.NewEncoder(w).Encode(batchEmbedContentsResponse{
+			Embeddings: []contentEmbedding{{Values: []float32{1}}},
+		})
+	}))
+	defer srv.Close()
+
+	c := NewEmbeddingClient(ClientConfig{})
+	ep := ai.ProviderEndpoint{
+		ProviderName: "google",
+		BaseURL:      srv.URL,
+		APIKey:       "test-key",
+		Headers: map[string][]string{
+			"X-Provider-Header": {"pval1", "pval2"},
+		},
+		ProviderSpecific: map[string]string{"apiVersion": "v1beta"},
+	}
+	model := ai.EmbeddingModel{
+		ID:           "m",
+		MaxBatchSize: 10,
+		Headers: map[string][]string{
+			"X-Model-Header": {"mval"},
+		},
+	}
+	_, err := c.Embed(context.Background(), ep, model, ai.EmbeddingRequest{Texts: []string{"x"}})
+	if err != nil {
+		t.Fatalf("Embed err: %v", err)
+	}
+	if vals := seenHeaders.Values("X-Provider-Header"); len(vals) != 2 || vals[0] != "pval1" || vals[1] != "pval2" {
+		t.Fatalf("provider headers: %v", vals)
+	}
+	if vals := seenHeaders.Values("X-Model-Header"); len(vals) != 1 || vals[0] != "mval" {
+		t.Fatalf("model headers: %v", vals)
+	}
+}

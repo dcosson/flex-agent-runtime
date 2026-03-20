@@ -75,6 +75,16 @@ func (c *EmbeddingClient) embedSingle(ctx context.Context, endpoint ai.ProviderE
 	if endpoint.APIKey != "" {
 		httpReq.Header.Set("authorization", "Bearer "+endpoint.APIKey)
 	}
+	for k, vs := range endpoint.Headers {
+		for _, v := range vs {
+			httpReq.Header.Add(k, v)
+		}
+	}
+	for k, vs := range model.Headers {
+		for _, v := range vs {
+			httpReq.Header.Add(k, v)
+		}
+	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {

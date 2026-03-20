@@ -194,3 +194,47 @@ func TestEmbeddingClient_BatchSplitAndProgress(t *testing.T) {
 		t.Fatalf("progress=%v want=%v", progress, wantProgress)
 	}
 }
+
+func TestEmbeddingClient_HeaderPropagation(t *testing.T) {
+	var seenHeaders http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenHeaders = r.Header.Clone()
+		_ = json.NewEncoder(w).Encode(embeddingResponseWire{
+			Data: []embeddingVectorWire{{Index: 0, Embedding: []float32{1}}},
+		})
+	}))
+	defer srv.Close()
+
+	c := NewEmbeddingClient(ClientConfig{})
+	ep := ai.ProviderEndpoint{
+		ProviderName: "openai",
+		BaseURL:      srv.URL,
+		APIKey:       "test-key",
+		Headers: map[string][]string{
+			"X-Provider-Header": {"pval1", "pval2"},
+		},
+	}
+	model := ai.EmbeddingModel{
+		ID:           "m",
+		MaxBatchSize: 10,
+		Headers: map[string][]string{
+			"X-Model-Header": {"mval"},
+		},
+	}
+	_, err := c.Embed(context.Background(), ep, model, ai.EmbeddingRequest{Texts: []string{"x"}})
+	if err != nil {
+		t.Fatalf("Embed err: %v", err)
+	}
+	// Provider headers
+	if vals := seenHeaders.Values("X-Provider-Header"); len(vals) != 2 || vals[0] != "pval1" || vals[1] != "pval2" {
+		t.Fatalf("provider headers: %v", vals)
+	}
+	// Model headers
+	if vals := seenHeaders.Values("X-Model-Header"); len(vals) != 1 || vals[0] != "mval" {
+		t.Fatalf("model headers: %v", vals)
+	}
+	// Auth header still present
+	if seenHeaders.Get("Authorization") != "Bearer test-key" {
+		t.Fatalf("auth header: %q", seenHeaders.Get("Authorization"))
+	}
+}
