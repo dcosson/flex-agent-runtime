@@ -1,0 +1,23 @@
+{
+  "id": "aiag-fis.6",
+  "title": "Fleet metrics plan-coverage completion (remaining §15.1 metrics)",
+  "description": "Implement the remaining Plan 20 §15.1 fleet_* metrics not covered by aiag-fis.2, including create/destroy counters, health check/result counters, session reconciliation and rollback counters, and additional histograms/log fields. Ensure full unit coverage and docs alignment.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-fis",
+  "dependencies": [
+    {
+      "id": "aiag-fis",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=20-fleet-management"
+  ],
+  "created_at": "2026-03-20T12:11:36.243226-07:00",
+  "updated_at": "2026-03-20T12:11:36.243226-07:00"
+}
