@@ -152,62 +152,47 @@ func (e *E2BSandboxEnvironment) ExecuteTool(ctx context.Context, req environment
 }
 
 func (e *E2BSandboxEnvironment) Pause(ctx context.Context) error {
-	e.mu.RLock()
-	state := e.state
-	id := e.sandboxID
-	e.mu.RUnlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
-	if state != environment.StateActive || id == "" {
+	if e.state != environment.StateActive || e.sandboxID == "" {
 		return environment.ErrNotActive
 	}
-	if err := e.doJSON(ctx, http.MethodPost, "/sandboxes/"+id+"/pause", map[string]any{}, nil); err != nil {
+	if err := e.doJSON(ctx, http.MethodPost, "/sandboxes/"+e.sandboxID+"/pause", map[string]any{}, nil); err != nil {
 		return fmt.Errorf("e2b: pause: %w", err)
 	}
-
-	e.mu.Lock()
 	e.state = environment.StatePaused
-	e.mu.Unlock()
 	return nil
 }
 
 func (e *E2BSandboxEnvironment) Resume(ctx context.Context) error {
-	e.mu.RLock()
-	state := e.state
-	id := e.sandboxID
-	e.mu.RUnlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
-	if state != environment.StatePaused || id == "" {
+	if e.state != environment.StatePaused || e.sandboxID == "" {
 		return environment.ErrNotActive
 	}
-	if err := e.doJSON(ctx, http.MethodPost, "/sandboxes/"+id+"/resume", map[string]any{}, nil); err != nil {
+	if err := e.doJSON(ctx, http.MethodPost, "/sandboxes/"+e.sandboxID+"/resume", map[string]any{}, nil); err != nil {
 		return fmt.Errorf("e2b: resume: %w", err)
 	}
-
-	e.mu.Lock()
 	e.state = environment.StateActive
-	e.mu.Unlock()
 	return nil
 }
 
 func (e *E2BSandboxEnvironment) Destroy(ctx context.Context) error {
-	e.mu.RLock()
-	id := e.sandboxID
-	state := e.state
-	e.mu.RUnlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
-	if state == environment.StateDestroyed {
+	if e.state == environment.StateDestroyed {
 		return nil
 	}
-	if id == "" {
+	if e.sandboxID == "" {
 		return environment.ErrNotActive
 	}
-	if err := e.doJSON(ctx, http.MethodDelete, "/sandboxes/"+id, nil, nil); err != nil {
+	if err := e.doJSON(ctx, http.MethodDelete, "/sandboxes/"+e.sandboxID, nil, nil); err != nil {
 		return fmt.Errorf("e2b: destroy: %w", err)
 	}
-
-	e.mu.Lock()
 	e.state = environment.StateDestroyed
-	e.mu.Unlock()
 	return nil
 }
 

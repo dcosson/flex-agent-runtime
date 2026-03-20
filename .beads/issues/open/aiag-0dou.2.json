@@ -33,6 +33,14 @@
     "plan-doc=11-sandbox-host-service-add01"
   ],
   "assignee": "coder-1-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — approved with revisions. 1 P1, 1 P2, 2 P3. P1: TOCTOU race in Pause/Resume/Destroy — state read under RLock then updated under Lock with HTTP call in between. Concurrent Destroy+Resume can leave state as Active after sandbox is destroyed server-side. Fix: hold write lock across lifecycle HTTP calls. P2: missing test for destroy-from-paused. See docs/reviews/aiag-0dou.2-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-20T14:04:47.297403-07:00"
+    }
+  ],
   "created_at": "2026-03-20T13:32:55.843523-07:00",
-  "updated_at": "2026-03-20T13:33:13.465076-07:00"
+  "updated_at": "2026-03-20T14:04:47.297918-07:00"
 }

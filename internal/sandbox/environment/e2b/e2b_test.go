@@ -183,6 +183,36 @@ func TestPauseResumeDestroyLifecycle(t *testing.T) {
 	}
 }
 
+func TestDestroy_FromPausedState(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/sandboxes":
+			_, _ = w.Write([]byte(`{"id":"sb-1"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/sandboxes/sb-1/pause":
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/sandboxes/sb-1":
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	env := NewE2BSandboxEnvironment("k", WithBaseURL(ts.URL), WithHTTPClient(ts.Client()))
+	if err := env.Create(context.Background(), environment.SessionConfig{SessionID: "s1", BaseImage: "tmpl"}); err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+	if err := env.Pause(context.Background()); err != nil {
+		t.Fatalf("Pause() error: %v", err)
+	}
+	if err := env.Destroy(context.Background()); err != nil {
+		t.Fatalf("Destroy() from paused error: %v", err)
+	}
+	if got := env.State(); got != environment.StateDestroyed {
+		t.Fatalf("State() after paused Destroy = %q, want destroyed", got)
+	}
+}
+
 func TestExecuteTool_AfterDestroyReturnsNotActive(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
