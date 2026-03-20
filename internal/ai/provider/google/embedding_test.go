@@ -13,24 +13,39 @@ import (
 	"github.com/dcosson/flex-agent-runtime/internal/ai"
 )
 
-func TestEmbeddingProvider_APIAndRegister(t *testing.T) {
-	ai.ClearEmbeddingProviders()
-	t.Cleanup(ai.ClearEmbeddingProviders)
-
-	p := RegisterEmbedding(Config{APIKey: "k"}, "src")
-	if p.API() != "google-embeddings" {
-		t.Fatalf("api=%q", p.API())
-	}
-	got, err := ai.GetEmbeddingProvider("google-embeddings")
-	if err != nil {
-		t.Fatalf("GetEmbeddingProvider err: %v", err)
-	}
-	if got.API() != p.API() {
-		t.Fatalf("registered provider mismatch")
+func testEmbeddingEndpoint(baseURL, apiKey string) ai.ProviderEndpoint {
+	return ai.ProviderEndpoint{
+		ProviderName: "google",
+		BaseURL:      baseURL,
+		APIKey:       apiKey,
+		ProviderSpecific: map[string]string{
+			"apiVersion": "v1beta",
+		},
 	}
 }
 
-func TestEmbeddingProvider_EmbedSingleSuccess(t *testing.T) {
+func TestEmbeddingClient_ClientType(t *testing.T) {
+	c := NewEmbeddingClient(ClientConfig{})
+	if c.ClientType() != "google-embeddings" {
+		t.Fatalf("clientType=%q", c.ClientType())
+	}
+}
+
+func TestEmbeddingClient_RegisterEmbeddingClient(t *testing.T) {
+	ai.ClearEmbeddingAPIClients()
+	t.Cleanup(ai.ClearEmbeddingAPIClients)
+
+	c := RegisterEmbeddingClient(ClientConfig{})
+	got, err := ai.GetEmbeddingAPIClient("google-embeddings")
+	if err != nil {
+		t.Fatalf("GetEmbeddingAPIClient err: %v", err)
+	}
+	if got.ClientType() != c.ClientType() {
+		t.Fatalf("registered client mismatch")
+	}
+}
+
+func TestEmbeddingClient_EmbedSingleSuccess(t *testing.T) {
 	var seenReq batchEmbedContentsRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1beta/models/gemini-embedding-001:batchEmbedContents" {
@@ -51,9 +66,10 @@ func TestEmbeddingProvider_EmbedSingleSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := NewEmbedding(Config{APIKey: "secret", BaseURL: srv.URL})
+	c := NewEmbeddingClient(ClientConfig{})
+	ep := testEmbeddingEndpoint(srv.URL, "secret")
 	model := ai.EmbeddingModel{ID: "gemini-embedding-001", MaxBatchSize: 100}
-	resp, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
+	resp, err := c.Embed(context.Background(), ep, model, ai.EmbeddingRequest{
 		Texts:      []string{"hello", "world"},
 		Dimensions: 256,
 		TaskType:   ai.EmbeddingTaskQuery,
@@ -98,7 +114,7 @@ func TestEmbeddingProvider_EmbedSingleSuccess(t *testing.T) {
 	}
 }
 
-func TestEmbeddingProvider_TaskTypeMapping(t *testing.T) {
+func TestEmbeddingClient_TaskTypeMapping(t *testing.T) {
 	tests := []struct {
 		taskType ai.EmbeddingTaskType
 		wantWire string
@@ -121,9 +137,10 @@ func TestEmbeddingProvider_TaskTypeMapping(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			p := NewEmbedding(Config{BaseURL: srv.URL})
+			c := NewEmbeddingClient(ClientConfig{})
+			ep := testEmbeddingEndpoint(srv.URL, "")
 			model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
-			_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{
+			_, err := c.Embed(context.Background(), ep, model, ai.EmbeddingRequest{
 				Texts:    []string{"x"},
 				TaskType: tc.taskType,
 			})
@@ -137,7 +154,7 @@ func TestEmbeddingProvider_TaskTypeMapping(t *testing.T) {
 	}
 }
 
-func TestEmbeddingProvider_ProviderBaseURL(t *testing.T) {
+func TestEmbeddingClient_ProviderBaseURL(t *testing.T) {
 	hit := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hit = true
@@ -147,9 +164,10 @@ func TestEmbeddingProvider_ProviderBaseURL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := NewEmbedding(Config{BaseURL: srv.URL})
+	c := NewEmbeddingClient(ClientConfig{})
+	ep := testEmbeddingEndpoint(srv.URL, "")
 	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
-	if _, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}}); err != nil {
+	if _, err := c.Embed(context.Background(), ep, model, ai.EmbeddingRequest{Texts: []string{"x"}}); err != nil {
 		t.Fatalf("Embed err: %v", err)
 	}
 	if !hit {
@@ -157,7 +175,7 @@ func TestEmbeddingProvider_ProviderBaseURL(t *testing.T) {
 	}
 }
 
-func TestEmbeddingProvider_HTTPErrorClassification(t *testing.T) {
+func TestEmbeddingClient_HTTPErrorClassification(t *testing.T) {
 	tests := []struct {
 		name   string
 		status int
@@ -177,8 +195,9 @@ func TestEmbeddingProvider_HTTPErrorClassification(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			p := NewEmbedding(Config{BaseURL: srv.URL})
-			_, err := p.Embed(context.Background(), ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}, ai.EmbeddingRequest{Texts: []string{"x"}})
+			c := NewEmbeddingClient(ClientConfig{})
+			ep := testEmbeddingEndpoint(srv.URL, "")
+			_, err := c.Embed(context.Background(), ep, ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}, ai.EmbeddingRequest{Texts: []string{"x"}})
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -193,7 +212,7 @@ func TestEmbeddingProvider_HTTPErrorClassification(t *testing.T) {
 	}
 }
 
-func TestEmbeddingProvider_BatchSplitAndProgress(t *testing.T) {
+func TestEmbeddingClient_BatchSplitAndProgress(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req batchEmbedContentsRequest
@@ -210,8 +229,9 @@ func TestEmbeddingProvider_BatchSplitAndProgress(t *testing.T) {
 	defer srv.Close()
 
 	progress := make([][2]int, 0)
-	p := NewEmbedding(Config{BaseURL: srv.URL})
-	resp, err := p.Embed(context.Background(), ai.EmbeddingModel{ID: "m", MaxBatchSize: 2}, ai.EmbeddingRequest{
+	c := NewEmbeddingClient(ClientConfig{})
+	ep := testEmbeddingEndpoint(srv.URL, "")
+	resp, err := c.Embed(context.Background(), ep, ai.EmbeddingModel{ID: "m", MaxBatchSize: 2}, ai.EmbeddingRequest{
 		Texts: []string{"a", "b", "c", "d", "e"},
 		OnProgress: func(done, total int) {
 			progress = append(progress, [2]int{done, total})
@@ -237,7 +257,7 @@ func TestEmbeddingProvider_BatchSplitAndProgress(t *testing.T) {
 	}
 }
 
-func TestEmbeddingProvider_NoDimensionsWhenZero(t *testing.T) {
+func TestEmbeddingClient_NoDimensionsWhenZero(t *testing.T) {
 	var seenReq batchEmbedContentsRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&seenReq)
@@ -247,9 +267,10 @@ func TestEmbeddingProvider_NoDimensionsWhenZero(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := NewEmbedding(Config{BaseURL: srv.URL})
+	c := NewEmbeddingClient(ClientConfig{})
+	ep := testEmbeddingEndpoint(srv.URL, "")
 	model := ai.EmbeddingModel{ID: "m", MaxBatchSize: 10}
-	_, err := p.Embed(context.Background(), model, ai.EmbeddingRequest{Texts: []string{"x"}})
+	_, err := c.Embed(context.Background(), ep, model, ai.EmbeddingRequest{Texts: []string{"x"}})
 	if err != nil {
 		t.Fatalf("Embed err: %v", err)
 	}

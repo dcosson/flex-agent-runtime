@@ -16,8 +16,7 @@ func testEndpoint(baseURL, apiKey string) ai.ProviderEndpoint {
 }
 
 func testClientAndEndpoint(baseURL, apiKey string) (*Client, ai.ProviderEndpoint) {
-	p := New(Config{BaseURL: baseURL, APIKey: apiKey})
-	return p.Client, testEndpoint(baseURL, apiKey)
+	return NewClient(ClientConfig{}), testEndpoint(baseURL, apiKey)
 }
 
 func testModel() ai.Model {

@@ -9,6 +9,7 @@ available.
 
 Usage:
     python3 scripts/update-model-catalog.py
+    python3 scripts/update-model-catalog.py --force  # skip freshness check
 
     Set these env vars for richer data (all optional):
       ANTHROPIC_API_KEY   - enrich Anthropic models with capabilities
@@ -52,6 +53,7 @@ import time
 import urllib.request
 import urllib.error
 from collections import OrderedDict
+from datetime import datetime, timezone
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -60,6 +62,46 @@ EMBEDDING_CATALOG_PATH = os.path.join(PROJECT_ROOT, "internal", "ai", "models", 
 
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "model-catalog-cache")
 CACHE_TTL_SECONDS = 3600  # 1 hour
+
+FRESHNESS_TTL_SECONDS = 3600  # 1 hour — skip if catalog was updated recently
+
+
+# ---------------------------------------------------------------------------
+# Provider configs — emitted into the "providers" section of catalog.json.
+# These define the ProviderConfig structs that Go code registers.
+# ---------------------------------------------------------------------------
+
+PROVIDER_CONFIGS = OrderedDict([
+    ("anthropic", OrderedDict([
+        ("apiClientType", "anthropic-messages"),
+        ("baseUrl", "https://api.anthropic.com"),
+        ("keyEnvVars", ["ANTHROPIC_API_KEY"]),
+        ("providerSpecific", {"apiVersion": "2023-06-01"}),
+    ])),
+    ("google", OrderedDict([
+        ("apiClientType", "google-genai"),
+        ("embeddingApiClientType", "google-embeddings"),
+        ("baseUrl", "https://generativelanguage.googleapis.com"),
+        ("keyEnvVars", ["GOOGLE_API_KEY", "GEMINI_API_KEY"]),
+        ("providerSpecific", {"apiVersion": "v1beta"}),
+    ])),
+    ("openai", OrderedDict([
+        ("apiClientType", "openai-completions"),
+        ("embeddingApiClientType", "openai-embeddings"),
+        ("baseUrl", "https://api.openai.com/v1"),
+        ("keyEnvVars", ["OPENAI_API_KEY"]),
+    ])),
+    ("openrouter", OrderedDict([
+        ("apiClientType", "openai-completions"),
+        ("baseUrl", "https://openrouter.ai/api/v1"),
+        ("keyEnvVars", ["OPENROUTER_API_KEY"]),
+    ])),
+    ("cohere", OrderedDict([
+        ("embeddingApiClientType", "cohere-embeddings"),
+        ("baseUrl", "https://api.cohere.com/v2"),
+        ("keyEnvVars", ["COHERE_API_KEY"]),
+    ])),
+])
 
 
 # ---------------------------------------------------------------------------
@@ -181,27 +223,12 @@ def fetch_google_models():
 # Model filtering
 # ---------------------------------------------------------------------------
 
-# Provider prefixes that map to native providers (stripped from model ID)
-NATIVE_PROVIDERS = {
-    "anthropic": {
-        "api": "anthropic-messages",
-        "baseUrl": "https://api.anthropic.com",
-    },
-    "openai": {
-        "api": "openai-completions",
-        "baseUrl": "https://api.openai.com/v1",
-    },
-    "google": {
-        "api": "google-genai",
-        "baseUrl": "https://generativelanguage.googleapis.com",
-    },
-}
+# Provider prefixes that map to native providers (stripped from model ID).
+# Note: api/baseUrl are now in PROVIDER_CONFIGS, not per-model.
+NATIVE_PROVIDER_KEYS = {"anthropic", "openai", "google"}
 
 # Models that should stay under the openrouter provider (third-party / open)
-OPENROUTER_PROVIDER = {
-    "api": "openai-completions",
-    "baseUrl": "https://openrouter.ai/api/v1",
-}
+OPENROUTER_PROVIDER_KEY = "openrouter"
 
 # Anthropic models on OpenRouter use undated aliases (e.g. "claude-sonnet-4"),
 # but our codebase / tests reference the dated snapshot IDs (e.g.
@@ -507,7 +534,12 @@ def _get_compat(model_id, provider_key):
 # ---------------------------------------------------------------------------
 
 def build_chat_catalog(or_models, anthropic_extra, google_extra):
-    """Build the chat model catalog from OpenRouter models."""
+    """Build the chat model catalog from OpenRouter models.
+
+    Returns a dict of provider_key -> {model_id -> model_entry}.
+    Model entries do NOT contain 'api' or 'baseUrl' — those are derived
+    from the provider config at load time.
+    """
     providers = OrderedDict()
     providers["anthropic"] = OrderedDict()
     providers["google"] = OrderedDict()
@@ -526,24 +558,20 @@ def build_chat_catalog(or_models, anthropic_extra, google_extra):
         prefix = model_id.split("/", 1)[0] if "/" in model_id else ""
         suffix = model_id.split("/", 1)[1] if "/" in model_id else model_id
 
-        if prefix in NATIVE_PROVIDERS:
+        if prefix in NATIVE_PROVIDER_KEYS:
             provider_key = prefix
-            provider_info = NATIVE_PROVIDERS[prefix]
             # For Anthropic, normalize dots to hyphens in version numbers
             if prefix == "anthropic":
                 catalog_id = _normalize_anthropic_id(suffix)
             else:
                 catalog_id = suffix
         else:
-            provider_key = "openrouter"
+            provider_key = OPENROUTER_PROVIDER_KEY
             catalog_id = model_id
-            provider_info = OPENROUTER_PROVIDER
 
-        # Build model entry
+        # Build model entry — no api or baseUrl, those come from provider config
         entry = OrderedDict()
         entry["name"] = _make_display_name(m)
-        entry["api"] = provider_info["api"]
-        entry["baseUrl"] = provider_info["baseUrl"]
         entry["reasoning"] = _is_reasoning_model(m)
         entry["input"] = _get_input_modalities(m)
         entry["cost"] = _build_cost(m, provider_key)
@@ -594,15 +622,20 @@ def build_chat_catalog(or_models, anthropic_extra, google_extra):
 # that are not discoverable from any API)
 # ---------------------------------------------------------------------------
 
-def _embedding_model(id_, name, api, provider, base_url, max_input, default_dims,
+def _embedding_model(id_, name, api, provider, max_input, default_dims,
                      max_dims, min_dims, max_batch, dim_ctrl, task_type, cost_per_mtok):
-    """Build an embedding model entry."""
+    """Build an embedding model entry.
+
+    Note: baseUrl is no longer included — it comes from the provider config.
+    The 'api' field is included for models whose api differs from the provider's
+    embeddingApiClientType (e.g. openrouter models use openai-embeddings but
+    openrouter provider doesn't have an embeddingApiClientType).
+    """
     return OrderedDict([
         ("id", id_),
         ("name", name),
         ("api", api),
         ("provider", provider),
-        ("baseUrl", base_url),
         ("maxInputTokens", max_input),
         ("defaultDims", default_dims),
         ("maxDims", max_dims),
@@ -622,60 +655,60 @@ def build_embedding_catalog():
         # OpenAI embeddings -- source: https://openai.com/api/pricing/
         _embedding_model(
             "text-embedding-3-small", "Text Embedding 3 Small",
-            "openai-embeddings", "openai", "https://api.openai.com/v1",
+            "openai-embeddings", "openai",
             8192, 1536, 1536, 256, 2048, True, False, 0.02,
         ),
         _embedding_model(
             "text-embedding-3-large", "Text Embedding 3 Large",
-            "openai-embeddings", "openai", "https://api.openai.com/v1",
+            "openai-embeddings", "openai",
             8192, 3072, 3072, 256, 2048, True, False, 0.13,
         ),
         _embedding_model(
             "text-embedding-ada-002", "Ada v2",
-            "openai-embeddings", "openai", "https://api.openai.com/v1",
+            "openai-embeddings", "openai",
             8192, 1536, 1536, 1536, 2048, False, False, 0.1,
         ),
         # Google embeddings -- source: https://ai.google.dev/gemini-api/docs/pricing
         _embedding_model(
             "gemini-embedding-001", "Gemini Embedding 001",
-            "google-embeddings", "google", "https://generativelanguage.googleapis.com/v1beta",
+            "google-embeddings", "google",
             2048, 3072, 3072, 128, 100, True, True, 0.0,
         ),
         # Cohere embeddings -- source: https://cohere.com/pricing
         _embedding_model(
             "embed-v4.0", "Cohere Embed v4",
-            "cohere-embeddings", "cohere", "https://api.cohere.com/v2",
+            "cohere-embeddings", "cohere",
             128000, 1536, 1536, 256, 96, True, True, 0.12,
         ),
         _embedding_model(
             "embed-english-v3.0", "Cohere Embed English v3",
-            "cohere-embeddings", "cohere", "https://api.cohere.com/v2",
+            "cohere-embeddings", "cohere",
             512, 1024, 1024, 1024, 96, False, True, 0.1,
         ),
         _embedding_model(
             "embed-multilingual-v3.0", "Cohere Embed Multilingual v3",
-            "cohere-embeddings", "cohere", "https://api.cohere.com/v2",
+            "cohere-embeddings", "cohere",
             512, 1024, 1024, 1024, 96, False, True, 0.1,
         ),
         # OpenRouter embeddings -- source: https://openrouter.ai/models
         _embedding_model(
             "openai/text-embedding-3-small", "Text Embedding 3 Small (OpenRouter)",
-            "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
+            "openai-embeddings", "openrouter",
             8192, 1536, 1536, 256, 2048, True, False, 0.02,
         ),
         _embedding_model(
             "openai/text-embedding-3-large", "Text Embedding 3 Large (OpenRouter)",
-            "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
+            "openai-embeddings", "openrouter",
             8192, 3072, 3072, 256, 2048, True, False, 0.13,
         ),
         _embedding_model(
             "qwen/qwen3-embedding-8b", "Qwen3 Embedding 8B",
-            "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
+            "openai-embeddings", "openrouter",
             32000, 1024, 1024, 1024, 2048, False, False, 0.01,
         ),
         _embedding_model(
             "qwen/qwen3-embedding-4b", "Qwen3 Embedding 4B",
-            "openai-embeddings", "openrouter", "https://openrouter.ai/api/v1",
+            "openai-embeddings", "openrouter",
             32768, 1024, 1024, 1024, 2048, False, False, 0.02,
         ),
     ]
@@ -692,19 +725,41 @@ REQUIRED_MODELS = {
 }
 
 
-def validate_catalog(catalog):
-    """Check that test-critical models are present."""
+def validate_catalog(models_by_provider):
+    """Check that test-critical models are present in the models section."""
     ok = True
     for provider, model_ids in REQUIRED_MODELS.items():
-        if provider not in catalog:
-            print(f"  ERROR: Missing provider '{provider}'", file=sys.stderr)
+        if provider not in models_by_provider:
+            print(f"  ERROR: Missing provider '{provider}' in models", file=sys.stderr)
             ok = False
             continue
         for mid in model_ids:
-            if mid not in catalog[provider]:
+            if mid not in models_by_provider[provider]:
                 print(f"  ERROR: Missing required model '{mid}' in '{provider}'", file=sys.stderr)
                 ok = False
     return ok
+
+
+# ---------------------------------------------------------------------------
+# Freshness check
+# ---------------------------------------------------------------------------
+
+def _is_fresh(path):
+    """Return True if the catalog at path was updated within FRESHNESS_TTL_SECONDS."""
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        ts = data.get("lastUpdated", "")
+        if not ts:
+            return False
+        # Parse ISO 8601 timestamp
+        updated = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - updated).total_seconds()
+        return age < FRESHNESS_TTL_SECONDS
+    except (json.JSONDecodeError, ValueError, OSError):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -724,6 +779,13 @@ def load_existing_catalog(path):
 # ---------------------------------------------------------------------------
 
 def main():
+    force = "--force" in sys.argv
+
+    # Freshness check — skip if catalog was recently updated
+    if not force and _is_fresh(CATALOG_PATH):
+        print(f"Catalog is fresh (updated within {FRESHNESS_TTL_SECONDS}s). Use --force to override.")
+        return
+
     # Fetch from OpenRouter (primary source)
     or_models = fetch_openrouter_models()
     if not or_models:
@@ -735,11 +797,11 @@ def main():
     anthropic_extra = fetch_anthropic_models()
     google_extra = fetch_google_models()
 
-    # Build chat catalog
-    catalog = build_chat_catalog(or_models, anthropic_extra, google_extra)
+    # Build chat model data
+    models_by_provider = build_chat_catalog(or_models, anthropic_extra, google_extra)
 
     # Validate
-    if not validate_catalog(catalog):
+    if not validate_catalog(models_by_provider):
         existing = load_existing_catalog(CATALOG_PATH)
         if existing:
             print("WARNING: Validation failed. Falling back to existing catalog.", file=sys.stderr)
@@ -748,20 +810,32 @@ def main():
             print("ERROR: Validation failed and no existing catalog to fall back to.", file=sys.stderr)
             sys.exit(1)
     else:
-        # Write chat catalog
+        # Build full catalog with providers section
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        catalog = OrderedDict([
+            ("lastUpdated", now),
+            ("providers", PROVIDER_CONFIGS),
+            ("models", models_by_provider),
+        ])
+
         with open(CATALOG_PATH, "w") as f:
             json.dump(catalog, f, indent=2, sort_keys=True)
             f.write("\n")
-        total = sum(len(v) for v in catalog.values())
+        total = sum(len(v) for v in models_by_provider.values())
         print(f"Wrote {CATALOG_PATH}")
-        print(f"  {total} chat models across {len(catalog)} providers")
-        for provider, models in catalog.items():
+        print(f"  {total} chat models across {len(models_by_provider)} providers")
+        for provider, models in models_by_provider.items():
             print(f"    {provider}: {len(models)} models")
 
     # Build and write embedding catalog
     embedding_models = build_embedding_catalog()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    embedding_catalog = OrderedDict([
+        ("lastUpdated", now),
+        ("models", embedding_models),
+    ])
     with open(EMBEDDING_CATALOG_PATH, "w") as f:
-        json.dump(embedding_models, f, indent=2, sort_keys=True)
+        json.dump(embedding_catalog, f, indent=2, sort_keys=True)
         f.write("\n")
     print(f"Wrote {EMBEDDING_CATALOG_PATH}")
     print(f"  {len(embedding_models)} embedding models")

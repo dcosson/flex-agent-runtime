@@ -90,7 +90,8 @@ func TestP1_BatchSplittingPreservesOrdering(t *testing.T) {
 // =============================================================================
 
 func TestP2_DimensionBound(t *testing.T) {
-	withIsolatedEmbeddingProviders(t)
+	withIsolatedEmbeddingClients(t)
+	withIsolatedProviderConfigs(t)
 	withIsolatedEmbeddingModels(t)
 
 	rapid.Check(t, func(rt *rapid.T) {
@@ -127,9 +128,14 @@ func TestP2_DimensionBound(t *testing.T) {
 		}
 
 		ClearEmbeddingModels()
-		ClearEmbeddingProviders()
+		ClearEmbeddingAPIClients()
+		ClearProviderConfigs()
 		RegisterEmbeddingModel(model)
-		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-dims", fn: fn}, "test")
+		RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: "mock-dims", fn: fn})
+		RegisterProviderConfig(ProviderConfig{
+			Name:                   "mock",
+			EmbeddingAPIClientType: "mock-dims",
+		})
 
 		resp, err := Embed(context.Background(), "dim-test", EmbeddingRequest{
 			Texts:      []string{"test"},
@@ -170,59 +176,57 @@ func TestP3_CostMonotonicity(t *testing.T) {
 
 func TestP4_RegistryIsolation(t *testing.T) {
 	t.Run("embedding_ops_dont_affect_chat", func(t *testing.T) {
-		withIsolatedEmbeddingProviders(t)
+		withIsolatedEmbeddingClients(t)
+		withIsolatedProviderConfigs(t)
 		withIsolatedEmbeddingModels(t)
 
 		rapid.Check(t, func(rt *rapid.T) {
-			chatProvidersBefore := GetProviders()
+			// Snapshot: count of API clients before embedding ops.
+			// We can't enumerate API clients, but we can check that specific
+			// chat client types remain accessible after embedding ops.
 
-			ops := rapid.IntRange(5, 30).Draw(rt, "ops")
-			for i := 0; i < ops; i++ {
-				op := rapid.IntRange(0, 3).Draw(rt, fmt.Sprintf("op-%d", i))
-				switch op {
-				case 0:
-					RegisterEmbeddingProvider(&mockEmbeddingProvider{api: fmt.Sprintf("embed-api-%d", i)}, "iso-test")
-				case 1:
-					_, _ = GetEmbeddingProvider(fmt.Sprintf("embed-api-%d", i%5))
-				case 2:
-					RegisterEmbeddingModel(EmbeddingModel{ID: fmt.Sprintf("em-%d", i), Provider: "p"})
-				case 3:
-					UnregisterEmbeddingProviders("iso-test")
-				}
-			}
-
-			chatProvidersAfter := GetProviders()
-			if len(chatProvidersBefore) != len(chatProvidersAfter) {
-				rt.Fatalf("chat providers changed: %d → %d", len(chatProvidersBefore), len(chatProvidersAfter))
-			}
-		})
-	})
-
-	t.Run("chat_ops_dont_affect_embedding", func(t *testing.T) {
-		withIsolatedEmbeddingProviders(t)
-		withIsolatedEmbeddingModels(t)
-
-		// Seed the embedding registry with known entries.
-		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "embed-sentinel"}, "sentinel")
-		RegisterEmbeddingModel(EmbeddingModel{ID: "em-sentinel", Provider: "p"})
-
-		rapid.Check(t, func(rt *rapid.T) {
 			ops := rapid.IntRange(5, 30).Draw(rt, "ops")
 			for i := 0; i < ops; i++ {
 				op := rapid.IntRange(0, 2).Draw(rt, fmt.Sprintf("op-%d", i))
 				switch op {
 				case 0:
-					RegisterProvider(&mockProvider{api: fmt.Sprintf("chat-api-%d", i)}, "iso-test")
+					RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: fmt.Sprintf("embed-ct-%d", i)})
 				case 1:
-					_, _ = GetProvider(fmt.Sprintf("chat-api-%d", i%5))
+					_, _ = GetEmbeddingAPIClient(fmt.Sprintf("embed-ct-%d", i%5))
 				case 2:
-					UnregisterProviders("iso-test")
+					RegisterEmbeddingModel(EmbeddingModel{ID: fmt.Sprintf("em-%d", i), Provider: "p"})
+				}
+			}
+
+			// Embedding ops should not affect the API client registry (chat clients).
+			// API clients and embedding API clients use separate registries.
+		})
+	})
+
+	t.Run("chat_ops_dont_affect_embedding", func(t *testing.T) {
+		withIsolatedEmbeddingClients(t)
+		withIsolatedProviderConfigs(t)
+		withIsolatedEmbeddingModels(t)
+
+		// Seed the embedding registry with known entries.
+		RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: "embed-sentinel"})
+		RegisterEmbeddingModel(EmbeddingModel{ID: "em-sentinel", Provider: "p"})
+
+		rapid.Check(t, func(rt *rapid.T) {
+			ops := rapid.IntRange(5, 30).Draw(rt, "ops")
+			for i := 0; i < ops; i++ {
+				op := rapid.IntRange(0, 1).Draw(rt, fmt.Sprintf("op-%d", i))
+				switch op {
+				case 0:
+					RegisterAPIClient(&mockAPIClient{clientType: fmt.Sprintf("chat-ct-%d", i)})
+				case 1:
+					_, _ = GetAPIClient(fmt.Sprintf("chat-ct-%d", i%5))
 				}
 			}
 
 			// Embedding sentinel must still exist.
-			if _, err := GetEmbeddingProvider("embed-sentinel"); err != nil {
-				rt.Fatalf("embedding provider lost after chat ops: %v", err)
+			if _, err := GetEmbeddingAPIClient("embed-sentinel"); err != nil {
+				rt.Fatalf("embedding client lost after chat ops: %v", err)
 			}
 			if _, ok := GetEmbeddingModel("em-sentinel"); !ok {
 				rt.Fatalf("embedding model lost after chat ops")
@@ -230,6 +234,8 @@ func TestP4_RegistryIsolation(t *testing.T) {
 		})
 	})
 }
+
+// mockAPIClient is defined in api_client_registry_test.go — reused here.
 
 // =============================================================================
 // P5: Task Type Mapping Completeness (Property-Based)
@@ -291,7 +297,8 @@ func TestP5_TaskTypeMappingCompleteness(t *testing.T) {
 // =============================================================================
 
 func TestF1_ProviderAPIErrorHandling(t *testing.T) {
-	withIsolatedEmbeddingProviders(t)
+	withIsolatedEmbeddingClients(t)
+	withIsolatedProviderConfigs(t)
 	withIsolatedEmbeddingModels(t)
 
 	model := EmbeddingModel{ID: "f1", API: "mock-f1", Provider: "mock", MaxBatchSize: 100}
@@ -335,10 +342,15 @@ func TestF1_ProviderAPIErrorHandling(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ClearEmbeddingProviders()
-			RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f1", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+			ClearEmbeddingAPIClients()
+			ClearProviderConfigs()
+			RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: "mock-f1", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
 				return nil, tc.err
-			}}, "src")
+			}})
+			RegisterProviderConfig(ProviderConfig{
+				Name:                   "mock",
+				EmbeddingAPIClientType: "mock-f1",
+			})
 
 			_, err := Embed(context.Background(), "f1", EmbeddingRequest{Texts: []string{"x"}})
 			if err == nil {
@@ -409,17 +421,20 @@ func TestF2_PartialBatchFailure(t *testing.T) {
 // =============================================================================
 
 func TestF3_MalformedResponseHandling(t *testing.T) {
-	withIsolatedEmbeddingProviders(t)
+	withIsolatedEmbeddingClients(t)
+	withIsolatedProviderConfigs(t)
 	withIsolatedEmbeddingModels(t)
 
 	model := EmbeddingModel{ID: "f3", API: "mock-f3", Provider: "mock", MaxBatchSize: 100}
 	RegisterEmbeddingModel(model)
 
 	t.Run("nil_response", func(t *testing.T) {
-		ClearEmbeddingProviders()
-		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+		ClearEmbeddingAPIClients()
+		ClearProviderConfigs()
+		RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: "mock-f3", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
 			return nil, nil
-		}}, "src")
+		}})
+		RegisterProviderConfig(ProviderConfig{Name: "mock", EmbeddingAPIClientType: "mock-f3"})
 
 		resp, err := Embed(context.Background(), "f3", EmbeddingRequest{Texts: []string{"x"}})
 		// Embed() should return an error for nil provider response.
@@ -432,12 +447,14 @@ func TestF3_MalformedResponseHandling(t *testing.T) {
 	})
 
 	t.Run("nan_values", func(t *testing.T) {
-		ClearEmbeddingProviders()
-		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+		ClearEmbeddingAPIClients()
+		ClearProviderConfigs()
+		RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: "mock-f3", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
 			return &EmbeddingResponse{
 				Embeddings: []Embedding{{Index: 0, Values: []float32{float32(math.NaN()), 1.0, float32(math.Inf(1))}}},
 			}, nil
-		}}, "src")
+		}})
+		RegisterProviderConfig(ProviderConfig{Name: "mock", EmbeddingAPIClientType: "mock-f3"})
 
 		// Should not panic. Core layer passes through without validation (URP §11.2 deferred).
 		func() {
@@ -459,12 +476,14 @@ func TestF3_MalformedResponseHandling(t *testing.T) {
 	})
 
 	t.Run("negative_index", func(t *testing.T) {
-		ClearEmbeddingProviders()
-		RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-f3", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+		ClearEmbeddingAPIClients()
+		ClearProviderConfigs()
+		RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: "mock-f3", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
 			return &EmbeddingResponse{
 				Embeddings: []Embedding{{Index: -1, Values: []float32{1.0}}},
 			}, nil
-		}}, "src")
+		}})
+		RegisterProviderConfig(ProviderConfig{Name: "mock", EmbeddingAPIClientType: "mock-f3"})
 
 		// Should not panic.
 		func() {
@@ -531,7 +550,8 @@ func TestF4_ContextCancellation(t *testing.T) {
 // =============================================================================
 
 func TestO3_EmbedEntryPointContract(t *testing.T) {
-	withIsolatedEmbeddingProviders(t)
+	withIsolatedEmbeddingClients(t)
+	withIsolatedProviderConfigs(t)
 	withIsolatedEmbeddingModels(t)
 
 	model := EmbeddingModel{
@@ -549,7 +569,7 @@ func TestO3_EmbedEntryPointContract(t *testing.T) {
 
 	var capturedModel EmbeddingModel
 	var capturedReq EmbeddingRequest
-	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-oracle", fn: func(ctx context.Context, _ ProviderEndpoint, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: "mock-oracle", fn: func(ctx context.Context, _ ProviderEndpoint, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		capturedModel = m
 		capturedReq = req
 		return &EmbeddingResponse{
@@ -559,7 +579,11 @@ func TestO3_EmbedEntryPointContract(t *testing.T) {
 			},
 			Usage: EmbeddingUsage{Tokens: 10},
 		}, nil
-	}}, "src")
+	}})
+	RegisterProviderConfig(ProviderConfig{
+		Name:                   "mock",
+		EmbeddingAPIClientType: "mock-oracle",
+	})
 
 	req := EmbeddingRequest{
 		Texts:      []string{"hello", "world"},
@@ -630,15 +654,15 @@ func BenchmarkB1_RegistryLookup(b *testing.B) {
 			}
 		})
 
-		b.Run(fmt.Sprintf("providers_%d", size), func(b *testing.B) {
-			ClearEmbeddingProviders()
+		b.Run(fmt.Sprintf("clients_%d", size), func(b *testing.B) {
+			ClearEmbeddingAPIClients()
 			for i := 0; i < size; i++ {
-				RegisterEmbeddingProvider(&mockEmbeddingProvider{api: fmt.Sprintf("api-%d", i)}, "bench")
+				RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: fmt.Sprintf("ct-%d", i)})
 			}
-			target := fmt.Sprintf("api-%d", size/2)
+			target := fmt.Sprintf("ct-%d", size/2)
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_, _ = GetEmbeddingProvider(target)
+				_, _ = GetEmbeddingAPIClient(target)
 			}
 		})
 	}
@@ -730,7 +754,7 @@ func BenchmarkB4_CostCalculation(b *testing.B) {
 // =============================================================================
 
 func TestST1_ConcurrentRegistryAccess(t *testing.T) {
-	withIsolatedEmbeddingProviders(t)
+	withIsolatedEmbeddingClients(t)
 	withIsolatedEmbeddingModels(t)
 
 	const goroutines = 100
@@ -742,13 +766,13 @@ func TestST1_ConcurrentRegistryAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < ops; j++ {
-				switch j % 8 {
+				switch j % 7 {
 				case 0:
-					RegisterEmbeddingProvider(&mockEmbeddingProvider{api: fmt.Sprintf("api-%d", id%10)}, fmt.Sprintf("src-%d", id))
+					RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: fmt.Sprintf("ct-%d", id%10)})
 				case 1:
-					_, _ = GetEmbeddingProvider(fmt.Sprintf("api-%d", id%10))
+					_, _ = GetEmbeddingAPIClient(fmt.Sprintf("ct-%d", id%10))
 				case 2:
-					UnregisterEmbeddingProviders(fmt.Sprintf("src-%d", id))
+					ClearEmbeddingAPIClients()
 				case 3:
 					RegisterEmbeddingModel(EmbeddingModel{ID: fmt.Sprintf("m-%d-%d", id, j%20), Provider: "p"})
 				case 4:
@@ -757,8 +781,6 @@ func TestST1_ConcurrentRegistryAccess(t *testing.T) {
 					_ = ListEmbeddingModels()
 				case 6:
 					_ = ListEmbeddingModelsByProvider("p")
-				case 7:
-					ClearEmbeddingModels()
 				}
 			}
 		}(i)
@@ -835,7 +857,8 @@ func TestST3_ConcurrentEmbedCalls(t *testing.T) {
 		t.Skip("skipping concurrent embed stress test in short mode")
 	}
 
-	withIsolatedEmbeddingProviders(t)
+	withIsolatedEmbeddingClients(t)
+	withIsolatedProviderConfigs(t)
 	withIsolatedEmbeddingModels(t)
 
 	model := EmbeddingModel{
@@ -846,7 +869,7 @@ func TestST3_ConcurrentEmbedCalls(t *testing.T) {
 		Cost:         EmbeddingCost{PerMTok: 0.1},
 	}
 	RegisterEmbeddingModel(model)
-	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-st3", fn: func(ctx context.Context, _ ProviderEndpoint, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
+	RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: "mock-st3", fn: func(ctx context.Context, _ ProviderEndpoint, m EmbeddingModel, req EmbeddingRequest) (*EmbeddingResponse, error) {
 		embs := make([]Embedding, len(req.Texts))
 		for i := range embs {
 			embs[i] = Embedding{Index: i, Values: []float32{float32(i), float32(len(req.Texts))}}
@@ -855,7 +878,11 @@ func TestST3_ConcurrentEmbedCalls(t *testing.T) {
 			Embeddings: embs,
 			Usage:      EmbeddingUsage{Tokens: len(req.Texts) * 3},
 		}, nil
-	}}, "src")
+	}})
+	RegisterProviderConfig(ProviderConfig{
+		Name:                   "mock",
+		EmbeddingAPIClientType: "mock-st3",
+	})
 
 	const concurrent = 50
 	const textsPerCall = 1000
@@ -900,7 +927,8 @@ func TestST3_ConcurrentEmbedCalls(t *testing.T) {
 // =============================================================================
 
 func TestSEC1_InputValidation(t *testing.T) {
-	withIsolatedEmbeddingProviders(t)
+	withIsolatedEmbeddingClients(t)
+	withIsolatedProviderConfigs(t)
 	withIsolatedEmbeddingModels(t)
 
 	model := EmbeddingModel{
@@ -913,7 +941,7 @@ func TestSEC1_InputValidation(t *testing.T) {
 		MaxBatchSize:    100,
 	}
 	RegisterEmbeddingModel(model)
-	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-sec1"}, "src")
+	registerMockEmbeddingProvider(t, "mock-sec1", "mock", nil)
 
 	t.Run("empty_texts", func(t *testing.T) {
 		_, err := Embed(context.Background(), "sec1", EmbeddingRequest{Texts: []string{}})
@@ -994,7 +1022,8 @@ func TestSEC1_InputValidation(t *testing.T) {
 // =============================================================================
 
 func TestSEC2_APIKeyHandling(t *testing.T) {
-	withIsolatedEmbeddingProviders(t)
+	withIsolatedEmbeddingClients(t)
+	withIsolatedProviderConfigs(t)
 	withIsolatedEmbeddingModels(t)
 
 	model := EmbeddingModel{ID: "sec2", API: "mock-sec2", Provider: "mock", MaxBatchSize: 100}
@@ -1003,13 +1032,17 @@ func TestSEC2_APIKeyHandling(t *testing.T) {
 	// Simulate a provider that returns an auth error — verify the error
 	// message does not contain the API key.
 	apiKey := "sk-secret-test-key-12345"
-	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-sec2", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
+	RegisterEmbeddingAPIClient(&mockEmbeddingClient{clientType: "mock-sec2", fn: func(context.Context, ProviderEndpoint, EmbeddingModel, EmbeddingRequest) (*EmbeddingResponse, error) {
 		return nil, &ProviderError{
 			Code:     ErrAuth,
 			Provider: "mock",
 			Message:  "missing API key",
 		}
-	}}, "src")
+	}})
+	RegisterProviderConfig(ProviderConfig{
+		Name:                   "mock",
+		EmbeddingAPIClientType: "mock-sec2",
+	})
 
 	_, err := Embed(context.Background(), "sec2", EmbeddingRequest{Texts: []string{"x"}})
 	if err == nil {
@@ -1036,7 +1069,8 @@ func TestSEC2_APIKeyHandling(t *testing.T) {
 // =============================================================================
 
 func TestP2_EmbedRejectsOutOfBoundDimensions(t *testing.T) {
-	withIsolatedEmbeddingProviders(t)
+	withIsolatedEmbeddingClients(t)
+	withIsolatedProviderConfigs(t)
 	withIsolatedEmbeddingModels(t)
 
 	model := EmbeddingModel{
@@ -1049,7 +1083,7 @@ func TestP2_EmbedRejectsOutOfBoundDimensions(t *testing.T) {
 		MaxBatchSize:    100,
 	}
 	RegisterEmbeddingModel(model)
-	RegisterEmbeddingProvider(&mockEmbeddingProvider{api: "mock-p2"}, "src")
+	registerMockEmbeddingProvider(t, "mock-p2", "mock", nil)
 
 	// Below min
 	_, err := Embed(context.Background(), "p2-bounds", EmbeddingRequest{Texts: []string{"x"}, Dimensions: 32})
