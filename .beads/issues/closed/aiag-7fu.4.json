@@ -1,0 +1,22 @@
+{
+  "id": "aiag-7fu.4",
+  "title": "Fix embedding clients: propagate endpoint.Headers to HTTP requests",
+  "description": "Fix P2 from E2E wiring review: embedding clients silently drop provider-level headers.\n\nAll 3 embedding clients (openai, google, cohere) fail to apply endpoint.Headers to HTTP requests. Chat stream clients do this correctly via applyHeaders(). Embedding clients need the same treatment.\n\nFiles to fix:\n- internal/ai/provider/openai/embedding.go (or equivalent) — add endpoint.Headers propagation\n- internal/ai/provider/google/embedding.go — same\n- internal/ai/provider/cohere/embedding.go — same\n- Also apply EmbeddingModel.Headers if present (parity with Model.Headers in chat)\n\nAdd a test verifying headers propagate for embedding requests.\n\nReference: docs/plans/01-ai-core.add03-e2e-wiring-review.md (P2-F1)",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-7fu",
+  "dependencies": [
+    {
+      "id": "aiag-7fu",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "assignee": "coder-2-sea",
+  "created_at": "2026-03-19T22:36:34.631812-07:00",
+  "updated_at": "2026-03-19T22:40:22.245731-07:00",
+  "closed_at": "2026-03-19T22:40:22.24573-07:00",
+  "close_reason": "Closed"
+}

@@ -17,12 +17,16 @@
     {
       "id": "aiag-7fu.3",
       "type": "parent-child"
+    },
+    {
+      "id": "aiag-7fu.4",
+      "type": "parent-child"
     }
   ],
   "created_by": "Danny Cosson",
   "owner": "dcosson@gmail.com",
   "created_at": "2026-03-19T15:16:10.62841-07:00",
-  "updated_at": "2026-03-19T21:48:18.324132-07:00",
-  "closed_at": "2026-03-19T21:48:18.312202-07:00",
+  "updated_at": "2026-03-19T22:40:22.261951-07:00",
+  "closed_at": "2026-03-19T22:40:22.252352-07:00",
   "close_reason": "Auto-closed: all children completed"
 }
