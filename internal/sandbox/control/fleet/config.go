@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control/instance"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // FleetConfig controls fleet behavior. All durations with zero values use the
@@ -143,6 +144,7 @@ type FleetOption func(*fleetOptions)
 type fleetOptions struct {
 	logger                *slog.Logger
 	leaveInstancesOnClose bool
+	metricsRegisterer     prometheus.Registerer
 }
 
 // WithLogger sets the structured logger for fleet operations.
@@ -160,5 +162,13 @@ func WithLogger(logger *slog.Logger) FleetOption {
 func WithLeaveInstancesOnClose(leave bool) FleetOption {
 	return func(o *fleetOptions) {
 		o.leaveInstancesOnClose = leave
+	}
+}
+
+// WithMetricsRegisterer sets the Prometheus registerer used for fleet metrics.
+// If nil, the default registerer is used.
+func WithMetricsRegisterer(registerer prometheus.Registerer) FleetOption {
+	return func(o *fleetOptions) {
+		o.metricsRegisterer = registerer
 	}
 }

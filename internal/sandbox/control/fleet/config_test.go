@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestDefaultFleetConfig_Valid(t *testing.T) {
@@ -221,6 +223,16 @@ func TestFleetOption_WithLeaveInstancesOnClose(t *testing.T) {
 	WithLeaveInstancesOnClose(false)(opts)
 	if opts.leaveInstancesOnClose {
 		t.Error("WithLeaveInstancesOnClose(false) should clear leaveInstancesOnClose")
+	}
+}
+
+func TestFleetOption_WithMetricsRegisterer(t *testing.T) {
+	opts := &fleetOptions{}
+	reg := prometheus.NewRegistry()
+
+	WithMetricsRegisterer(reg)(opts)
+	if opts.metricsRegisterer != reg {
+		t.Error("WithMetricsRegisterer should set metrics registerer")
 	}
 }
 

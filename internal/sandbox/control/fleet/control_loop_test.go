@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control/instance"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // ---------- fakeClock ----------
@@ -45,7 +46,7 @@ func newTestFleetWithClock(t *testing.T) (*FleetSandboxControl, *mockProvisioner
 
 	f, err := NewFleetSandboxControl(mp, func(addr string) (FleetNodeClient, error) {
 		return &mockNodeClient{}, nil
-	}, cfg)
+	}, cfg, WithMetricsRegisterer(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
 	}

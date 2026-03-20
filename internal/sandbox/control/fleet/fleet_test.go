@@ -12,6 +12,7 @@ import (
 
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control/instance"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // ---------- Mock test doubles ----------
@@ -196,7 +197,7 @@ func newTestFleet(t *testing.T) (*FleetSandboxControl, *mockProvisioner) {
 
 	f, err := NewFleetSandboxControl(mp, func(addr string) (FleetNodeClient, error) {
 		return &mockNodeClient{}, nil
-	}, cfg)
+	}, cfg, WithMetricsRegisterer(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -670,7 +671,7 @@ func TestClose_LeaveInstancesOnClose(t *testing.T) {
 
 	f, err := NewFleetSandboxControl(mp, func(addr string) (FleetNodeClient, error) {
 		return &mockNodeClient{}, nil
-	}, cfg)
+	}, cfg, WithMetricsRegisterer(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -744,8 +745,48 @@ func TestFleetStatus_ReflectsState(t *testing.T) {
 	if status.InstancesByState[InstanceDraining] != 1 {
 		t.Errorf("Draining instances = %d, want 1", status.InstancesByState[InstanceDraining])
 	}
+	if status.WarmPoolSize != 1 {
+		t.Errorf("WarmPoolSize = %d, want 1 (one Ready instance with 0 sessions)", status.WarmPoolSize)
+	}
+	if !status.Healthy {
+		t.Error("Healthy should be true (warm=1 >= MinInstances=1, healthy instances exist)")
+	}
 	if status.Closed {
 		t.Error("Closed should be false before Close()")
+	}
+}
+
+func TestFleetStatus_UnhealthyWhenNoWarmPool(t *testing.T) {
+	f, _ := newTestFleet(t)
+	mc := &mockNodeClient{}
+
+	// All instances are active with sessions — no warm pool.
+	addInstance(f, "i-active1", "10.0.1.1", InstanceActive, 3, mc)
+	addInstance(f, "i-active2", "10.0.1.2", InstanceActive, 5, mc)
+
+	status := f.FleetStatus()
+	if status.WarmPoolSize != 0 {
+		t.Errorf("WarmPoolSize = %d, want 0", status.WarmPoolSize)
+	}
+	if status.Healthy {
+		t.Error("Healthy should be false (warm=0 < MinInstances=1)")
+	}
+}
+
+func TestFleetStatus_WarmPoolCountsOnlyIdleReady(t *testing.T) {
+	f, _ := newTestFleet(t)
+	mc := &mockNodeClient{}
+
+	// Ready with sessions is NOT warm.
+	addInstance(f, "i-ready-busy", "10.0.1.1", InstanceReady, 2, mc)
+	// Ready with 0 sessions IS warm.
+	addInstance(f, "i-ready-idle", "10.0.1.2", InstanceReady, 0, mc)
+	// Draining with 0 sessions is NOT warm.
+	addInstance(f, "i-drain-idle", "10.0.1.3", InstanceDraining, 0, mc)
+
+	status := f.FleetStatus()
+	if status.WarmPoolSize != 1 {
+		t.Errorf("WarmPoolSize = %d, want 1", status.WarmPoolSize)
 	}
 }
 
@@ -755,7 +796,7 @@ func TestNewFleetSandboxControl_InvalidConfig(t *testing.T) {
 	cfg := FleetConfig{} // zero value fails validation
 	_, err := NewFleetSandboxControl(&mockProvisioner{}, func(string) (FleetNodeClient, error) {
 		return &mockNodeClient{}, nil
-	}, cfg)
+	}, cfg, WithMetricsRegisterer(prometheus.NewRegistry()))
 	if err == nil {
 		t.Fatal("expected error for invalid config")
 	}
@@ -767,7 +808,7 @@ func TestNewFleetSandboxControl_WithLeaveInstancesOption(t *testing.T) {
 
 	f, err := NewFleetSandboxControl(mp, func(string) (FleetNodeClient, error) {
 		return &mockNodeClient{}, nil
-	}, cfg, WithLeaveInstancesOnClose(true))
+	}, cfg, WithLeaveInstancesOnClose(true), WithMetricsRegisterer(prometheus.NewRegistry()))
 	if err != nil {
 		t.Fatal(err)
 	}

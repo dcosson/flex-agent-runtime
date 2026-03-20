@@ -38,6 +38,7 @@ type FleetSandboxControl struct {
 	clientFactory SandboxClientFactory
 	logger        *slog.Logger
 	clock         Clock
+	metrics       *fleetMetrics
 
 	// instances maps instance IDs to their managed state. Guarded by mu.
 	instances map[string]*ManagedInstance
@@ -76,6 +77,11 @@ func NewFleetSandboxControl(
 		cfg.LeaveInstancesOnClose = true
 	}
 
+	metrics, err := newFleetMetrics(o.metricsRegisterer)
+	if err != nil {
+		return nil, fmt.Errorf("fleet: metrics init failed: %w", err)
+	}
+
 	f := &FleetSandboxControl{
 		provisioner:   provisioner,
 		config:        cfg,
@@ -83,12 +89,14 @@ func NewFleetSandboxControl(
 		clientFactory: clientFactory,
 		logger:        o.logger,
 		clock:         realClock{},
+		metrics:       metrics,
 		instances:     make(map[string]*ManagedInstance),
 		loopDone:      make(chan struct{}),
 		cancelLoop:    func() {},
 	}
 	// No control loop yet; Close() shouldn't block on loopDone.
 	close(f.loopDone)
+	f.updateMetricsSnapshot()
 
 	return f, nil
 }
@@ -102,6 +110,7 @@ func (f *FleetSandboxControl) CreateSandbox(ctx context.Context, req control.Cre
 	if f.closed.Load() {
 		return nil, ErrFleetClosed
 	}
+	defer f.updateMetricsSnapshot()
 
 	const maxAttempts = 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -148,6 +157,11 @@ func (f *FleetSandboxControl) CreateSandbox(ctx context.Context, req control.Cre
 // It takes consistent snapshots of instance fields under their read locks for
 // routing, then claims on the real instance under its write lock.
 func (f *FleetSandboxControl) selectAndClaim() (*ManagedInstance, error) {
+	start := time.Now()
+	defer func() {
+		f.metrics.observeRoutingDecision(time.Since(start))
+	}()
+
 	f.mu.RLock()
 	var snapshots []*ManagedInstance
 	real := make(map[string]*ManagedInstance, len(f.instances))
@@ -184,6 +198,8 @@ func (f *FleetSandboxControl) selectAndClaim() (*ManagedInstance, error) {
 
 // provisionInstance launches a new instance and adds it to the fleet.
 func (f *FleetSandboxControl) provisionInstance(ctx context.Context) error {
+	defer f.updateMetricsSnapshot()
+
 	f.mu.RLock()
 	total := len(f.instances)
 	f.mu.RUnlock()
@@ -203,14 +219,17 @@ func (f *FleetSandboxControl) provisionInstance(ctx context.Context) error {
 	}
 	defer f.pendingLaunches.Add(-1)
 
+	start := time.Now()
 	info, err := f.provisioner.LaunchInstance(ctx, f.config.InstanceConfig)
 	if err != nil {
+		f.metrics.provisionsTotal.WithLabelValues("error").Inc()
 		return fmt.Errorf("fleet: provision failed: %w", err)
 	}
 
 	addr := fmt.Sprintf("%s:%d", info.PrivateIP, f.config.SandboxHostPort)
 	client, err := f.clientFactory(addr)
 	if err != nil {
+		f.metrics.provisionsTotal.WithLabelValues("error").Inc()
 		return fmt.Errorf("fleet: client creation failed for %s: %w", info.InstanceID, err)
 	}
 
@@ -226,6 +245,8 @@ func (f *FleetSandboxControl) provisionInstance(ctx context.Context) error {
 	f.mu.Lock()
 	f.instances[info.InstanceID] = mi
 	f.mu.Unlock()
+	f.metrics.provisionsTotal.WithLabelValues("success").Inc()
+	f.metrics.observeProvisionDuration(time.Since(start))
 
 	f.logger.Info("provisioned new instance",
 		"instance_id", info.InstanceID,
@@ -240,6 +261,8 @@ func (f *FleetSandboxControl) provisionInstance(ctx context.Context) error {
 // eagerly, then delegates to the per-instance client. On RPC failure the
 // count is rolled back; the reconciliation loop corrects any remaining drift.
 func (f *FleetSandboxControl) DestroySandbox(ctx context.Context, sandboxID string) error {
+	defer f.updateMetricsSnapshot()
+
 	instanceID, sessionID, err := parseSandboxID(sandboxID)
 	if err != nil {
 		return err
@@ -404,6 +427,7 @@ func (f *FleetSandboxControl) Close() error {
 		}
 		mi.mu.Unlock()
 
+		f.metrics.terminationsTotal.WithLabelValues("shutdown").Inc()
 		if err := f.provisioner.TerminateInstance(ctx, mi.InstanceID); err != nil {
 			f.logger.Warn("failed to terminate instance during close",
 				"instance_id", mi.InstanceID, "error", err)
@@ -413,6 +437,7 @@ func (f *FleetSandboxControl) Close() error {
 	f.mu.Lock()
 	f.instances = make(map[string]*ManagedInstance)
 	f.mu.Unlock()
+	f.updateMetricsSnapshot()
 
 	return nil
 }
@@ -424,7 +449,9 @@ type FleetStatus struct {
 	TotalInstances    int
 	InstancesByState  map[InstanceState]int
 	TotalSessions     int64
+	WarmPoolSize      int
 	PendingProvisions int32
+	Healthy           bool
 	Closed            bool
 }
 
@@ -439,10 +466,21 @@ func (f *FleetSandboxControl) FleetStatus() FleetStatus {
 		PendingProvisions: f.pendingLaunches.Load(),
 		Closed:            f.closed.Load(),
 	}
+	var warm, healthy int
 	for _, mi := range f.instances {
+		mi.mu.RLock()
 		status.InstancesByState[mi.State]++
 		status.TotalSessions += mi.SessionCount
+		if mi.State == InstanceReady && mi.SessionCount == 0 {
+			warm++
+		}
+		if mi.State == InstanceReady || mi.State == InstanceActive {
+			healthy++
+		}
+		mi.mu.RUnlock()
 	}
+	status.WarmPoolSize = warm
+	status.Healthy = warm >= f.config.MinInstances && healthy > 0
 	return status
 }
 
@@ -458,4 +496,47 @@ func (f *FleetSandboxControl) getInstance(instanceID string) (*ManagedInstance, 
 		return nil, fmt.Errorf("%w: %s", ErrInstanceNotFound, instanceID)
 	}
 	return mi, nil
+}
+
+func (f *FleetSandboxControl) updateMetricsSnapshot() {
+	if f.metrics == nil {
+		return
+	}
+
+	f.mu.RLock()
+	total := len(f.instances)
+	var warm int
+	var healthy int
+	for _, mi := range f.instances {
+		mi.mu.RLock()
+		if mi.State == InstanceReady && mi.SessionCount == 0 {
+			warm++
+		}
+		if mi.State == InstanceReady || mi.State == InstanceActive {
+			healthy++
+		}
+		mi.mu.RUnlock()
+	}
+	f.mu.RUnlock()
+
+	f.metrics.poolSize.Set(float64(total))
+	f.metrics.warmPoolSize.Set(float64(warm))
+	f.metrics.healthyInstances.Set(float64(healthy))
+	f.metrics.pendingProvisions.Set(float64(f.pendingLaunches.Load()))
+}
+
+func terminationReasonLabel(reason DrainReason, timedOut bool) string {
+	if timedOut {
+		return "drain_timeout"
+	}
+	switch reason {
+	case DrainHealth:
+		return "unhealthy"
+	case DrainScaleDown:
+		return "scale_down"
+	case DrainShutdown:
+		return "shutdown"
+	default:
+		return "scale_down"
+	}
 }

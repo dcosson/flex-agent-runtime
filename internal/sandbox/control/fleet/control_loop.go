@@ -44,6 +44,8 @@ func (f *FleetSandboxControl) runControlLoop(ctx context.Context) {
 // runIteration executes one iteration of the 6-phase control loop.
 // Exported for testing.
 func (f *FleetSandboxControl) runIteration(ctx context.Context) {
+	defer f.updateMetricsSnapshot()
+
 	f.phaseHealthCheck(ctx)
 	f.phaseHandleUnhealthy()
 	f.phaseScaleUp(ctx)
@@ -178,6 +180,8 @@ func (f *FleetSandboxControl) phaseScaleUp(ctx context.Context) {
 // provisionWarmInstance launches a new instance in Provisioning state.
 // The control loop's phase 6 promotes it to Ready after health check passes.
 func (f *FleetSandboxControl) provisionWarmInstance(ctx context.Context) error {
+	defer f.updateMetricsSnapshot()
+
 	f.mu.RLock()
 	total := len(f.instances)
 	f.mu.RUnlock()
@@ -196,14 +200,17 @@ func (f *FleetSandboxControl) provisionWarmInstance(ctx context.Context) error {
 	}
 	defer f.pendingLaunches.Add(-1)
 
+	start := f.clock.Now()
 	info, err := f.provisioner.LaunchInstance(ctx, f.config.InstanceConfig)
 	if err != nil {
+		f.metrics.provisionsTotal.WithLabelValues("error").Inc()
 		return fmt.Errorf("fleet: warm provision failed: %w", err)
 	}
 
 	addr := fmt.Sprintf("%s:%d", info.PrivateIP, f.config.SandboxHostPort)
 	client, err := f.clientFactory(addr)
 	if err != nil {
+		f.metrics.provisionsTotal.WithLabelValues("error").Inc()
 		return fmt.Errorf("fleet: client creation failed for %s: %w", info.InstanceID, err)
 	}
 
@@ -213,12 +220,13 @@ func (f *FleetSandboxControl) provisionWarmInstance(ctx context.Context) error {
 		Client:           client,
 		MaxSessions:      f.config.MaxSessionsPerInstance,
 		IP:               info.PrivateIP,
-		ProvisionStarted: f.clock.Now(),
+		ProvisionStarted: start,
 	}
 
 	f.mu.Lock()
 	f.instances[info.InstanceID] = mi
 	f.mu.Unlock()
+	f.metrics.provisionsTotal.WithLabelValues("success").Inc()
 
 	f.logger.Info("warm pool provision started",
 		"instance_id", info.InstanceID, "ip", info.PrivateIP)
@@ -288,6 +296,7 @@ func (f *FleetSandboxControl) phaseDrainCompletion(ctx context.Context) {
 		state := mi.State
 		sessions := mi.SessionCount
 		drainStarted := mi.DrainStarted
+		drainReason := mi.DrainReason
 		instanceID := mi.InstanceID
 		mi.mu.RUnlock()
 
@@ -296,6 +305,7 @@ func (f *FleetSandboxControl) phaseDrainCompletion(ctx context.Context) {
 			if !drainStarted.IsZero() && f.clock.Now().Sub(drainStarted) > f.config.DrainTimeout {
 				f.logger.Warn("drain timeout exceeded, force-terminating",
 					"instance_id", instanceID, "sessions", sessions)
+				f.metrics.terminationsTotal.WithLabelValues(terminationReasonLabel(drainReason, true)).Inc()
 				if err := f.provisioner.TerminateInstance(ctx, instanceID); err == nil {
 					mi.mu.Lock()
 					mi.State = InstanceTerminating
@@ -307,6 +317,7 @@ func (f *FleetSandboxControl) phaseDrainCompletion(ctx context.Context) {
 
 			// Terminate drained instances with 0 sessions.
 			if sessions == 0 {
+				f.metrics.terminationsTotal.WithLabelValues(terminationReasonLabel(drainReason, false)).Inc()
 				err := f.provisioner.TerminateInstance(ctx, instanceID)
 				mi.mu.Lock()
 				if err == nil {
@@ -369,6 +380,7 @@ func (f *FleetSandboxControl) phaseProvisioningCompletion(ctx context.Context) {
 		if !provStarted.IsZero() && f.clock.Now().Sub(provStarted) > f.config.ProvisionTimeout {
 			f.logger.Warn("provision timeout, terminating",
 				"instance_id", instanceID)
+			f.metrics.provisionsTotal.WithLabelValues("timeout").Inc()
 			if err := f.provisioner.TerminateInstance(ctx, instanceID); err == nil {
 				mi.mu.Lock()
 				mi.State = InstanceTerminating
@@ -388,6 +400,9 @@ func (f *FleetSandboxControl) phaseProvisioningCompletion(ctx context.Context) {
 			mi.mu.Lock()
 			if err := mi.TransitionTo(InstanceReady); err == nil {
 				mi.IdleSince = f.clock.Now()
+				if !provStarted.IsZero() {
+					f.metrics.observeProvisionDuration(f.clock.Now().Sub(provStarted))
+				}
 				f.logger.Info("instance provisioned and ready",
 					"instance_id", instanceID)
 			}
@@ -409,6 +424,8 @@ func (f *FleetSandboxControl) phaseProvisioningCompletion(ctx context.Context) {
 // RecoverInstances rediscovers managed instances via cloud API tags and
 // re-adds them to the fleet. Call before StartControlLoop after a restart.
 func (f *FleetSandboxControl) RecoverInstances(ctx context.Context) error {
+	defer f.updateMetricsSnapshot()
+
 	filter := instance.InstanceFilter{
 		Tags: f.config.InstanceConfig.Tags,
 		States: []instance.CloudInstanceState{
