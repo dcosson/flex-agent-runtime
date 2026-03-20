@@ -16,14 +16,15 @@ This project provides composable components for building agent systems. Some exa
 
 ## Supported providers
 
-| Provider | Chat/LLM | Embeddings |
-|----------|----------|------------|
-| Anthropic | Yes | - |
-| OpenAI | Yes | Yes |
-| Google | Yes | Yes |
-| Cohere | - | Yes |
+| Provider | Chat/LLM | Embeddings | Key Env Var |
+|----------|----------|------------|-------------|
+| Anthropic | Yes | - | `ANTHROPIC_API_KEY` |
+| OpenAI | Yes | Yes | `OPENAI_API_KEY` |
+| Google | Yes | Yes | `GOOGLE_API_KEY` / `GEMINI_API_KEY` |
+| Cohere | - | Yes | `COHERE_API_KEY` |
+| OpenRouter | Yes | - | `OPENROUTER_API_KEY` |
 
-All providers support configurable base URLs for compatible third-party endpoints.
+Provider configs (base URLs, API client types, headers) and the model catalog are embedded at build time from `internal/ai/models/catalog.json`. API keys are resolved automatically from environment variables via `ResolveEndpoint`.
 
 ## Quick start
 
@@ -45,19 +46,21 @@ export OPENAI_API_KEY=your-key-here
 
 ## Using as a library
 
+API clients are stateless protocol implementations. Provider configs (base URL, API keys, headers) are loaded from the embedded catalog at init and resolved per-call. Set the appropriate env var and go:
+
 ```go
 import (
     "github.com/dcosson/flex-agent-runtime/ai"
     "github.com/dcosson/flex-agent-runtime/ai/provider/anthropic"
 )
 
-// Register a provider
-anthropic.Register(anthropic.Config{
-    APIKey: os.Getenv("ANTHROPIC_API_KEY"),
-}, "my-app")
+func init() {
+    anthropic.Register(anthropic.ClientConfig{}) // registers the API client
+    // Provider config + model catalog loaded automatically from embedded JSON
+}
 
-// Stream a response
-model, _ := ai.GetModel("anthropic", "claude-sonnet-4-20250514")
+// Stream a response — API key resolved from ANTHROPIC_API_KEY env var
+model, _ := ai.GetModel("anthropic", "claude-sonnet-4-6")
 es := ai.StreamSimple(ctx, model, ai.Context{
     Messages: messages,
     Tools:    tools,
@@ -75,13 +78,27 @@ import (
     "github.com/dcosson/flex-agent-runtime/ai/provider/openai"
 )
 
-// Embeddings
-openai.RegisterEmbedding(openai.Config{
-    APIKey: os.Getenv("OPENAI_API_KEY"),
-}, "my-app")
+func init() {
+    openai.RegisterEmbeddingClient(openai.ClientConfig{})
+}
 
-resp, err := ai.Embed(ctx, "text-embedding-3-small", ai.EmbeddingRequest{
+// Embed — API key resolved from OPENAI_API_KEY env var
+model, _ := ai.GetEmbeddingModel("text-embedding-3-small")
+resp, err := ai.Embed(ctx, model, ai.EmbeddingRequest{
     Texts: []string{"hello world", "goodbye world"},
+})
+```
+
+For custom or third-party endpoints:
+
+```go
+ai.RegisterCustomProvider(ai.CustomProviderConfig{
+    ProviderConfig: ai.ProviderConfig{
+        Name:          "my-proxy",
+        APIClientType: "openai-completions",
+        BaseURL:       "https://my-proxy.example.com/v1",
+        KeyEnvVars:    []string{"PROXY_API_KEY"},
+    },
 })
 ```
 
