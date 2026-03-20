@@ -3,6 +3,7 @@ package fly
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -170,6 +171,8 @@ func (e *FlySandboxEnvironment) Create(ctx context.Context, config environment.S
 	}
 	machineID, ip, err := e.apiCreateMachine(ctx, image, opts, volID, config.SessionID)
 	if err != nil {
+		// Best-effort cleanup to avoid leaking provisioned volumes.
+		_ = e.doJSON(ctx, http.MethodDelete, fmt.Sprintf("/apps/%s/volumes/%s", e.appName, volID), nil, nil)
 		return fmt.Errorf("fly: create machine: %w", err)
 	}
 
@@ -195,6 +198,9 @@ func (e *FlySandboxEnvironment) ExecuteTool(ctx context.Context, req environment
 	var command string
 	var err error
 	if environment.IsFileOp(req.ToolName) {
+		if req.ToolName == "edit_file" {
+			return e.executeEditFile(ctx, addrForIP(ip, e.sshPort), req, onProgress)
+		}
 		command, err = buildFileCommand(req)
 	} else {
 		command, err = buildProcessCommand(req)
@@ -203,7 +209,7 @@ func (e *FlySandboxEnvironment) ExecuteTool(ctx context.Context, req environment
 		return nil, err
 	}
 
-	addr := net.JoinHostPort(ip, fmt.Sprintf("%d", e.sshPort))
+	addr := addrForIP(ip, e.sshPort)
 	result, err := e.execSSH(ctx, addr, command, onProgress)
 	if err != nil {
 		return nil, fmt.Errorf("fly: execute %s: %w", req.ToolName, err)
@@ -220,6 +226,70 @@ func (e *FlySandboxEnvironment) ExecuteTool(ctx context.Context, req environment
 	return &environment.ToolResponse{
 		Content:  []ai.ContentBlock{&ai.TextContent{Text: text}},
 		ExitCode: &exitCode,
+	}, nil
+}
+
+func (e *FlySandboxEnvironment) executeEditFile(ctx context.Context, addr string, req environment.ToolRequest, onProgress func(environment.ToolProgress)) (*environment.ToolResponse, error) {
+	path, _ := req.Params["path"].(string)
+	oldStr, _ := req.Params["old_string"].(string)
+	newStr, _ := req.Params["new_string"].(string)
+	replaceAll, _ := req.Params["replace_all"].(bool)
+
+	if path == "" {
+		return &environment.ToolResponse{Content: []ai.ContentBlock{&ai.TextContent{Text: "missing required parameter: path"}}}, nil
+	}
+	if oldStr == "" {
+		return &environment.ToolResponse{Content: []ai.ContentBlock{&ai.TextContent{Text: "missing required parameter: old_string"}}}, nil
+	}
+
+	readCmd, err := buildFileCommand(environment.ToolRequest{
+		ToolName: "read_file",
+		Params:   map[string]any{"path": path},
+	})
+	if err != nil {
+		return nil, err
+	}
+	readRes, err := e.execSSH(ctx, addr, readCmd, onProgress)
+	if err != nil {
+		return nil, fmt.Errorf("fly: edit_file read: %w", err)
+	}
+	if readRes.ExitCode != 0 {
+		msg := strings.TrimSpace(readRes.Stderr)
+		if msg == "" {
+			msg = "file read failed"
+		}
+		return &environment.ToolResponse{Content: []ai.ContentBlock{&ai.TextContent{Text: msg}}}, nil
+	}
+
+	updated, msg, changed := applyEdit(readRes.Stdout, oldStr, newStr, replaceAll, path)
+	if !changed {
+		return &environment.ToolResponse{Content: []ai.ContentBlock{&ai.TextContent{Text: msg}}}, nil
+	}
+
+	writeCmd, err := buildFileCommand(environment.ToolRequest{
+		ToolName: "write_file",
+		Params: map[string]any{
+			"path":    path,
+			"content": updated,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	writeRes, err := e.execSSH(ctx, addr, writeCmd, onProgress)
+	if err != nil {
+		return nil, fmt.Errorf("fly: edit_file write: %w", err)
+	}
+	if writeRes.ExitCode != 0 {
+		msg := strings.TrimSpace(writeRes.Stderr)
+		if msg == "" {
+			msg = "file write failed"
+		}
+		return &environment.ToolResponse{Content: []ai.ContentBlock{&ai.TextContent{Text: msg}}}, nil
+	}
+
+	return &environment.ToolResponse{
+		Content: []ai.ContentBlock{&ai.TextContent{Text: msg}},
 	}, nil
 }
 
@@ -475,8 +545,9 @@ func buildFileCommand(req environment.ToolRequest) (string, error) {
 			return "", fmt.Errorf("fly: write_file requires path")
 		}
 		dir := filepath.Dir(path)
-		return fmt.Sprintf("mkdir -p %s && cat > %s <<'__FLEX_EOF__'\n%s\n__FLEX_EOF__",
-			shQuote(dir), shQuote(path), content), nil
+		encoded := base64.StdEncoding.EncodeToString([]byte(content))
+		return fmt.Sprintf("mkdir -p %s && printf %%s %s | base64 -d > %s",
+			shQuote(dir), shQuote(encoded), shQuote(path)), nil
 	case "grep":
 		pattern, _ := params["pattern"].(string)
 		path, _ := params["path"].(string)
@@ -502,6 +573,20 @@ func buildFileCommand(req environment.ToolRequest) (string, error) {
 	default:
 		return "", fmt.Errorf("fly: unsupported file op: %s", req.ToolName)
 	}
+}
+
+func applyEdit(content, oldStr, newStr string, replaceAll bool, path string) (string, string, bool) {
+	count := strings.Count(content, oldStr)
+	if count == 0 {
+		return content, fmt.Sprintf("old_string not found in %s", path), false
+	}
+	if !replaceAll && count > 1 {
+		return content, fmt.Sprintf("old_string found %d times in %s — provide more context to uniquely identify the target, or set replace_all=true", count, path), false
+	}
+	if replaceAll {
+		return strings.ReplaceAll(content, oldStr, newStr), fmt.Sprintf("edited %s: %d replacement(s) made", path, count), true
+	}
+	return strings.Replace(content, oldStr, newStr, 1), fmt.Sprintf("edited %s: 1 replacement(s) made", path), true
 }
 
 func buildProcessCommand(req environment.ToolRequest) (string, error) {
@@ -530,6 +615,10 @@ func buildProcessCommand(req environment.ToolRequest) (string, error) {
 
 func shQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
+func addrForIP(ip string, port int) string {
+	return net.JoinHostPort(ip, fmt.Sprintf("%d", port))
 }
 
 func cloneLabels(in map[string]string) map[string]string {
