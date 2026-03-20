@@ -55,18 +55,42 @@ type ModelCompat struct {
 	SupportsStrictMode               *bool             `json:"supportsStrictMode,omitempty"`
 }
 
+// catalogFile is the on-disk format for the model catalog.
+type catalogFile struct {
+	LastUpdated string                      `json:"lastUpdated"`
+	Providers   map[string]ProviderConfig   `json:"providers"`
+	Models      map[string]map[string]Model `json:"models"`
+}
+
 func init() {
-	var catalog map[string]map[string]Model
+	var catalog catalogFile
 	if err := json.Unmarshal(catalogJSON, &catalog); err != nil {
 		panic(fmt.Sprintf("failed to load model catalog: %v", err))
 	}
-	for provider, models := range catalog {
+
+	// Phase 1: Register provider configs.
+	for name, cfg := range catalog.Providers {
+		cfg.Name = name
+		RegisterProviderConfig(cfg)
+	}
+
+	// Phase 2: Register chat models, deriving API from provider config.
+	for providerName, models := range catalog.Models {
+		provCfg, ok := catalog.Providers[providerName]
+		if !ok {
+			panic(fmt.Sprintf("model catalog: provider %q not in providers section", providerName))
+		}
 		for id, m := range models {
 			m.ID = id
-			m.Provider = provider
+			m.Provider = providerName
+			m.API = provCfg.APIClientType
+			m.PricingKnown = true
 			RegisterModel(m)
 		}
 	}
+
+	// Phase 3: Register embedding models from embedding catalog.
+	loadEmbeddingCatalog(catalog.Providers)
 }
 
 // RegisterModel registers a model under its provider.

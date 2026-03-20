@@ -16,12 +16,29 @@ var (
 	embeddingModelRegistry = make(map[string]EmbeddingModel)
 )
 
-func init() {
-	var models []EmbeddingModel
-	if err := json.Unmarshal(embeddingCatalogJSON, &models); err != nil {
+// embeddingCatalogFile is the on-disk format for the embedding catalog.
+type embeddingCatalogFile struct {
+	LastUpdated string           `json:"lastUpdated"`
+	Models      []EmbeddingModel `json:"models"`
+}
+
+// loadEmbeddingCatalog parses embedding_catalog.json and registers embedding models.
+// Called from the single init() in models.go after provider configs are registered.
+func loadEmbeddingCatalog(providers map[string]ProviderConfig) {
+	var catalog embeddingCatalogFile
+	if err := json.Unmarshal(embeddingCatalogJSON, &catalog); err != nil {
 		panic(fmt.Sprintf("failed to load embedding catalog: %v", err))
 	}
-	for _, m := range models {
+	for _, m := range catalog.Models {
+		provCfg, ok := providers[m.Provider]
+		if !ok {
+			panic(fmt.Sprintf("embedding catalog: provider %q not in providers section", m.Provider))
+		}
+		// Derive API from provider's EmbeddingAPIClientType if model doesn't specify.
+		if m.API == "" && provCfg.EmbeddingAPIClientType != "" {
+			m.API = provCfg.EmbeddingAPIClientType
+		}
+		m.PricingKnown = true
 		RegisterEmbeddingModel(m)
 	}
 }

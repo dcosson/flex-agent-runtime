@@ -1,21 +1,5 @@
 package ai
 
-import "context"
-
-// Provider is the interface each LLM backend implements.
-// Deprecated: Use APIClient instead. This interface will be removed
-// when callers are migrated in a subsequent task.
-type Provider interface {
-	// API returns the API identifier (e.g., "anthropic-messages").
-	API() string
-
-	// Stream starts a streaming LLM call with provider-specific options.
-	Stream(ctx context.Context, model Model, llmCtx Context, opts StreamOptions) *EventStream
-
-	// StreamSimple is the high-level API that maps ThinkingLevel to provider-specific params.
-	StreamSimple(ctx context.Context, model Model, llmCtx Context, opts SimpleStreamOptions) *EventStream
-}
-
 // ProviderConfig is the declarative configuration for a named service endpoint.
 // It specifies which API client type to use, where to send requests,
 // and how to authenticate. Stored in the provider registry.

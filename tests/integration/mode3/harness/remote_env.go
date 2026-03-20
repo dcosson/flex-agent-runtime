@@ -37,9 +37,9 @@ func NewRemoteEnv(t *testing.T, script []testutil.ScriptEntry, baseFiles map[str
 
 	apiName := testutil.UniqueAPI("mode3")
 	provider := testutil.NewScriptedProvider(apiName, script)
-	sourceID := "mode3-" + t.Name()
-	ai.RegisterProvider(provider, sourceID)
-	t.Cleanup(func() { ai.UnregisterProviders(sourceID) })
+	providerName := "mode3-" + t.Name()
+	testutil.RegisterScriptedProvider(provider, providerName)
+	t.Cleanup(func() { ai.UnregisterProviderConfig(providerName) })
 
 	baseSnapshot := "memory/base@initial"
 	sessionID := fmt.Sprintf("mode3-%d", time.Now().UnixNano())
@@ -56,9 +56,9 @@ func NewRemoteEnv(t *testing.T, script []testutil.ScriptEntry, baseFiles map[str
 		return cl.ExecuteTool(ctx, sessionID, req, onProgress)
 	}
 	toolset := tools.NewEnvironmentTools(executeFn)
-	toolset = replaceCodeInterpTool(ai.Model{ID: "mode3-model", API: apiName, Provider: "mode3", MaxTokens: 4096}, toolset)
+	toolset = replaceCodeInterpTool(ai.Model{ID: "mode3-model", API: apiName, Provider: providerName, MaxTokens: 4096}, toolset)
 	driver := agent.NewNativeDriver(agent.DriverConfig{
-		Model: ai.Model{ID: "mode3-model", API: apiName, Provider: "mode3", MaxTokens: 4096},
+		Model: ai.Model{ID: "mode3-model", API: apiName, Provider: providerName, MaxTokens: 4096},
 		Tools: toolset,
 	})
 	a := agent.New(driver)

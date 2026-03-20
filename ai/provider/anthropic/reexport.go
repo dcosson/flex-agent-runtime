@@ -10,11 +10,9 @@ type (
 	Config       = internal.Config
 	ClientConfig = internal.ClientConfig
 	Client       = internal.Client
-	Provider     = internal.Provider
 )
 
 var (
-	New                = internal.New
 	NewClient          = internal.NewClient
 	Register           = internal.Register
 	EndpointFromConfig = internal.EndpointFromConfig

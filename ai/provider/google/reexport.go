@@ -7,20 +7,18 @@ import (
 
 // Google supports chat/streaming and embeddings.
 type (
-	Config            = internal.Config
-	ClientConfig      = internal.ClientConfig
-	Client            = internal.Client
-	Provider          = internal.Provider
-	EmbeddingProvider = internal.EmbeddingProvider
+	Config          = internal.Config
+	ClientConfig    = internal.ClientConfig
+	Client          = internal.Client
+	EmbeddingClient = internal.EmbeddingClient
 )
 
 var (
-	New                = internal.New
-	NewClient          = internal.NewClient
-	Register           = internal.Register
-	EndpointFromConfig = internal.EndpointFromConfig
-	NewEmbedding       = internal.NewEmbedding
-	RegisterEmbedding  = internal.RegisterEmbedding
+	NewClient               = internal.NewClient
+	Register                = internal.Register
+	EndpointFromConfig      = internal.EndpointFromConfig
+	NewEmbeddingClient      = internal.NewEmbeddingClient
+	RegisterEmbeddingClient = internal.RegisterEmbeddingClient
 )
 
 func Capabilities() provider.CapabilitySet {

@@ -176,28 +176,22 @@ func runRank(texts []string, query, modelID string, timeout time.Duration) error
 func registerEmbeddingProviders() []string {
 	available := make([]string, 0, 3)
 
-	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
-		provideropenai.RegisterEmbedding(provideropenai.Config{
-			APIKey:  key,
-			BaseURL: os.Getenv("OPENAI_BASE_URL"),
-		}, "cmd-embedding-demo")
+	// Register embedding API clients (stateless protocol implementations).
+	// Provider configs (base URLs, key env vars) are loaded from the catalog at init.
+	// We just need to register the client implementations.
+
+	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
+		provideropenai.RegisterEmbeddingClient(provideropenai.ClientConfig{})
 		available = append(available, embedOpenAI)
 	}
 
-	if key := strings.TrimSpace(os.Getenv("GOOGLE_API_KEY")); key != "" {
-		providergoogle.RegisterEmbedding(providergoogle.Config{
-			APIKey:  key,
-			BaseURL: os.Getenv("GOOGLE_BASE_URL"),
-			Version: os.Getenv("GOOGLE_API_VERSION"),
-		}, "cmd-embedding-demo")
+	if strings.TrimSpace(os.Getenv("GOOGLE_API_KEY")) != "" {
+		providergoogle.RegisterEmbeddingClient(providergoogle.ClientConfig{})
 		available = append(available, embedGoogle)
 	}
 
-	if key := strings.TrimSpace(os.Getenv("COHERE_API_KEY")); key != "" {
-		providercohere.RegisterEmbedding(providercohere.Config{
-			APIKey:  key,
-			BaseURL: os.Getenv("COHERE_BASE_URL"),
-		}, "cmd-embedding-demo")
+	if strings.TrimSpace(os.Getenv("COHERE_API_KEY")) != "" {
+		providercohere.RegisterEmbeddingClient(providercohere.ClientConfig{})
 		available = append(available, embedCohere)
 	}
 

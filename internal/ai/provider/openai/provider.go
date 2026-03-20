@@ -1,7 +1,6 @@
 package openai
 
 import (
-	"context"
 	"net/http"
 	"time"
 
@@ -45,43 +44,14 @@ func Register(cfg ClientConfig) *Client {
 	return c
 }
 
-// Config is the legacy configuration struct. Retained for embedding provider
-// backward compatibility during migration. New code should use ClientConfig.
+// Config holds test-friendly configuration for constructing a ProviderEndpoint.
 type Config struct {
 	HTTPClient *http.Client
 	BaseURL    string
 	APIKey     string
 }
 
-// Provider wraps Client with stored endpoint config for legacy callers that
-// use the old ai.Provider interface. Will be removed when callers migrate.
-type Provider struct {
-	*Client
-	endpoint ai.ProviderEndpoint
-}
-
-// API returns the ai.Provider API identifier.
-func (p *Provider) API() string { return apiName }
-
-// Stream implements ai.Provider for legacy callers.
-func (p *Provider) Stream(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.StreamOptions) *ai.EventStream {
-	return p.Client.Stream(ctx, p.endpoint, model, llmCtx, opts)
-}
-
-// StreamSimple implements ai.Provider for legacy callers.
-func (p *Provider) StreamSimple(ctx context.Context, model ai.Model, llmCtx ai.Context, opts ai.SimpleStreamOptions) *ai.EventStream {
-	return p.Client.StreamSimple(ctx, p.endpoint, model, llmCtx, opts)
-}
-
-// New constructs a legacy Provider with stored endpoint config.
-// Retained for backward compatibility during migration.
-func New(cfg Config) *Provider {
-	client := NewClient(ClientConfig{HTTPClient: cfg.HTTPClient})
-	ep := EndpointFromConfig(cfg)
-	return &Provider{Client: client, endpoint: ep}
-}
-
-// EndpointFromConfig creates a ProviderEndpoint from legacy Config for testing.
+// EndpointFromConfig creates a ProviderEndpoint from Config for testing.
 func EndpointFromConfig(cfg Config) ai.ProviderEndpoint {
 	baseURL := cfg.BaseURL
 	if baseURL == "" {

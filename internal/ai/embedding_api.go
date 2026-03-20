@@ -5,9 +5,8 @@ import (
 	"fmt"
 )
 
-// Embed is the top-level embedding entry point. Resolution order:
-//  1. New path: model.Provider → ProviderConfig → EmbeddingAPIClient + ResolveEndpoint
-//  2. Legacy fallback: model.API → old EmbeddingProvider registry (until callers migrate)
+// Embed is the top-level embedding entry point.
+// Resolution: model.Provider → ProviderConfig → EmbeddingAPIClient + ResolveEndpoint
 func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*EmbeddingResponse, error) {
 	if len(req.Texts) == 0 {
 		return nil, fmt.Errorf("embedding request requires at least one text")
@@ -28,30 +27,23 @@ func Embed(ctx context.Context, modelID string, req EmbeddingRequest) (*Embeddin
 		return nil, fmt.Errorf("requested dimensions %d exceeds max %d for model %s", req.Dimensions, model.MaxDims, modelID)
 	}
 
-	// Try new two-step resolution path first.
-	if cfg, err := GetProviderConfig(model.Provider); err == nil {
-		// Determine embedding client type: provider config first, then model.API fallback.
-		clientType := cfg.EmbeddingAPIClientType
-		if clientType == "" {
-			clientType = model.API
-		}
-		if client, err := GetEmbeddingAPIClient(clientType); err == nil {
-			endpoint := ResolveEndpoint(cfg, StreamOptions{})
-			resp, err := client.Embed(ctx, endpoint, model, req)
-			if err != nil {
-				return nil, err
-			}
-			return finalizeEmbeddingResponse(resp, model)
-		}
-	}
-
-	// Legacy fallback: use old EmbeddingProvider registry.
-	provider, err := GetEmbeddingProvider(model.API)
+	cfg, err := GetProviderConfig(model.Provider)
 	if err != nil {
-		return nil, fmt.Errorf("no provider config for %q and no legacy embedding provider for API %q", model.Provider, model.API)
+		return nil, fmt.Errorf("no provider config for embedding model %q provider %q: %w", modelID, model.Provider, err)
 	}
 
-	resp, err := provider.Embed(ctx, model, req)
+	// Determine embedding client type: provider config first, then model.API fallback.
+	clientType := cfg.EmbeddingAPIClientType
+	if clientType == "" {
+		clientType = model.API
+	}
+	client, err := GetEmbeddingAPIClient(clientType)
+	if err != nil {
+		return nil, fmt.Errorf("no embedding API client for type %q (provider %q): %w", clientType, model.Provider, err)
+	}
+
+	endpoint := ResolveEndpoint(cfg, StreamOptions{})
+	resp, err := client.Embed(ctx, endpoint, model, req)
 	if err != nil {
 		return nil, err
 	}

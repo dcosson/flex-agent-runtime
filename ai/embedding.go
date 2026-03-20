@@ -3,17 +3,15 @@ package ai
 import internal "github.com/dcosson/flex-agent-runtime/internal/ai"
 
 type (
-	EmbeddingRequest   = internal.EmbeddingRequest
-	EmbeddingResponse  = internal.EmbeddingResponse
-	Embedding          = internal.Embedding
-	EmbeddingUsage     = internal.EmbeddingUsage
-	EmbeddingTaskType  = internal.EmbeddingTaskType
-	EmbeddingEncoding  = internal.EmbeddingEncoding
-	EmbeddingProvider  = internal.EmbeddingProvider
-	EmbeddingModel     = internal.EmbeddingModel
-	EmbeddingCost      = internal.EmbeddingCost
-	EmbedFunc          = internal.EmbedFunc
-	EmbeddingAPIClient = internal.EmbeddingAPIClient
+	EmbeddingRequest  = internal.EmbeddingRequest
+	EmbeddingResponse = internal.EmbeddingResponse
+	Embedding         = internal.Embedding
+	EmbeddingUsage    = internal.EmbeddingUsage
+	EmbeddingTaskType = internal.EmbeddingTaskType
+	EmbeddingEncoding = internal.EmbeddingEncoding
+	EmbeddingModel    = internal.EmbeddingModel
+	EmbeddingCost     = internal.EmbeddingCost
+	EmbedFunc         = internal.EmbedFunc
 )
 
 const (
@@ -35,16 +33,9 @@ const (
 var (
 	Embed                         = internal.Embed
 	BatchEmbed                    = internal.BatchEmbed
-	RegisterEmbeddingProvider     = internal.RegisterEmbeddingProvider
-	GetEmbeddingProvider          = internal.GetEmbeddingProvider
-	UnregisterEmbeddingProviders  = internal.UnregisterEmbeddingProviders
-	ClearEmbeddingProviders       = internal.ClearEmbeddingProviders
 	RegisterEmbeddingModel        = internal.RegisterEmbeddingModel
 	GetEmbeddingModel             = internal.GetEmbeddingModel
 	ListEmbeddingModels           = internal.ListEmbeddingModels
 	ListEmbeddingModelsByProvider = internal.ListEmbeddingModelsByProvider
 	ClearEmbeddingModels          = internal.ClearEmbeddingModels
-	RegisterEmbeddingAPIClient    = internal.RegisterEmbeddingAPIClient
-	GetEmbeddingAPIClient         = internal.GetEmbeddingAPIClient
-	ClearEmbeddingAPIClients      = internal.ClearEmbeddingAPIClients
 )

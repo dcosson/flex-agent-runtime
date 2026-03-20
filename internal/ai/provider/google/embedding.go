@@ -23,61 +23,41 @@ var googleTaskTypes = map[ai.EmbeddingTaskType]string{
 	ai.EmbeddingTaskSimilarity:     "SEMANTIC_SIMILARITY",
 }
 
-// EmbeddingProvider implements ai.EmbeddingProvider for Google Gemini REST API.
-type EmbeddingProvider struct {
-	client  *http.Client
-	baseURL string
-	apiKey  string
-	version string
+// EmbeddingClient implements ai.EmbeddingAPIClient for the Google Gemini REST API.
+// It is stateless — base URL, API key, and version come from ProviderEndpoint per-call.
+type EmbeddingClient struct {
+	httpClient *http.Client
 }
 
-var _ ai.EmbeddingProvider = (*EmbeddingProvider)(nil)
+var _ ai.EmbeddingAPIClient = (*EmbeddingClient)(nil)
 
-// NewEmbedding constructs a Google embedding provider with sane defaults.
-func NewEmbedding(cfg Config) *EmbeddingProvider {
+// NewEmbeddingClient constructs a Google embedding client.
+func NewEmbeddingClient(cfg ClientConfig) *EmbeddingClient {
 	client := cfg.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: defaultTimeout}
 	}
-	baseURL := strings.TrimSpace(cfg.BaseURL)
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-	version := strings.TrimSpace(cfg.Version)
-	if version == "" {
-		version = defaultVersion
-	}
-	return &EmbeddingProvider{
-		client:  client,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  cfg.APIKey,
-		version: version,
-	}
+	return &EmbeddingClient{httpClient: client}
 }
 
-// API returns the provider API identifier.
-func (p *EmbeddingProvider) API() string {
+// ClientType returns the embedding API client type identifier.
+func (c *EmbeddingClient) ClientType() string {
 	return embeddingAPIName
 }
 
-// RegisterEmbedding constructs and registers the Google embedding provider.
-func RegisterEmbedding(cfg Config, sourceID string) *EmbeddingProvider {
-	ep := NewEmbedding(cfg)
-	ai.RegisterEmbeddingProvider(ep, sourceID)
-	return ep
+// RegisterEmbeddingClient creates and registers the Google embedding API client.
+func RegisterEmbeddingClient(cfg ClientConfig) *EmbeddingClient {
+	c := NewEmbeddingClient(cfg)
+	ai.RegisterEmbeddingAPIClient(c)
+	return c
 }
 
 // Embed dispatches embedding requests with shared batch-splitting behavior.
-func (p *EmbeddingProvider) Embed(ctx context.Context, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
-	endpoint := ai.ProviderEndpoint{
-		ProviderName: model.Provider,
-		BaseURL:      p.baseURL,
-		APIKey:       p.apiKey,
-	}
-	return ai.BatchEmbed(ctx, p.embedSingle, endpoint, model, req)
+func (c *EmbeddingClient) Embed(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
+	return ai.BatchEmbed(ctx, c.embedSingle, endpoint, model, req)
 }
 
-func (p *EmbeddingProvider) embedSingle(ctx context.Context, _ ai.ProviderEndpoint, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
+func (c *EmbeddingClient) embedSingle(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
 	// Build per-text embedding requests for batchEmbedContents
 	requests := make([]embedContentRequest, len(req.Texts))
 	for i, text := range req.Texts {
@@ -103,19 +83,23 @@ func (p *EmbeddingProvider) embedSingle(ctx context.Context, _ ai.ProviderEndpoi
 		return nil, fmt.Errorf("marshal embedding request: %w", err)
 	}
 
-	base := p.baseURL
-	endpoint := fmt.Sprintf("%s/%s/models/%s:batchEmbedContents", strings.TrimRight(base, "/"), p.version, model.ID)
-	if p.apiKey != "" {
-		endpoint += "?key=" + p.apiKey
+	version := endpoint.ProviderSpecific["apiVersion"]
+	if version == "" {
+		version = defaultVersion
+	}
+	baseURL := strings.TrimRight(endpoint.BaseURL, "/")
+	url := fmt.Sprintf("%s/%s/models/%s:batchEmbedContents", baseURL, version, model.ID)
+	if endpoint.APIKey != "" {
+		url += "?key=" + endpoint.APIKey
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("build embedding request: %w", err)
 	}
 	httpReq.Header.Set("content-type", "application/json")
 
-	resp, err := p.client.Do(httpReq)
+	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
