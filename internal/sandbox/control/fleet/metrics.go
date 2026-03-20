@@ -76,7 +76,7 @@ func newFleetMetrics(reg prometheus.Registerer) (*fleetMetrics, error) {
 	provisionDuration, err := registerCollector(reg, prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "fleet_provision_duration_seconds",
 		Help:    "Provisioning latency in seconds.",
-		Buckets: prometheus.DefBuckets,
+		Buckets: []float64{5, 10, 30, 60, 120, 300, 600},
 	}))
 	if err != nil {
 		return nil, err

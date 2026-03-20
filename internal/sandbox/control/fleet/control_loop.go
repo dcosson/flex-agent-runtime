@@ -203,6 +203,7 @@ func (f *FleetSandboxControl) provisionWarmInstance(ctx context.Context) error {
 	start := f.clock.Now()
 	info, err := f.provisioner.LaunchInstance(ctx, f.config.InstanceConfig)
 	if err != nil {
+		f.metrics.observeProvisionDuration(f.clock.Now().Sub(start))
 		f.metrics.provisionsTotal.WithLabelValues("error").Inc()
 		return fmt.Errorf("fleet: warm provision failed: %w", err)
 	}
@@ -210,6 +211,7 @@ func (f *FleetSandboxControl) provisionWarmInstance(ctx context.Context) error {
 	addr := fmt.Sprintf("%s:%d", info.PrivateIP, f.config.SandboxHostPort)
 	client, err := f.clientFactory(addr)
 	if err != nil {
+		f.metrics.observeProvisionDuration(f.clock.Now().Sub(start))
 		f.metrics.provisionsTotal.WithLabelValues("error").Inc()
 		return fmt.Errorf("fleet: client creation failed for %s: %w", info.InstanceID, err)
 	}

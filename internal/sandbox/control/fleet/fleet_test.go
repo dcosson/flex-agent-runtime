@@ -816,3 +816,10 @@ func TestNewFleetSandboxControl_WithLeaveInstancesOption(t *testing.T) {
 		t.Error("LeaveInstancesOnClose should be true from option")
 	}
 }
+
+func TestTerminationReasonLabel_UnknownFallback(t *testing.T) {
+	got := terminationReasonLabel(DrainReason("unexpected"), false)
+	if got != "unknown" {
+		t.Fatalf("terminationReasonLabel fallback = %q, want unknown", got)
+	}
+}

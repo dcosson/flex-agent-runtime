@@ -2,9 +2,11 @@ package fleet
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/control/instance"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -63,6 +65,22 @@ func TestFleetMetrics_ProvisionCounterAndHistogramsEmit(t *testing.T) {
 	assertHistogramHasSamples(t, reg, "fleet_provision_duration_seconds", 1)
 }
 
+func TestFleetMetrics_ProvisionDurationRecordedOnError(t *testing.T) {
+	f, mp, reg := newMetricsTestFleet(t)
+	mp.launchFn = func(context.Context, instance.InstanceConfig) (*instance.InstanceInfo, error) {
+		return nil, errors.New("launch failed")
+	}
+
+	if err := f.provisionInstance(context.Background()); err == nil {
+		t.Fatal("expected provisionInstance() error")
+	}
+
+	if got := testutil.ToFloat64(f.metrics.provisionsTotal.WithLabelValues("error")); got != 1 {
+		t.Fatalf("fleet_provisions_total{result=error} = %v, want 1", got)
+	}
+	assertHistogramHasSamples(t, reg, "fleet_provision_duration_seconds", 1)
+}
+
 func TestFleetMetrics_RoutingAndTerminationMetricsEmit(t *testing.T) {
 	f, _, reg := newMetricsTestFleet(t)
 
@@ -103,4 +121,33 @@ func assertHistogramHasSamples(t *testing.T, reg *prometheus.Registry, metricNam
 	}
 
 	t.Fatalf("metric %s not found", metricName)
+}
+
+func TestFleetMetrics_ProvisionHistogramBuckets(t *testing.T) {
+	_, _, reg := newMetricsTestFleet(t)
+	want := []float64{5, 10, 30, 60, 120, 300, 600}
+
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error: %v", err)
+	}
+	for _, fam := range families {
+		if fam.GetName() != "fleet_provision_duration_seconds" {
+			continue
+		}
+		if len(fam.Metric) == 0 || fam.Metric[0].Histogram == nil {
+			t.Fatal("fleet_provision_duration_seconds missing histogram data")
+		}
+		buckets := fam.Metric[0].Histogram.Bucket
+		if len(buckets) != len(want) {
+			t.Fatalf("bucket count = %d, want %d", len(buckets), len(want))
+		}
+		for i, b := range buckets {
+			if b.GetUpperBound() != want[i] {
+				t.Fatalf("bucket[%d] upper bound = %v, want %v", i, b.GetUpperBound(), want[i])
+			}
+		}
+		return
+	}
+	t.Fatal("fleet_provision_duration_seconds not found")
 }

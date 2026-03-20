@@ -222,6 +222,7 @@ func (f *FleetSandboxControl) provisionInstance(ctx context.Context) error {
 	start := time.Now()
 	info, err := f.provisioner.LaunchInstance(ctx, f.config.InstanceConfig)
 	if err != nil {
+		f.metrics.observeProvisionDuration(time.Since(start))
 		f.metrics.provisionsTotal.WithLabelValues("error").Inc()
 		return fmt.Errorf("fleet: provision failed: %w", err)
 	}
@@ -229,6 +230,7 @@ func (f *FleetSandboxControl) provisionInstance(ctx context.Context) error {
 	addr := fmt.Sprintf("%s:%d", info.PrivateIP, f.config.SandboxHostPort)
 	client, err := f.clientFactory(addr)
 	if err != nil {
+		f.metrics.observeProvisionDuration(time.Since(start))
 		f.metrics.provisionsTotal.WithLabelValues("error").Inc()
 		return fmt.Errorf("fleet: client creation failed for %s: %w", info.InstanceID, err)
 	}
@@ -537,6 +539,6 @@ func terminationReasonLabel(reason DrainReason, timedOut bool) string {
 	case DrainShutdown:
 		return "shutdown"
 	default:
-		return "scale_down"
+		return "unknown"
 	}
 }
