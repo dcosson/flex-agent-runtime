@@ -76,6 +76,9 @@ PROVIDER_CONFIGS = OrderedDict([
         ("apiClientType", "anthropic-messages"),
         ("baseUrl", "https://api.anthropic.com"),
         ("keyEnvVars", ["ANTHROPIC_API_KEY"]),
+        ("headers", OrderedDict([
+            ("anthropic-beta", ["prompt-caching-2024-07-31", "max-tokens-3-5-sonnet-2024-07-15"]),
+        ])),
         ("providerSpecific", {"apiVersion": "2023-06-01"}),
     ])),
     ("google", OrderedDict([
@@ -95,6 +98,10 @@ PROVIDER_CONFIGS = OrderedDict([
         ("apiClientType", "openai-completions"),
         ("baseUrl", "https://openrouter.ai/api/v1"),
         ("keyEnvVars", ["OPENROUTER_API_KEY"]),
+        ("headers", OrderedDict([
+            ("HTTP-Referer", ["https://flex-agent-runtime"]),
+            ("X-Title", ["flex-agent-runtime"]),
+        ])),
     ])),
     ("cohere", OrderedDict([
         ("embeddingApiClientType", "cohere-embeddings"),
@@ -627,24 +634,29 @@ def _embedding_model(id_, name, api, provider, max_input, default_dims,
     """Build an embedding model entry.
 
     Note: baseUrl is no longer included — it comes from the provider config.
-    The 'api' field is included for models whose api differs from the provider's
-    embeddingApiClientType (e.g. openrouter models use openai-embeddings but
-    openrouter provider doesn't have an embeddingApiClientType).
+    The 'api' field is omitted when it matches the provider's embeddingApiClientType
+    (Go code derives it at load time). It is included when the provider has no
+    embeddingApiClientType or the value differs (e.g. openrouter models use
+    openai-embeddings but openrouter has no embeddingApiClientType).
     """
-    return OrderedDict([
-        ("id", id_),
-        ("name", name),
-        ("api", api),
-        ("provider", provider),
-        ("maxInputTokens", max_input),
-        ("defaultDims", default_dims),
-        ("maxDims", max_dims),
-        ("minDims", min_dims),
-        ("maxBatchSize", max_batch),
-        ("supportsDimCtrl", dim_ctrl),
-        ("supportsTaskType", task_type),
-        ("cost", {"perMTok": cost_per_mtok}),
-    ])
+    entry = OrderedDict()
+    entry["id"] = id_
+    entry["name"] = name
+    # Only emit api if it differs from the provider's embeddingApiClientType
+    prov_cfg = PROVIDER_CONFIGS.get(provider, {})
+    prov_emb_api = prov_cfg.get("embeddingApiClientType", "")
+    if api != prov_emb_api:
+        entry["api"] = api
+    entry["provider"] = provider
+    entry["maxInputTokens"] = max_input
+    entry["defaultDims"] = default_dims
+    entry["maxDims"] = max_dims
+    entry["minDims"] = min_dims
+    entry["maxBatchSize"] = max_batch
+    entry["supportsDimCtrl"] = dim_ctrl
+    entry["supportsTaskType"] = task_type
+    entry["cost"] = {"perMTok": cost_per_mtok}
+    return entry
 
 
 def build_embedding_catalog():

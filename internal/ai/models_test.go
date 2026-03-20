@@ -226,13 +226,17 @@ func TestCatalogNewFormat(t *testing.T) {
 	}
 
 	embTests := []struct {
-		id       string
-		provider string
-		wantAPI  string
+		id         string
+		provider   string
+		wantAPI    string
+		wantInJSON bool // true if api should be explicit in JSON, false if derived
 	}{
-		{"text-embedding-3-small", "openai", "openai-embeddings"},
-		{"gemini-embedding-001", "google", "google-embeddings"},
-		{"embed-v4.0", "cohere", "cohere-embeddings"},
+		// These providers have embeddingApiClientType — api is omitted from JSON and derived.
+		{"text-embedding-3-small", "openai", "openai-embeddings", false},
+		{"gemini-embedding-001", "google", "google-embeddings", false},
+		{"embed-v4.0", "cohere", "cohere-embeddings", false},
+		// openrouter has no embeddingApiClientType — api must be explicit in JSON.
+		{"openai/text-embedding-3-small", "openrouter", "openai-embeddings", true},
 	}
 	for _, tc := range embTests {
 		found := false
@@ -242,14 +246,42 @@ func TestCatalogNewFormat(t *testing.T) {
 				if m.Provider != tc.provider {
 					t.Fatalf("embedding %q: Provider=%q want=%q", tc.id, m.Provider, tc.provider)
 				}
-				if m.API != tc.wantAPI {
-					t.Fatalf("embedding %q: API=%q want=%q", tc.id, m.API, tc.wantAPI)
+				if tc.wantInJSON {
+					// API should be explicitly set in JSON.
+					if m.API != tc.wantAPI {
+						t.Fatalf("embedding %q: API=%q want=%q (expected explicit)", tc.id, m.API, tc.wantAPI)
+					}
+				} else {
+					// API should be empty in JSON (derived at load time from provider config).
+					if m.API != "" {
+						t.Fatalf("embedding %q: API=%q in JSON, should be empty (derived from provider)", tc.id, m.API)
+					}
 				}
 				break
 			}
 		}
 		if !found {
 			t.Fatalf("embedding model %q not found in catalog", tc.id)
+		}
+	}
+
+	// Verify the derivation path works end-to-end: simulate loadEmbeddingCatalog.
+	// After loading, models with omitted api should have it filled from provider config.
+	derivedModels := make(map[string]EmbeddingModel)
+	for _, m := range embCatalog.Models {
+		provCfg, ok := catalog.Providers[m.Provider]
+		if !ok {
+			t.Fatalf("embedding %q: provider %q not in providers", m.ID, m.Provider)
+		}
+		if m.API == "" && provCfg.EmbeddingAPIClientType != "" {
+			m.API = provCfg.EmbeddingAPIClientType
+		}
+		derivedModels[m.ID] = m
+	}
+	for _, tc := range embTests {
+		m := derivedModels[tc.id]
+		if m.API != tc.wantAPI {
+			t.Fatalf("embedding %q after derivation: API=%q want=%q", tc.id, m.API, tc.wantAPI)
 		}
 	}
 
@@ -260,6 +292,19 @@ func TestCatalogNewFormat(t *testing.T) {
 	}
 	if cohereCfg.EmbeddingAPIClientType != "cohere-embeddings" {
 		t.Fatalf("cohere EmbeddingAPIClientType=%q", cohereCfg.EmbeddingAPIClientType)
+	}
+
+	// Verify plan-specified headers are present.
+	anthrCfg := catalog.Providers["anthropic"]
+	if betas := anthrCfg.Headers["anthropic-beta"]; len(betas) == 0 {
+		t.Fatal("anthropic missing anthropic-beta headers")
+	}
+	orCfg := catalog.Providers["openrouter"]
+	if refs := orCfg.Headers["HTTP-Referer"]; len(refs) == 0 {
+		t.Fatal("openrouter missing HTTP-Referer header")
+	}
+	if titles := orCfg.Headers["X-Title"]; len(titles) == 0 {
+		t.Fatal("openrouter missing X-Title header")
 	}
 }
 

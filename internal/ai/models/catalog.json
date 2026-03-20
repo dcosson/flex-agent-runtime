@@ -1,51 +1,5 @@
 {
-  "lastUpdated": "2026-03-19T00:00:00Z",
-  "providers": {
-    "anthropic": {
-      "apiClientType": "anthropic-messages",
-      "baseUrl": "https://api.anthropic.com",
-      "keyEnvVars": [
-        "ANTHROPIC_API_KEY"
-      ],
-      "providerSpecific": {
-        "apiVersion": "2023-06-01"
-      }
-    },
-    "google": {
-      "apiClientType": "google-genai",
-      "embeddingApiClientType": "google-embeddings",
-      "baseUrl": "https://generativelanguage.googleapis.com",
-      "keyEnvVars": [
-        "GOOGLE_API_KEY",
-        "GEMINI_API_KEY"
-      ],
-      "providerSpecific": {
-        "apiVersion": "v1beta"
-      }
-    },
-    "openai": {
-      "apiClientType": "openai-completions",
-      "embeddingApiClientType": "openai-embeddings",
-      "baseUrl": "https://api.openai.com/v1",
-      "keyEnvVars": [
-        "OPENAI_API_KEY"
-      ]
-    },
-    "openrouter": {
-      "apiClientType": "openai-completions",
-      "baseUrl": "https://openrouter.ai/api/v1",
-      "keyEnvVars": [
-        "OPENROUTER_API_KEY"
-      ]
-    },
-    "cohere": {
-      "embeddingApiClientType": "cohere-embeddings",
-      "baseUrl": "https://api.cohere.com/v2",
-      "keyEnvVars": [
-        "COHERE_API_KEY"
-      ]
-    }
-  },
+  "lastUpdated": "2026-03-20T04:40:56Z",
   "models": {
     "anthropic": {
       "claude-3-5-haiku": {
@@ -1025,6 +979,66 @@
         "name": "Qwen3.5 397B A17B",
         "reasoning": false
       }
+    }
+  },
+  "providers": {
+    "anthropic": {
+      "apiClientType": "anthropic-messages",
+      "baseUrl": "https://api.anthropic.com",
+      "headers": {
+        "anthropic-beta": [
+          "prompt-caching-2024-07-31",
+          "max-tokens-3-5-sonnet-2024-07-15"
+        ]
+      },
+      "keyEnvVars": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "providerSpecific": {
+        "apiVersion": "2023-06-01"
+      }
+    },
+    "cohere": {
+      "baseUrl": "https://api.cohere.com/v2",
+      "embeddingApiClientType": "cohere-embeddings",
+      "keyEnvVars": [
+        "COHERE_API_KEY"
+      ]
+    },
+    "google": {
+      "apiClientType": "google-genai",
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "embeddingApiClientType": "google-embeddings",
+      "keyEnvVars": [
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY"
+      ],
+      "providerSpecific": {
+        "apiVersion": "v1beta"
+      }
+    },
+    "openai": {
+      "apiClientType": "openai-completions",
+      "baseUrl": "https://api.openai.com/v1",
+      "embeddingApiClientType": "openai-embeddings",
+      "keyEnvVars": [
+        "OPENAI_API_KEY"
+      ]
+    },
+    "openrouter": {
+      "apiClientType": "openai-completions",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "headers": {
+        "HTTP-Referer": [
+          "https://flex-agent-runtime"
+        ],
+        "X-Title": [
+          "flex-agent-runtime"
+        ]
+      },
+      "keyEnvVars": [
+        "OPENROUTER_API_KEY"
+      ]
     }
   }
 }

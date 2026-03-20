@@ -1,8 +1,7 @@
 {
-  "lastUpdated": "2026-03-19T00:00:00Z",
+  "lastUpdated": "2026-03-20T04:40:56Z",
   "models": [
     {
-      "api": "openai-embeddings",
       "cost": {
         "perMTok": 0.02
       },
@@ -18,7 +17,6 @@
       "supportsTaskType": false
     },
     {
-      "api": "openai-embeddings",
       "cost": {
         "perMTok": 0.13
       },
@@ -34,7 +32,6 @@
       "supportsTaskType": false
     },
     {
-      "api": "openai-embeddings",
       "cost": {
         "perMTok": 0.1
       },
@@ -50,7 +47,6 @@
       "supportsTaskType": false
     },
     {
-      "api": "google-embeddings",
       "cost": {
         "perMTok": 0.0
       },
@@ -66,7 +62,6 @@
       "supportsTaskType": true
     },
     {
-      "api": "cohere-embeddings",
       "cost": {
         "perMTok": 0.12
       },
@@ -82,7 +77,6 @@
       "supportsTaskType": true
     },
     {
-      "api": "cohere-embeddings",
       "cost": {
         "perMTok": 0.1
       },
@@ -98,7 +92,6 @@
       "supportsTaskType": true
     },
     {
-      "api": "cohere-embeddings",
       "cost": {
         "perMTok": 0.1
       },
