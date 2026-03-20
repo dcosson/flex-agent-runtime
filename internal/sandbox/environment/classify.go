@@ -8,7 +8,7 @@ package environment
 // which is a NativeSandbox-specific concept.
 func IsFileOp(toolName string) bool {
 	switch toolName {
-	case "read", "write", "edit", "grep", "glob":
+	case "read_file", "write_file", "edit_file", "grep", "glob":
 		return true
 	default:
 		return false
