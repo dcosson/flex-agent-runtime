@@ -25,6 +25,9 @@ type NativeDriver struct {
 }
 
 func NewNativeDriver(cfg DriverConfig) *NativeDriver {
+	if len(cfg.Tools) == 0 && cfg.EnvironmentTools != nil {
+		cfg.Tools = cfg.EnvironmentTools()
+	}
 	return &NativeDriver{cfg: cfg, bus: newEventBus()}
 }
 

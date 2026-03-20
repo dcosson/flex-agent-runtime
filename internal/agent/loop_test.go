@@ -166,6 +166,94 @@ func TestNativeDriverToolLoopAndSnapshotBoundary(t *testing.T) {
 	}
 }
 
+func TestNativeDriverEnvironmentToolsResolution(t *testing.T) {
+	clearTestProviders()
+	t.Cleanup(clearTestProviders)
+
+	prov := &scriptedProvider{clientType: "native-envtools", responses: []ai.AssistantMessage{
+		{
+			Content:    []ai.ContentBlock{&ai.ToolCall{ID: "tc-1", Name: "env_tool", Arguments: map[string]any{"x": "1"}}},
+			StopReason: ai.StopReasonToolUse,
+			Timestamp:  ai.TimeToMillis(time.Now()),
+		},
+		{
+			Content:    []ai.ContentBlock{&ai.TextContent{Text: "done"}},
+			StopReason: ai.StopReasonStop,
+			Timestamp:  ai.TimeToMillis(time.Now()),
+		},
+	}}
+	registerTestProvider(prov, "native-envtools-prov")
+
+	called := false
+	envTool := AgentTool{
+		Tool: ai.Tool{Name: "env_tool"},
+		Execute: func(ctx context.Context, toolCallID string, params map[string]any, onUpdate func(AgentToolResult)) (AgentToolResult, error) {
+			called = true
+			return AgentToolResult{Content: []ai.ContentBlock{&ai.TextContent{Text: "env result"}}}, nil
+		},
+	}
+
+	// Tools is empty; EnvironmentTools provides them lazily.
+	driver := NewNativeDriver(DriverConfig{
+		Model: ai.Model{ID: "m", API: "native-envtools", Provider: "native-envtools-prov", MaxTokens: 1024},
+		EnvironmentTools: func() []AgentTool {
+			return []AgentTool{envTool}
+		},
+	})
+
+	// Verify tools were resolved from EnvironmentTools.
+	if len(driver.cfg.Tools) != 1 {
+		t.Fatalf("expected 1 tool from EnvironmentTools, got %d", len(driver.cfg.Tools))
+	}
+	if driver.cfg.Tools[0].Name != "env_tool" {
+		t.Fatalf("expected tool name env_tool, got %s", driver.cfg.Tools[0].Name)
+	}
+
+	// Run a full turn to verify the resolved tools actually work.
+	agent := New(driver)
+	agent.SetSession(&Session{ID: "runtime-envtools"})
+
+	done := make(chan struct{})
+	agent.Subscribe(func(evt AgentEvent) {
+		if evt.Type == EventStateChange && evt.State == StateIdle {
+			select {
+			case <-done:
+			default:
+				close(done)
+			}
+		}
+	})
+
+	if err := agent.Prompt(context.Background(), "go"); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for idle")
+	}
+
+	if !called {
+		t.Fatal("environment tool was not called during agent loop")
+	}
+}
+
+func TestNativeDriverEnvironmentToolsNotUsedWhenToolsSet(t *testing.T) {
+	directTool := AgentTool{Tool: ai.Tool{Name: "direct_tool"}}
+	driver := NewNativeDriver(DriverConfig{
+		Model: ai.Model{ID: "m"},
+		Tools: []AgentTool{directTool},
+		EnvironmentTools: func() []AgentTool {
+			t.Fatal("EnvironmentTools should not be called when Tools is non-empty")
+			return nil
+		},
+	})
+	if len(driver.cfg.Tools) != 1 || driver.cfg.Tools[0].Name != "direct_tool" {
+		t.Fatalf("expected direct_tool preserved, got %v", driver.cfg.Tools)
+	}
+}
+
 func TestNativeDriverFollowUpFIFO(t *testing.T) {
 	clearTestProviders()
 	t.Cleanup(clearTestProviders)

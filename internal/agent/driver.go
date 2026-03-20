@@ -21,12 +21,20 @@ type AgentDriver interface {
 type DriverFactory func(cfg DriverConfig) (AgentDriver, error)
 
 // DriverConfig carries optional dependencies into driver factories.
+//
+// Tools can be provided directly via the Tools field, or lazily via
+// EnvironmentTools. When EnvironmentTools is set and Tools is empty,
+// NativeDriver calls EnvironmentTools() once at start to populate
+// the tool catalog. This avoids a circular import between internal/agent
+// and internal/sandbox/environment — callers wire it via
+// tools.EnvironmentToolsFunc(env).
 type DriverConfig struct {
-	Model        ai.Model
-	Options      ai.SimpleStreamOptions
-	SystemPrompt string
-	Tools        []AgentTool
-	Metadata     map[string]any
+	Model            ai.Model
+	Options          ai.SimpleStreamOptions
+	SystemPrompt     string
+	Tools            []AgentTool
+	EnvironmentTools func() []AgentTool
+	Metadata         map[string]any
 }
 
 var (
