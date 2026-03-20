@@ -1484,16 +1484,17 @@ State transitions and error conditions are logged with structured fields:
 ```go
 // FleetStatus returns a snapshot of fleet state for operational visibility.
 // Can be exposed via a health/status endpoint by the orchestrator.
-type FleetStatusResponse struct {
+type FleetStatus struct {
     TotalInstances    int
     InstancesByState  map[InstanceState]int
-    TotalSessions     int
+    TotalSessions     int64
     WarmPoolSize      int
-    PendingProvisions int
-    Healthy           bool // true if warm pool >= target and no stuck drains
+    PendingProvisions int32
+    Healthy           bool // true if warm pool >= MinInstances and healthy instances > 0
+    Closed            bool
 }
 
-func (f *FleetSandboxControl) FleetStatus() FleetStatusResponse
+func (f *FleetSandboxControl) FleetStatus() FleetStatus
 ```
 
 ---
@@ -1602,11 +1603,11 @@ Findings from `docs/plans/20-fleet-management-review-coder-1-sea.md` and `docs/p
     - `go test ./internal/sandbox/control/fleet/... ./internal/sandbox/control/instance/... -count=1` — PASS
     - `go test -race ./internal/sandbox/control/fleet/... ./internal/sandbox/control/instance/... -count=1` — PASS
 - **Deviations**:
-  - [Contractual] `FleetStatus` contract drift vs section 15.3: plan specifies `FleetStatusResponse` including `WarmPoolSize` and `Healthy`, but implementation exposes `FleetStatus` with different fields (`Closed`, no `WarmPoolSize`/`Healthy`) in `internal/sandbox/control/fleet/fleet.go`.
+  - [Resolved] `FleetStatus` contract drift vs section 15.3: aligned in aiag-fis.3. Implementation uses `FleetStatus` (not `FleetStatusResponse`) with `int64`/`int32` for atomic-sourced fields and an extra `Closed` field. Plan section 15.3 updated to match.
   - [Missing] Section 15.1 metrics instrumentation (`fleet_*` gauges/counters/histograms) is not implemented in `internal/sandbox/control/fleet/`.
   - [Missing] Section 11.2 fleet-specific build-tag integration suite is not implemented under fleet package/test hierarchy.
   - [Structural] Import flow in section 2.2/12.4 is now more decoupled than documented: fleet core uses injected `FleetNodeClient` factory rather than directly constructing RPC clients.
 - **Outstanding gaps**:
   - Gap 1: Implement fleet observability metrics from section 15.1 (suggested follow-up bead: `aiag-20-signoff.metrics`).
-  - Gap 2: Align FleetStatus API with section 15.3 (either implement planned fields or update plan contract + callers consistently; suggested bead: `aiag-20-signoff.fleetstatus-contract`).
+  - ~~Gap 2: Align FleetStatus API with section 15.3~~ — resolved by aiag-fis.3.
   - Gap 3: Add the fleet integration test suite described in section 11.2 (suggested bead: `aiag-20-signoff.integration-tests`).
