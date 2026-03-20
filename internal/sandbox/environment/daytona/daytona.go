@@ -1,11 +1,8 @@
 package daytona
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -14,6 +11,7 @@ import (
 
 	"github.com/dcosson/flex-agent-runtime/internal/ai"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/restapi"
 )
 
 const (
@@ -25,7 +23,7 @@ type Option func(*DaytonaSandboxEnvironment)
 func WithBaseURL(baseURL string) Option {
 	return func(e *DaytonaSandboxEnvironment) {
 		if strings.TrimSpace(baseURL) != "" {
-			e.baseURL = strings.TrimRight(baseURL, "/")
+			e.api.BaseURL = strings.TrimRight(baseURL, "/")
 		}
 	}
 }
@@ -33,7 +31,7 @@ func WithBaseURL(baseURL string) Option {
 func WithHTTPClient(client *http.Client) Option {
 	return func(e *DaytonaSandboxEnvironment) {
 		if client != nil {
-			e.httpClient = client
+			e.api.HTTPClient = client
 		}
 	}
 }
@@ -64,10 +62,8 @@ type DaytonaOptions struct {
 //	Resume      → ErrCapabilityNotSupported
 //	Destroy     → workspace.delete()
 type DaytonaSandboxEnvironment struct {
-	apiKey     string
-	httpClient *http.Client
-	baseURL    string
-	logger     *slog.Logger
+	api    restapi.Client
+	logger *slog.Logger
 
 	mu          sync.RWMutex
 	workspaceID string
@@ -78,11 +74,13 @@ type DaytonaSandboxEnvironment struct {
 
 func NewDaytonaSandboxEnvironment(apiKey string, opts ...Option) *DaytonaSandboxEnvironment {
 	e := &DaytonaSandboxEnvironment{
-		apiKey:     strings.TrimSpace(apiKey),
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		baseURL:    defaultBaseURL,
-		logger:     slog.Default(),
-		state:      environment.StateCreating,
+		api: restapi.Client{
+			BaseURL:    defaultBaseURL,
+			AuthToken:  strings.TrimSpace(apiKey),
+			HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		},
+		logger: slog.Default(),
+		state:  environment.StateCreating,
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -130,7 +128,7 @@ func (e *DaytonaSandboxEnvironment) Create(ctx context.Context, config environme
 	var resp struct {
 		ID string `json:"id"`
 	}
-	if err := e.doJSON(ctx, http.MethodPost, "/workspaces", payload, &resp); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodPost, "/workspaces", payload, &resp); err != nil {
 		return fmt.Errorf("daytona: create workspace: %w", err)
 	}
 	if resp.ID == "" {
@@ -141,7 +139,7 @@ func (e *DaytonaSandboxEnvironment) Create(ctx context.Context, config environme
 	e.workspaceID = resp.ID
 	e.state = environment.StateActive
 	e.created = time.Now()
-	e.labels = cloneLabels(config.Labels)
+	e.labels = restapi.CloneLabels(config.Labels)
 	e.mu.Unlock()
 
 	return nil
@@ -177,7 +175,7 @@ func (e *DaytonaSandboxEnvironment) Destroy(ctx context.Context) error {
 	if e.workspaceID == "" {
 		return environment.ErrNotActive
 	}
-	if err := e.doJSON(ctx, http.MethodDelete, "/workspaces/"+e.workspaceID, nil, nil); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodDelete, "/workspaces/"+e.workspaceID, nil, nil); err != nil {
 		return fmt.Errorf("daytona: destroy workspace: %w", err)
 	}
 	e.state = environment.StateDestroyed
@@ -219,7 +217,7 @@ func (e *DaytonaSandboxEnvironment) executeFileOp(ctx context.Context, workspace
 	var resp struct {
 		Content string `json:"content"`
 	}
-	if err := e.doJSON(ctx, http.MethodPost, "/workspaces/"+workspaceID+"/filesystem/"+req.ToolName, payload, &resp); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodPost, "/workspaces/"+workspaceID+"/filesystem/"+req.ToolName, payload, &resp); err != nil {
 		return nil, fmt.Errorf("daytona: execute file op %s: %w", req.ToolName, err)
 	}
 	return &environment.ToolResponse{
@@ -240,7 +238,7 @@ func (e *DaytonaSandboxEnvironment) executeCommand(ctx context.Context, workspac
 			IsError bool   `json:"is_error"`
 		} `json:"progress,omitempty"`
 	}
-	if err := e.doJSON(ctx, http.MethodPost, "/workspaces/"+workspaceID+"/commands/run", payload, &resp); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodPost, "/workspaces/"+workspaceID+"/commands/run", payload, &resp); err != nil {
 		return nil, fmt.Errorf("daytona: execute command %s: %w", req.ToolName, err)
 	}
 	if onProgress != nil {
@@ -252,57 +250,4 @@ func (e *DaytonaSandboxEnvironment) executeCommand(ctx context.Context, workspac
 		Content:  []ai.ContentBlock{&ai.TextContent{Text: resp.Content}},
 		ExitCode: resp.ExitCode,
 	}, nil
-}
-
-func (e *DaytonaSandboxEnvironment) doJSON(ctx context.Context, method, path string, body any, out any) error {
-	var reqBody io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("marshal request: %w", err)
-		}
-		reqBody = bytes.NewReader(raw)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, e.baseURL+path, reqBody)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if e.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.apiKey)
-	}
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
-	}
-	if out == nil {
-		io.Copy(io.Discard, resp.Body)
-		return nil
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode response: %w", err)
-	}
-	return nil
-}
-
-func cloneLabels(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }

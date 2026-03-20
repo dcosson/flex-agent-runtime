@@ -1,11 +1,8 @@
 package e2b
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -14,6 +11,7 @@ import (
 
 	"github.com/dcosson/flex-agent-runtime/internal/ai"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/restapi"
 )
 
 const (
@@ -27,7 +25,7 @@ type Option func(*E2BSandboxEnvironment)
 func WithBaseURL(baseURL string) Option {
 	return func(e *E2BSandboxEnvironment) {
 		if strings.TrimSpace(baseURL) != "" {
-			e.baseURL = strings.TrimRight(baseURL, "/")
+			e.api.BaseURL = strings.TrimRight(baseURL, "/")
 		}
 	}
 }
@@ -35,7 +33,7 @@ func WithBaseURL(baseURL string) Option {
 func WithHTTPClient(client *http.Client) Option {
 	return func(e *E2BSandboxEnvironment) {
 		if client != nil {
-			e.httpClient = client
+			e.api.HTTPClient = client
 		}
 	}
 }
@@ -57,10 +55,8 @@ type E2BOptions struct {
 
 // E2BSandboxEnvironment implements environment.ExecutionEnvironment using E2B REST APIs.
 type E2BSandboxEnvironment struct {
-	apiKey     string
-	httpClient *http.Client
-	baseURL    string
-	logger     *slog.Logger
+	api    restapi.Client
+	logger *slog.Logger
 
 	mu        sync.RWMutex
 	sandboxID string
@@ -71,11 +67,13 @@ type E2BSandboxEnvironment struct {
 
 func NewE2BSandboxEnvironment(apiKey string, opts ...Option) *E2BSandboxEnvironment {
 	e := &E2BSandboxEnvironment{
-		apiKey:     strings.TrimSpace(apiKey),
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		baseURL:    defaultBaseURL,
-		logger:     slog.Default(),
-		state:      environment.StateCreating,
+		api: restapi.Client{
+			BaseURL:    defaultBaseURL,
+			AuthToken:  strings.TrimSpace(apiKey),
+			HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		},
+		logger: slog.Default(),
+		state:  environment.StateCreating,
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -122,7 +120,7 @@ func (e *E2BSandboxEnvironment) Create(ctx context.Context, config environment.S
 	var resp struct {
 		ID string `json:"id"`
 	}
-	if err := e.doJSON(ctx, http.MethodPost, "/sandboxes", payload, &resp); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodPost, "/sandboxes", payload, &resp); err != nil {
 		return fmt.Errorf("e2b: create sandbox: %w", err)
 	}
 	if resp.ID == "" {
@@ -133,7 +131,7 @@ func (e *E2BSandboxEnvironment) Create(ctx context.Context, config environment.S
 	e.sandboxID = resp.ID
 	e.state = environment.StateActive
 	e.created = time.Now()
-	e.labels = cloneLabels(config.Labels)
+	e.labels = restapi.CloneLabels(config.Labels)
 	e.mu.Unlock()
 
 	return nil
@@ -158,7 +156,7 @@ func (e *E2BSandboxEnvironment) Pause(ctx context.Context) error {
 	if e.state != environment.StateActive || e.sandboxID == "" {
 		return environment.ErrNotActive
 	}
-	if err := e.doJSON(ctx, http.MethodPost, "/sandboxes/"+e.sandboxID+"/pause", map[string]any{}, nil); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodPost, "/sandboxes/"+e.sandboxID+"/pause", map[string]any{}, nil); err != nil {
 		return fmt.Errorf("e2b: pause: %w", err)
 	}
 	e.state = environment.StatePaused
@@ -172,7 +170,7 @@ func (e *E2BSandboxEnvironment) Resume(ctx context.Context) error {
 	if e.state != environment.StatePaused || e.sandboxID == "" {
 		return environment.ErrNotActive
 	}
-	if err := e.doJSON(ctx, http.MethodPost, "/sandboxes/"+e.sandboxID+"/resume", map[string]any{}, nil); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodPost, "/sandboxes/"+e.sandboxID+"/resume", map[string]any{}, nil); err != nil {
 		return fmt.Errorf("e2b: resume: %w", err)
 	}
 	e.state = environment.StateActive
@@ -189,7 +187,7 @@ func (e *E2BSandboxEnvironment) Destroy(ctx context.Context) error {
 	if e.sandboxID == "" {
 		return environment.ErrNotActive
 	}
-	if err := e.doJSON(ctx, http.MethodDelete, "/sandboxes/"+e.sandboxID, nil, nil); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodDelete, "/sandboxes/"+e.sandboxID, nil, nil); err != nil {
 		return fmt.Errorf("e2b: destroy: %w", err)
 	}
 	e.state = environment.StateDestroyed
@@ -231,7 +229,7 @@ func (e *E2BSandboxEnvironment) executeFileOp(ctx context.Context, sandboxID str
 	var resp struct {
 		Content string `json:"content"`
 	}
-	if err := e.doJSON(ctx, http.MethodPost, "/sandboxes/"+sandboxID+"/filesystem/"+req.ToolName, payload, &resp); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodPost, "/sandboxes/"+sandboxID+"/filesystem/"+req.ToolName, payload, &resp); err != nil {
 		return nil, fmt.Errorf("e2b: execute file op %s: %w", req.ToolName, err)
 	}
 	return &environment.ToolResponse{
@@ -252,7 +250,7 @@ func (e *E2BSandboxEnvironment) executeCommand(ctx context.Context, sandboxID st
 			IsError bool   `json:"is_error"`
 		} `json:"progress,omitempty"`
 	}
-	if err := e.doJSON(ctx, http.MethodPost, "/sandboxes/"+sandboxID+"/commands/run", payload, &resp); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodPost, "/sandboxes/"+sandboxID+"/commands/run", payload, &resp); err != nil {
 		return nil, fmt.Errorf("e2b: execute command %s: %w", req.ToolName, err)
 	}
 	if onProgress != nil {
@@ -264,57 +262,4 @@ func (e *E2BSandboxEnvironment) executeCommand(ctx context.Context, sandboxID st
 		Content:  []ai.ContentBlock{&ai.TextContent{Text: resp.Content}},
 		ExitCode: resp.ExitCode,
 	}, nil
-}
-
-func (e *E2BSandboxEnvironment) doJSON(ctx context.Context, method, path string, body any, out any) error {
-	var reqBody io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("marshal request: %w", err)
-		}
-		reqBody = bytes.NewReader(raw)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, e.baseURL+path, reqBody)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if e.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.apiKey)
-	}
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
-	}
-	if out == nil {
-		io.Copy(io.Discard, resp.Body)
-		return nil
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode response: %w", err)
-	}
-	return nil
-}
-
-func cloneLabels(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }

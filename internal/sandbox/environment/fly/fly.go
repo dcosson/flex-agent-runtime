@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -18,6 +16,7 @@ import (
 
 	"github.com/dcosson/flex-agent-runtime/internal/ai"
 	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment"
+	"github.com/dcosson/flex-agent-runtime/internal/sandbox/environment/restapi"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -28,7 +27,7 @@ type Option func(*FlySandboxEnvironment)
 func WithBaseURL(baseURL string) Option {
 	return func(e *FlySandboxEnvironment) {
 		if strings.TrimSpace(baseURL) != "" {
-			e.baseURL = strings.TrimRight(baseURL, "/")
+			e.api.BaseURL = strings.TrimRight(baseURL, "/")
 		}
 	}
 }
@@ -36,7 +35,7 @@ func WithBaseURL(baseURL string) Option {
 func WithHTTPClient(client *http.Client) Option {
 	return func(e *FlySandboxEnvironment) {
 		if client != nil {
-			e.httpClient = client
+			e.api.HTTPClient = client
 		}
 	}
 }
@@ -79,11 +78,9 @@ type FlyOptions struct {
 
 // FlySandboxEnvironment implements environment.ExecutionEnvironment using Fly Machines API + SSH.
 type FlySandboxEnvironment struct {
-	apiToken   string
-	appName    string
-	httpClient *http.Client
-	baseURL    string
-	logger     *slog.Logger
+	api     restapi.Client
+	appName string
+	logger  *slog.Logger
 
 	mu        sync.RWMutex
 	machineID string
@@ -110,10 +107,12 @@ type SSHExecResult struct {
 
 func NewFlySandboxEnvironment(apiToken, appName string, sshPrivateKey []byte, pinnedHostKey string, opts ...Option) *FlySandboxEnvironment {
 	e := &FlySandboxEnvironment{
-		apiToken:      strings.TrimSpace(apiToken),
+		api: restapi.Client{
+			BaseURL:    defaultFlyBaseURL,
+			AuthToken:  strings.TrimSpace(apiToken),
+			HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		},
 		appName:       strings.TrimSpace(appName),
-		httpClient:    &http.Client{Timeout: 30 * time.Second},
-		baseURL:       defaultFlyBaseURL,
 		logger:        slog.Default(),
 		state:         environment.StateCreating,
 		sshPrivateKey: sshPrivateKey,
@@ -172,7 +171,7 @@ func (e *FlySandboxEnvironment) Create(ctx context.Context, config environment.S
 	machineID, ip, err := e.apiCreateMachine(ctx, image, opts, volID, config.SessionID)
 	if err != nil {
 		// Best-effort cleanup to avoid leaking provisioned volumes.
-		_ = e.doJSON(ctx, http.MethodDelete, fmt.Sprintf("/apps/%s/volumes/%s", e.appName, volID), nil, nil)
+		_ = e.api.DoJSON(ctx, http.MethodDelete, fmt.Sprintf("/apps/%s/volumes/%s", e.appName, volID), nil, nil)
 		return fmt.Errorf("fly: create machine: %w", err)
 	}
 
@@ -181,7 +180,7 @@ func (e *FlySandboxEnvironment) Create(ctx context.Context, config environment.S
 	e.ipAddr = ip
 	e.state = environment.StateActive
 	e.created = time.Now()
-	e.labels = cloneLabels(config.Labels)
+	e.labels = restapi.CloneLabels(config.Labels)
 	return nil
 }
 
@@ -300,7 +299,7 @@ func (e *FlySandboxEnvironment) Pause(ctx context.Context) error {
 	if e.state != environment.StateActive || e.machineID == "" {
 		return environment.ErrNotActive
 	}
-	if err := e.doJSON(ctx, http.MethodPost, fmt.Sprintf("/apps/%s/machines/%s/suspend", e.appName, e.machineID), map[string]any{}, nil); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodPost, fmt.Sprintf("/apps/%s/machines/%s/suspend", e.appName, e.machineID), map[string]any{}, nil); err != nil {
 		return fmt.Errorf("fly: suspend: %w", err)
 	}
 	e.state = environment.StatePaused
@@ -314,7 +313,7 @@ func (e *FlySandboxEnvironment) Resume(ctx context.Context) error {
 	if e.state != environment.StatePaused || e.machineID == "" {
 		return environment.ErrNotActive
 	}
-	if err := e.doJSON(ctx, http.MethodPost, fmt.Sprintf("/apps/%s/machines/%s/start", e.appName, e.machineID), map[string]any{}, nil); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodPost, fmt.Sprintf("/apps/%s/machines/%s/start", e.appName, e.machineID), map[string]any{}, nil); err != nil {
 		return fmt.Errorf("fly: start: %w", err)
 	}
 	e.state = environment.StateActive
@@ -332,11 +331,11 @@ func (e *FlySandboxEnvironment) Destroy(ctx context.Context) error {
 		return environment.ErrNotActive
 	}
 
-	if err := e.doJSON(ctx, http.MethodDelete, fmt.Sprintf("/apps/%s/machines/%s", e.appName, e.machineID), nil, nil); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodDelete, fmt.Sprintf("/apps/%s/machines/%s", e.appName, e.machineID), nil, nil); err != nil {
 		return fmt.Errorf("fly: destroy machine: %w", err)
 	}
 	if e.volumeID != "" {
-		if err := e.doJSON(ctx, http.MethodDelete, fmt.Sprintf("/apps/%s/volumes/%s", e.appName, e.volumeID), nil, nil); err != nil {
+		if err := e.api.DoJSON(ctx, http.MethodDelete, fmt.Sprintf("/apps/%s/volumes/%s", e.appName, e.volumeID), nil, nil); err != nil {
 			return fmt.Errorf("fly: destroy volume: %w", err)
 		}
 	}
@@ -371,7 +370,7 @@ func (e *FlySandboxEnvironment) apiCreateVolume(ctx context.Context, opts FlyOpt
 	var resp struct {
 		ID string `json:"id"`
 	}
-	if err := e.doJSON(ctx, http.MethodPost, fmt.Sprintf("/apps/%s/volumes", e.appName), payload, &resp); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodPost, fmt.Sprintf("/apps/%s/volumes", e.appName), payload, &resp); err != nil {
 		return "", err
 	}
 	if resp.ID == "" {
@@ -399,55 +398,13 @@ func (e *FlySandboxEnvironment) apiCreateMachine(ctx context.Context, image stri
 		ID        string `json:"id"`
 		PrivateIP string `json:"private_ip"`
 	}
-	if err := e.doJSON(ctx, http.MethodPost, fmt.Sprintf("/apps/%s/machines", e.appName), payload, &resp); err != nil {
+	if err := e.api.DoJSON(ctx, http.MethodPost, fmt.Sprintf("/apps/%s/machines", e.appName), payload, &resp); err != nil {
 		return "", "", err
 	}
 	if resp.ID == "" || resp.PrivateIP == "" {
 		return "", "", fmt.Errorf("missing machine id/private ip")
 	}
 	return resp.ID, resp.PrivateIP, nil
-}
-
-func (e *FlySandboxEnvironment) doJSON(ctx context.Context, method, path string, body any, out any) error {
-	var reqBody io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("marshal request: %w", err)
-		}
-		reqBody = bytes.NewReader(raw)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, e.baseURL+path, reqBody)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if e.apiToken != "" {
-		req.Header.Set("Authorization", "Bearer "+e.apiToken)
-	}
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
-	}
-	if out == nil {
-		io.Copy(io.Discard, resp.Body)
-		return nil
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode response: %w", err)
-	}
-	return nil
 }
 
 func (e *FlySandboxEnvironment) defaultSSHExecutor(ctx context.Context, addr, command string, onProgress func(environment.ToolProgress)) (*SSHExecResult, error) {
@@ -619,17 +576,6 @@ func shQuote(s string) string {
 
 func addrForIP(ip string, port int) string {
 	return net.JoinHostPort(ip, fmt.Sprintf("%d", port))
-}
-
-func cloneLabels(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }
 
 // errorsAs is a tiny indirection so tests can replace behavior if needed.
