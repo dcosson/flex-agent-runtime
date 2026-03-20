@@ -1,0 +1,35 @@
+{
+  "id": "aiag-0dou.5",
+  "title": "Remote environment compliance + E2E test extensions",
+  "description": "Extend compliance test suite for remote providers:\n- O1-O3: remote wire format goldens\n- F5: SSH failure scenarios\n- SEC3-4: API key / SSH key handling\n- E2E3-E2E5: remote environment E2E tests\n\nRun against E2B, Daytona, and Fly providers.\n\nReferences:\n- Plan: docs/plans/11-sandbox-host-service.add01.md §7, test harness doc",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-0dou",
+  "dependencies": [
+    {
+      "id": "aiag-0dou",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-0dou.2",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-0dou.3",
+      "type": "blocks"
+    },
+    {
+      "id": "aiag-0dou.4",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=11-sandbox-host-service-add01"
+  ],
+  "created_at": "2026-03-20T13:33:04.243243-07:00",
+  "updated_at": "2026-03-20T13:33:04.243243-07:00"
+}

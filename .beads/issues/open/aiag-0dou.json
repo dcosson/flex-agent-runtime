@@ -1,0 +1,38 @@
+{
+  "id": "aiag-0dou",
+  "title": "Sandbox Environments: Remote Providers",
+  "description": "Implement remaining work from Plan 11.add01 — remote cloud environment providers (E2B, Daytona, Fly.io), IsFileOp helper, agent loop migration, and compliance test extensions. Local + Native providers are done.",
+  "status": "open",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-0dou.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-0dou.2",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-0dou.3",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-0dou.4",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-0dou.5",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=11-sandbox-host-service-add01"
+  ],
+  "created_at": "2026-03-20T13:32:41.060377-07:00",
+  "updated_at": "2026-03-20T13:32:41.060377-07:00"
+}
