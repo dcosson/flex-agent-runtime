@@ -2,7 +2,7 @@
   "id": "aiag-0dou.1",
   "title": "IsFileOp helper + Agent loop ExecutionEnvironment migration",
   "description": "Two prerequisites for remote providers:\n\n1. Implement IsFileOp() helper in internal/sandbox/environment/classify.go — routes file ops vs command ops, needed by all remote providers.\n\n2. Agent loop migration (Plan 11.add01 Phase 4) — wire internal/agent to use ExecutionEnvironment interface instead of old ToolBackend. Old interfaces are already removed, but the agent loop hasn't been connected to the new interface yet.\n\nInclude unit tests for both.\n\nReferences:\n- Plan: docs/plans/11-sandbox-host-service.add01.md §4, §5.1",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "aiag-0dou",
@@ -33,6 +33,28 @@
     "plan-doc=11-sandbox-host-service-add01"
   ],
   "assignee": "coder-2-sea",
+  "comments": [
+    {
+      "id": 1,
+      "author": "Danny Cosson",
+      "text": "Implementation complete at commit 2ab9ec9. Both pieces done: IsFileOp helper and agent loop EnvironmentTools wiring. Sent to reviewer-sea for review.",
+      "created_at": "2026-03-20T13:52:02.984623-07:00"
+    },
+    {
+      "id": 2,
+      "author": "Danny Cosson",
+      "text": "R1 review complete — approved with revisions. 1 P2, 2 P3. P2: IsFileOp uses 'read/write/edit' but actual catalog tool names are 'read_file/write_file/edit_file' — will misclassify when remote providers use it. Must fix before aiag-0dou.2/3/4 start. See docs/reviews/aiag-0dou.1-r1-review-reviewer-sea.md",
+      "created_at": "2026-03-20T13:55:30.848528-07:00"
+    },
+    {
+      "id": 3,
+      "author": "Danny Cosson",
+      "text": "Approved by reviewer-sea. P2 fix verified at e52074c. Closing.",
+      "created_at": "2026-03-20T13:57:25.395749-07:00"
+    }
+  ],
   "created_at": "2026-03-20T13:32:49.208914-07:00",
-  "updated_at": "2026-03-20T13:33:13.451277-07:00"
+  "updated_at": "2026-03-20T13:57:25.395981-07:00",
+  "closed_at": "2026-03-20T13:57:25.371826-07:00",
+  "close_reason": "Closed"
 }
