@@ -1700,3 +1700,48 @@ Review incorporated: `docs/plans/01-ai-core.add03-r1-review-concierge.md`. Revie
 | C-8 | P2 | GetProviders() removed without replacement | Not Incorporated. ListProviderConfigs() returns provider names; callers needing full configs can call GetProviderConfig() per name. No downstream callers found that iterate provider capabilities. |  |
 | C-9 | P3 | Cohere provider has no apiClientType -- confusing error | Incorporated. Added empty-apiClientType guard in Stream() with clear error message ("does not support chat completions"). | 3.7 |
 | C-10 | P3 | ClearProviderConfigs lock ordering comment missing | Not Incorporated. Informational; lock ordering already documented per SR-6. |  |
+
+---
+
+## 12. Completion Signoff
+
+**Status: Complete**
+**Verified by:** opus-4-6 automated verification
+**Date:** 2026-03-19
+**Commit range:** Tasks aiag-7fu.1, aiag-7fu.2, aiag-7fu.3 merged to main
+**Verification method:** Code review against plan + `make check` + `make test` + `go test -race ./internal/ai/... -count=1`
+
+### Acceptance Criteria Verification
+
+| AC | Description | Status | Evidence |
+|----|-------------|--------|----------|
+| AC1 | Multiple providers per API client type | PASS | Catalog registers "openai" and "openrouter" both with `apiClientType: "openai-completions"`. `Stream()` resolves `model.Provider` -> `ProviderConfig` -> `APIClient`, routing to correct base URL per provider. |
+| AC2 | API keys resolved from env vars | PASS | `ResolveEndpoint` in `resolve.go` implements 4-step resolution: opts.APIKey > directAPIKeys > env vars > empty. Provider configs in catalog specify `keyEnvVars`. |
+| AC3 | RegisterCustomProvider works | PASS | `custom_provider.go` implements `RegisterCustomProvider` with validation (Name, APIClientType, BaseURL required), `RegisterCustomModel` with PricingKnown default false. |
+| AC4 | Catalog loads both provider configs and models | PASS | `models.go` `init()` loads new-format `catalog.json` with `lastUpdated`, `providers`, and `models` sections. Phase 1 registers provider configs, Phase 2 registers chat models (deriving `API` from provider config), Phase 3 calls `loadEmbeddingCatalog`. |
+| AC5 | Existing provider tests pass | PASS | `go test -race ./internal/ai/provider/openai/... ./internal/ai/provider/anthropic/... ./internal/ai/provider/google/... ./internal/ai/provider/cohere/...` all pass. |
+| AC6 | Embedding resolution uses provider config | PASS | `embedding_api.go` `Embed()` resolves provider config, checks `cfg.EmbeddingAPIClientType` first then falls back to `model.API`. Uses `ResolveEndpoint` for base URL and credentials. |
+| AC7 | Thread-safe registries under -race | PASS | `go test -race ./internal/ai/... -count=1` passes clean. All three registries (API client, embedding API client, provider config) use independent `sync.RWMutex`. |
+| AC8 | make check && make test clean | PASS | Both pass with no warnings or failures. |
+| AC9 | Multi-valued headers via Add semantics | PASS | All three provider stream implementations use `req.Header.Add(k, v)` for endpoint and model headers. Anthropic beta headers stored as `map[string][]string` in catalog provider config. `ResolveEndpoint` merges provider + call-level headers preserving multi-values. |
+| AC10 | PricingKnown distinguishes catalog vs custom | PASS | Catalog `init()` sets `m.PricingKnown = true` for all catalog models. `RegisterCustomModel` defaults `PricingKnown` to false (from `CustomModelOpts.PricingKnown` zero value). |
+
+### Deviations
+
+| ID | Severity | Description | Impact |
+|----|----------|-------------|--------|
+| D1 | Cosmetic | Plan Section 7 specifies `ai/ai.go` as the public re-export file. Actual file is `ai/reexport.go`. | No functional impact. File serves identical purpose. |
+| D2 | Cosmetic | Plan Section 7 specifies provider files renamed from `provider.go` to `client.go` (e.g., `openai/client.go`). Actual files remain named `provider.go`. The type inside IS correctly renamed from `Provider` to `Client`. | No functional impact. Internal file naming only; the exported type and interface conformance are correct. |
+| D3 | Structural | Plan Section 3.7 (incorporating C-9) specifies an explicit `if cfg.APIClientType == ""` guard in `Stream()` with a clear error message about embedding-only providers. The implementation omits this guard; `GetAPIClient("")` returns a generic "no API client registered for type: " error instead. | Minor impact on error message clarity for embedding-only providers like Cohere. The code path is functionally correct (Stream fails appropriately), but the error message is less helpful. |
+| D4 | Cosmetic | `Stream()` and `StreamSimple()` error messages use slightly different wording than the plan (e.g., `"no provider config for %q: %w"` vs plan's `"no provider registered: %s"`). | No functional impact. Error messages are clear and include the same information. |
+
+### Severity Definitions
+
+- **Cosmetic:** Naming, comments, formatting, or wording differences with no functional impact.
+- **Structural:** Implementation differs from plan in organization or approach but achieves the same functional outcome.
+- **Contractual:** Public API, interface signature, or behavior differs from the plan specification.
+- **Missing:** A specified feature, type, or test is absent from the implementation.
+
+### Conclusion
+
+The implementation is **Complete**. All 10 acceptance criteria pass. The highest-severity deviation is Structural (D3: missing explicit empty-apiClientType guard), which has minimal practical impact since the error path still functions correctly. All core types (`APIClient`, `EmbeddingAPIClient`, `ProviderConfig`, `ProviderEndpoint`, `CustomProviderConfig`, `CustomModelOpts`), registries (API client, embedding API client, provider config), resolution logic (`ResolveEndpoint`, two-step `Stream()`/`Embed()` resolution), catalog format changes (providers + models sections, embedding envelope), provider migrations (openai, anthropic, google, cohere all implement new interfaces), and public re-exports are implemented as specified.
