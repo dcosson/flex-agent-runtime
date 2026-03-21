@@ -91,15 +91,18 @@ tests/e2e/
     test_sandbox_identity.py     # §6: Sandbox identity verification
     test_multi_runtime.py        # §7: Multi-runtime tests
     test_provider_api.py         # §8: Real LLM provider API tests
+    test_connect_parser.py       # §2.5: Connect streaming envelope parser tests
 
-    requirements.txt             # pytest, requests, (optional) grpcio for streaming)
+    requirements.txt             # pytest, requests, pytest-timeout
 ```
 
 ### 2.3 RPC Client
 
-The Python client wraps ConnectRPC's JSON protocol. Unary RPCs use `_call` (POST, parse single JSON response). Server-streaming RPCs (`SendMessage`, `Continue`, `FollowUp`, `SubscribeEvents`) use `_stream` (POST with `stream=True`, parse newline-delimited JSON):
+The Python client wraps ConnectRPC's JSON protocol. Unary RPCs use `_call` (POST with `application/json`, parse single JSON response). Server-streaming RPCs (`SendMessage`, `Continue`, `FollowUp`, `SubscribeEvents`) use `_stream` which parses the **Connect streaming envelope format** (see §2.5 for wire protocol details):
 
 ```python
+import struct
+
 class FlexAgentClient:
     """Thin HTTP client for the orchestrator's ConnectRPC API."""
 
@@ -108,13 +111,27 @@ class FlexAgentClient:
         self.session = requests.Session()
         if auth_token:
             self.session.headers["Authorization"] = f"Bearer {auth_token}"
-        self.session.headers["Content-Type"] = "application/json"
 
     def _call(self, procedure: str, payload: dict) -> dict:
+        """Unary RPC: POST with JSON body, receive JSON response."""
         url = f"{self.base_url}{procedure}"
-        resp = self.session.post(url, json=payload, timeout=120)
+        resp = self.session.post(url, json=payload, timeout=120,
+                                 headers={"Content-Type": "application/json"})
         resp.raise_for_status()
         return resp.json()
+
+    def _stream(self, procedure: str, payload: dict, timeout: int = 300):
+        """Server-streaming RPC via Connect streaming protocol.
+        Sends JSON request, receives Connect envelope-framed responses.
+        Yields message dicts; raises ConnectStreamError on stream error."""
+        url = f"{self.base_url}{procedure}"
+        resp = self.session.post(
+            url, json=payload, stream=True, timeout=timeout,
+            headers={"Content-Type": "application/json"},
+        )
+        resp.raise_for_status()
+        for msg in _parse_connect_stream(resp):
+            yield msg
 
     def create_session(self, **kwargs) -> dict:
         return self._call("/rpc.v1.AgentService/CreateSession", kwargs)
@@ -134,21 +151,24 @@ class FlexAgentClient:
             "session_id": session_id, "instruction": instruction,
         })
 
-
     def abort(self, session_id: str) -> dict:
         return self._call("/rpc.v1.AgentService/Abort", {
             "session_id": session_id,
         })
 
-    def _stream(self, procedure: str, payload: dict, timeout: int = 300):
-        """Server-streaming RPC via ConnectRPC streaming protocol.
-        Returns an iterator of response dicts (newline-delimited JSON)."""
-        url = f"{self.base_url}{procedure}"
-        resp = self.session.post(url, json=payload, stream=True, timeout=timeout)
-        resp.raise_for_status()
-        for line in resp.iter_lines():
-            if line:
-                yield json.loads(line)
+    def list_sessions(self) -> dict:
+        return self._call("/rpc.v1.AgentService/ListSessions", {})
+
+    def resume_session(self, session_id: str) -> dict:
+        return self._call("/rpc.v1.AgentService/ResumeSession", {
+            "session_id": session_id,
+        })
+
+    def create_snapshot(self, session_id: str, name: str = "") -> dict:
+        """Create a ZFS snapshot via the orchestrator (delegates to SandboxService)."""
+        return self._call("/rpc.v1.AgentService/CreateSnapshot", {
+            "session_id": session_id, "name": name,
+        })
 
     def send_message(self, session_id: str, message: str):
         """Server-streaming: returns iterator of event dicts."""
@@ -168,21 +188,6 @@ class FlexAgentClient:
             "session_id": session_id, "message": message,
         })
 
-    def list_sessions(self) -> dict:
-        return self._call("/rpc.v1.AgentService/ListSessions", {})
-
-    def resume_session(self, session_id: str) -> dict:
-        return self._call("/rpc.v1.AgentService/ResumeSession", {
-            "session_id": session_id,
-        })
-
-    def create_snapshot(self, session_id: str, name: str = "") -> dict:
-        """Create a ZFS snapshot for the session's sandbox.
-        Routes through the orchestrator which delegates to SandboxService."""
-        return self._call("/rpc.v1.AgentService/CreateSnapshot", {
-            "session_id": session_id, "name": name,
-        })
-
     def subscribe_events(self, session_id: str):
         """Server-streaming: returns iterator of event dicts."""
         return self._stream("/rpc.v1.AgentService/SubscribeEvents", {
@@ -192,9 +197,106 @@ class FlexAgentClient:
     def health(self) -> bool:
         resp = self.session.get(f"{self.base_url}/health", timeout=5)
         return resp.status_code == 200
+
+
+class ConnectStreamError(Exception):
+    """Raised when a Connect server stream returns an error envelope."""
+    def __init__(self, code: str, message: str, details: list = None):
+        super().__init__(f"Connect error [{code}]: {message}")
+        self.code = code
+        self.details = details or []
+
+
+def _parse_connect_stream(resp):
+    """Parse a Connect streaming response (envelope-framed JSON messages).
+    See §2.5 for wire protocol details."""
+    raw = resp.raw
+    while True:
+        header = _read_exact(raw, 5)
+        if header is None:
+            return  # clean EOF
+        flags, length = struct.unpack(">BI", header)
+        payload = _read_exact(raw, length)
+        if payload is None:
+            raise RuntimeError("Unexpected EOF mid-envelope")
+        data = json.loads(payload)
+        if flags & 0x02:  # end-of-stream envelope
+            if "error" in data:
+                err = data["error"]
+                raise ConnectStreamError(
+                    err.get("code", "unknown"),
+                    err.get("message", ""),
+                    err.get("details", []),
+                )
+            return  # clean end-of-stream (may contain trailers)
+        yield data
+
+
+def _read_exact(raw, n: int) -> bytes | None:
+    """Read exactly n bytes from a raw stream, or None on EOF."""
+    buf = b""
+    while len(buf) < n:
+        chunk = raw.read(n - len(buf))
+        if not chunk:
+            return None if len(buf) == 0 else None
+        buf += chunk
+    return buf
 ```
 
-For server-streaming RPCs (`SendMessage`, `Continue`, `FollowUp`, `SubscribeEvents`), ConnectRPC uses newline-delimited JSON over a single HTTP response. The `_stream` helper reads lines incrementally and yields parsed dicts. Unary RPCs (`CreateSession`, `GetSession`, `ListSessions`, `ResumeSession`, `Steer`, `Abort`, `DestroySession`, `CreateSnapshot`) use the `_call` helper which returns a single parsed dict.
+### 2.5 Connect Streaming Wire Protocol
+
+The orchestrator uses ConnectRPC with a JSON codec. The streaming wire format follows the [Connect streaming protocol](https://connectrpc.com/docs/protocol/#streaming-rpcs):
+
+**Request** (client → server):
+- Method: `POST`
+- URL: `{base_url}/rpc.v1.AgentService/{Method}`
+- Headers: `Content-Type: application/json` (request body is unary JSON, not enveloped)
+- Body: JSON payload (e.g., `{"session_id": "...", "message": "..."}`)
+
+**Response** (server → client):
+- Headers: `Content-Type: application/connect+json`
+- Body: sequence of **envelope frames**, each consisting of:
+
+```
+┌─────────┬──────────────┬──────────────────────┐
+│ flags   │ length       │ payload              │
+│ 1 byte  │ 4 bytes BE   │ {length} bytes       │
+└─────────┴──────────────┴──────────────────────┘
+```
+
+- **flags=0x00**: message envelope — payload is a JSON-encoded message
+- **flags=0x02**: end-of-stream envelope — payload is JSON with optional `error` and `metadata` fields
+
+**Golden example** — successful 2-message stream then clean end:
+
+```
+# Message 1: flags=0x00, length=42
+00 00000028 {"type":"text_delta","text":"Hello"}
+
+# Message 2: flags=0x00, length=47
+00 0000002F {"type":"turn_completed","turn_id":"t1"}
+
+# End-of-stream: flags=0x02, length=2
+02 00000002 {}
+```
+
+**Error mid-stream example** — server error after 1 message:
+
+```
+# Message 1: flags=0x00, length=42
+00 00000028 {"type":"text_delta","text":"Hello"}
+
+# End-of-stream with error: flags=0x02, length=58
+02 0000003A {"error":{"code":"internal","message":"provider timeout"}}
+```
+
+**Required parser tests** (in `tests/e2e/test_connect_parser.py`):
+1. Parse successful multi-message stream → yields all messages, no error
+2. Parse stream with mid-stream error → yields messages before error, then raises `ConnectStreamError`
+3. Parse empty stream (just end-of-stream) → yields nothing, no error
+4. Parse truncated stream (EOF mid-envelope) → raises `RuntimeError`
+
+Unary RPCs (`CreateSession`, `GetSession`, `ListSessions`, `ResumeSession`, `Steer`, `Abort`, `DestroySession`, `CreateSnapshot`) use standard `application/json` request and response — no envelope framing.
 
 ### 2.4 Process Manager
 
@@ -211,17 +313,19 @@ class ProcessManager:
     def start_sandbox_host(self, listen: str = ":8082", **env) -> subprocess.Popen:
         return self._start(["serve", "sandbox-host", "--listen", listen], env)
 
-    def start_orchestrator(self, listen: str = ":8080", **kwargs) -> subprocess.Popen:
+    def start_orchestrator(self, listen: str = ":8080", env: dict = None,
+                           **kwargs) -> subprocess.Popen:
         args = ["serve", "orchestrator", "--listen", listen]
         for k, v in kwargs.items():
             args.extend([f"--{k.replace('_', '-')}", str(v)])
-        return self._start(args, kwargs.get("env", {}))
+        return self._start(args, env or {})
 
     def _start(self, args: list[str], env: dict) -> subprocess.Popen:
         full_env = {**os.environ, **env}
         proc = subprocess.Popen(
             [self.binary] + args,
             env=full_env,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         self.processes.append(proc)
@@ -234,15 +338,20 @@ class ProcessManager:
         proc = subprocess.Popen(
             [binary, "--listen", listen, "--fixture-dir", fixture_dir],
             env={**os.environ},
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         self.processes.append(proc)
         return proc
 
-    def stop_all(self):
+    def stop_all(self, timeout: float = 10):
         for proc in self.processes:
             proc.terminate()
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
         self.processes.clear()
 ```
 
@@ -275,18 +384,7 @@ Every operation has an explicit timeout. Nothing is allowed to block indefinitel
 | **Event stream consumption** | 120s | Streaming response timeout |
 | **Full test suite** | 600s (fast), 1800s (infra) | pytest `--timeout` global flag |
 
-```python
-# Process manager enforces shutdown timeout
-def stop_all(self, timeout: float = 10):
-    for proc in self.processes:
-        proc.terminate()
-        try:
-            proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
-    self.processes.clear()
-```
+The `ProcessManager.stop_all()` method (§2.4) enforces this: `terminate()` → `wait(timeout)` → `kill()` fallback.
 
 ### 3.3 Automatic Cleanup on Failure
 
@@ -477,7 +575,14 @@ Tests:
 These tests use real LLM providers, real infrastructure, and real agent binaries. They run on a developer's local machine (or dedicated test host), not in CI.
 
 ```
-Configs tested: C2 (real LLM), C3, C4, C5, C6
+Configs tested: C1, C2 (real LLM), C3, C4, C5, C6
+
+--- C1 with real LLM (dev/local) ---
+Setup:
+  1. Start orchestrator in dev mode with real provider credentials
+
+Tests:
+  DM-R0: Create session (dev/local) -> send real coding task -> verify response
 
 --- C2 with real LLM providers ---
 Setup:
@@ -793,9 +898,9 @@ FLEXAGENT_AUTH_TOKEN=test-e2e-token-...
 
 The credential manager loads credentials in this order (later overrides earlier):
 
-1. `~/.flexagent/test-credentials.env` (user's local secrets file)
-2. Environment variables (set by CI or shell)
-3. `.env.test.local` in the repo root (gitignored, for per-project overrides)
+1. `~/.flexagent/test-credentials.env` (shared secrets file)
+2. `.env.test.local` in the repo root (gitignored, per-project overrides)
+3. Environment variables (set by CI or shell — **highest precedence**)
 
 ```python
 class CredentialManager:
@@ -1099,11 +1204,11 @@ The two plans are complementary. Plan 17 catches bugs in the agent loop and tool
 
 These were originally open questions, now resolved:
 
-1. **ConnectRPC streaming from Python**: **Decision: manual newline-delimited JSON.** ConnectRPC's server-streaming protocol over HTTP sends newline-delimited JSON objects. The Python client uses `requests` with `stream=True` and `resp.iter_lines()` to parse events incrementally. No `grpcio` dependency needed — the `_stream` helper in `FlexAgentClient` (§2.3) handles this directly. This keeps the test driver lightweight with zero protobuf/gRPC dependencies.
+1. **ConnectRPC streaming from Python**: **Decision: manual Connect envelope parser.** ConnectRPC's server-streaming protocol uses envelope-framed messages (5-byte header: 1 byte flags + 4 bytes big-endian length, followed by JSON payload). The Python client parses these envelopes directly using `struct.unpack` and `resp.raw.read()`. No `grpcio` or protobuf dependency needed — the `_parse_connect_stream` helper (§2.3) and wire protocol details (§2.5) handle this. A dedicated parser test suite validates success, error, empty, and truncated stream cases.
 
 2. **Stubserver as LLM backend**: **Decision: use the Go stubserver binary from Plan 17.** The CI workflow builds both `flexagent` and `stubserver` binaries in the `build-binary` job. The `ProcessManager.start_stubserver()` method handles locating and starting it. This avoids reimplementing fixture serving in Python and keeps the stubserver implementation authoritative in one place.
 
-3. **Port allocation**: **Decision: tier-specific fixed ports from §3.5.** Each test tier uses a unique port range (E2E-Fast: 18xxx, E2E-Standard: 28xxx, E2E-Provider: 38xxx, E2E-Infra: 48xxx). All fixtures use these ports instead of default ports. This allows parallel tier execution without conflicts while keeping port assignment deterministic and debuggable. Dynamic port allocation was rejected as it adds complexity to the process manager and makes debugging harder.
+3. **Port allocation**: **Decision: tier-specific fixed ports from §3.5.** Each test tier uses a unique port range (Mock: 18xxx, Real: 28xxx). All fixtures use these ports instead of default ports. This allows the two tiers to run without port conflicts while keeping port assignment deterministic and debuggable. Dynamic port allocation was rejected as it adds complexity to the process manager and makes debugging harder.
 
 4. **EC2 direct mode without real EC2**: **Recommended default: local simulation is sufficient for CI.** The local `flexagent serve agent` process exercises the same direct-host code path. Real EC2 testing is reserved for nightly E2E-Infra runs. Localstack/mock EC2 is not worth the investment since the direct mode code path is small (just SSH/network setup vs. agent interaction).
 
@@ -1111,7 +1216,7 @@ These were originally open questions, now resolved:
 
 ---
 
-## Review Disposition
+## Round 1 Review Disposition
 
 | # | Reviewer | Severity | Summary | Disposition | Notes |
 |---|----------|----------|---------|-------------|-------|
@@ -1122,3 +1227,15 @@ These were originally open questions, now resolved:
 | 5 | reviewer-sea | P2 | Stubserver fixture uses private `_start` with incorrect args | Incorporated | §2.4: added `start_stubserver()` to ProcessManager; §12.2: fixture uses `start_stubserver()`; CI builds both binaries |
 | 6 | reviewer-sea | P3 | No remote ExecutionEnvironment provider coverage | Incorporated | §8.4 added: optional `test_remote_providers.py` for nightly E2B/Fly testing |
 | 7 | reviewer-sea | P3 | cleanup_leaked_sessions calls undefined list_sessions and fixture ordering | Incorporated | §3.3 Layer 3: added fixture ordering note, connection error handling for orchestrator-already-gone case |
+
+## Round 2 Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | coder-1-sea | P1 | Streaming protocol specified as NDJSON without Connect envelope contract | Incorporated | §2.3: replaced NDJSON `iter_lines` with Connect envelope parser (`_parse_connect_stream`, `ConnectStreamError`). §2.5 added: full wire protocol spec with envelope format, headers, golden examples. Required parser test suite added. §16 Q1 updated. |
+| 2 | coder-1-sea | P2 | Real-tier config coverage inconsistent (C2-C6 vs C1-C6 in acceptance criteria) | Incorporated | Added C1 (dev/local with real LLM) to real tier tests (DM-R0). Acceptance criteria remain C1-C6. |
+| 3 | coder-1-sea | P2 | Credential precedence text conflicts with loader implementation | Incorporated | §10.2 prose updated: shared secrets → local override → environment (env wins), matching code |
+| 4 | reviewer-sea | P2 | start_orchestrator passes env dict as CLI flag | Incorporated | §2.4: `env` is now a separate named parameter, excluded from kwargs CLI arg loop |
+| 5 | reviewer-sea | P3 | §16 Decisions Q3 references old 4-tier port scheme | Incorporated | Updated to Mock/Real tier names and 2 port ranges |
+| 6 | reviewer-sea | P3 | _start missing stdin=DEVNULL despite §3.1 requirement | Incorporated | Added `stdin=subprocess.DEVNULL` to both `_start` and `start_stubserver` |
+| 7 | reviewer-sea | P3 | stop_all inconsistency between §2.4 and §3.2 | Incorporated | §2.4 now has kill fallback; §3.2 references §2.4 instead of duplicating |
