@@ -264,11 +264,11 @@ func TestEmbeddings(t *testing.T) {
 func TestOpenRouterRouting(t *testing.T) {
 	skipWithoutKey(t, "OPENROUTER_API_KEY")
 
-	// OpenRouter uses the OpenAI API — it should already be registered.
-	// Use a cheap model via OpenRouter.
-	model, err := ai.GetModel("openrouter", "openai/gpt-4o-mini")
+	// OpenRouter uses the OpenAI API client — already registered.
+	// Use deepseek/deepseek-chat which exists in the openrouter catalog section.
+	model, err := ai.GetModel("openrouter", "deepseek/deepseek-chat")
 	if err != nil {
-		t.Skipf("OpenRouter model not in catalog: %v", err)
+		t.Fatalf("OpenRouter model not in catalog: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -337,17 +337,18 @@ func TestBadModelName(t *testing.T) {
 func TestInvalidAPIKey(t *testing.T) {
 	// Temporarily override the API key to test auth failure.
 	// Use OpenAI since its auth errors are well-defined.
-	origKey := os.Getenv("OPENAI_API_KEY")
-	if origKey == "" {
-		t.Skip("OPENAI_API_KEY not set")
-	}
+	skipWithoutKey(t, "OPENAI_API_KEY")
 
-	// Set an invalid key
-	os.Setenv("OPENAI_API_KEY", "sk-invalid-key-for-testing")
-	defer os.Setenv("OPENAI_API_KEY", origKey)
+	// t.Setenv automatically restores the original value and marks
+	// the test as incompatible with t.Parallel().
+	t.Setenv("OPENAI_API_KEY", "sk-invalid-key-for-testing")
 
-	// Re-register with the bad key
+	// Re-register with the bad key so the provider picks it up.
 	provideropenai.Register(provideropenai.ClientConfig{})
+	defer func() {
+		// Re-register with restored key (t.Setenv restores env on cleanup).
+		provideropenai.Register(provideropenai.ClientConfig{})
+	}()
 
 	model := resolveModel(t, "openai", "gpt-4o-mini")
 
@@ -371,10 +372,6 @@ func TestInvalidAPIKey(t *testing.T) {
 		t.Fatal("Expected auth error for invalid API key, got nil")
 	}
 	t.Logf("Got expected auth error: %v", err)
-
-	// Restore valid key and re-register
-	os.Setenv("OPENAI_API_KEY", origKey)
-	provideropenai.Register(provideropenai.ClientConfig{})
 }
 
 // ---------------------------------------------------------------------------
