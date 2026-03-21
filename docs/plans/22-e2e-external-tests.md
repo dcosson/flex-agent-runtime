@@ -97,7 +97,7 @@ tests/e2e/
 
 ### 2.3 RPC Client
 
-The Python client wraps ConnectRPC's unary JSON protocol. Each RPC is a POST request:
+The Python client wraps ConnectRPC's JSON protocol. Unary RPCs use `_call` (POST, parse single JSON response). Server-streaming RPCs (`SendMessage`, `Continue`, `FollowUp`, `SubscribeEvents`) use `_stream` (POST with `stream=True`, parse newline-delimited JSON):
 
 ```python
 class FlexAgentClient:
@@ -119,11 +119,6 @@ class FlexAgentClient:
     def create_session(self, **kwargs) -> dict:
         return self._call("/rpc.v1.AgentService/CreateSession", kwargs)
 
-    def send_message(self, session_id: str, message: str) -> dict:
-        return self._call("/rpc.v1.AgentService/SendMessage", {
-            "session_id": session_id, "message": message,
-        })
-
     def get_session(self, session_id: str) -> dict:
         return self._call("/rpc.v1.AgentService/GetSession", {
             "session_id": session_id,
@@ -139,33 +134,67 @@ class FlexAgentClient:
             "session_id": session_id, "instruction": instruction,
         })
 
-    def follow_up(self, session_id: str, message: str) -> dict:
-        return self._call("/rpc.v1.AgentService/FollowUp", {
-            "session_id": session_id, "message": message,
-        })
 
     def abort(self, session_id: str) -> dict:
         return self._call("/rpc.v1.AgentService/Abort", {
             "session_id": session_id,
         })
 
-    def subscribe_events(self, session_id: str):
+    def _stream(self, procedure: str, payload: dict, timeout: int = 300):
         """Server-streaming RPC via ConnectRPC streaming protocol.
-        Returns an iterator of event dicts."""
-        url = f"{self.base_url}/rpc.v1.AgentService/SubscribeEvents"
-        resp = self.session.post(url, json={"session_id": session_id},
-                                 stream=True, timeout=300)
+        Returns an iterator of response dicts (newline-delimited JSON)."""
+        url = f"{self.base_url}{procedure}"
+        resp = self.session.post(url, json=payload, stream=True, timeout=timeout)
         resp.raise_for_status()
         for line in resp.iter_lines():
             if line:
                 yield json.loads(line)
+
+    def send_message(self, session_id: str, message: str):
+        """Server-streaming: returns iterator of event dicts."""
+        return self._stream("/rpc.v1.AgentService/SendMessage", {
+            "session_id": session_id, "message": message,
+        })
+
+    def continue_(self, session_id: str):
+        """Server-streaming: continues the agent turn, returns event iterator."""
+        return self._stream("/rpc.v1.AgentService/Continue", {
+            "session_id": session_id,
+        })
+
+    def follow_up(self, session_id: str, message: str):
+        """Server-streaming: sends follow-up message, returns event iterator."""
+        return self._stream("/rpc.v1.AgentService/FollowUp", {
+            "session_id": session_id, "message": message,
+        })
+
+    def list_sessions(self) -> dict:
+        return self._call("/rpc.v1.AgentService/ListSessions", {})
+
+    def resume_session(self, session_id: str) -> dict:
+        return self._call("/rpc.v1.AgentService/ResumeSession", {
+            "session_id": session_id,
+        })
+
+    def create_snapshot(self, session_id: str, name: str = "") -> dict:
+        """Create a ZFS snapshot for the session's sandbox.
+        Routes through the orchestrator which delegates to SandboxService."""
+        return self._call("/rpc.v1.AgentService/CreateSnapshot", {
+            "session_id": session_id, "name": name,
+        })
+
+    def subscribe_events(self, session_id: str):
+        """Server-streaming: returns iterator of event dicts."""
+        return self._stream("/rpc.v1.AgentService/SubscribeEvents", {
+            "session_id": session_id,
+        })
 
     def health(self) -> bool:
         resp = self.session.get(f"{self.base_url}/health", timeout=5)
         return resp.status_code == 200
 ```
 
-For server-streaming RPCs (`SendMessage`, `SubscribeEvents`), ConnectRPC uses newline-delimited JSON over a single HTTP response. The client reads lines incrementally.
+For server-streaming RPCs (`SendMessage`, `Continue`, `FollowUp`, `SubscribeEvents`), ConnectRPC uses newline-delimited JSON over a single HTTP response. The `_stream` helper reads lines incrementally and yields parsed dicts. Unary RPCs (`CreateSession`, `GetSession`, `ListSessions`, `ResumeSession`, `Steer`, `Abort`, `DestroySession`, `CreateSnapshot`) use the `_call` helper which returns a single parsed dict.
 
 ### 2.4 Process Manager
 
@@ -193,6 +222,18 @@ class ProcessManager:
         proc = subprocess.Popen(
             [self.binary] + args,
             env=full_env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.processes.append(proc)
+        return proc
+
+    def start_stubserver(self, binary_path: str = "", listen: str = ":19090",
+                         fixture_dir: str = "testdata/fixtures") -> subprocess.Popen:
+        """Start the stubserver binary (separate from flexagent)."""
+        binary = binary_path or os.environ.get("STUBSERVER_BINARY", "stubserver")
+        proc = subprocess.Popen(
+            [binary, "--listen", listen, "--fixture-dir", fixture_dir],
+            env={**os.environ},
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         self.processes.append(proc)
@@ -282,13 +323,16 @@ class ProcessManager:
         sys.exit(128 + signum)
 ```
 
-**Layer 3: Module-scoped sweep.** Each test module's fixture teardown enumerates and destroys all sessions that weren't explicitly cleaned up (leaked sessions).
+**Layer 3: Module-scoped sweep.** Each test module's fixture teardown enumerates and destroys all sessions that weren't explicitly cleaned up (leaked sessions). This fixture depends on the orchestrator fixture, ensuring the session sweep runs **before** the orchestrator process is stopped (pytest tears down fixtures in reverse dependency order).
 
 ```python
 @pytest.fixture(scope="module", autouse=True)
 def cleanup_leaked_sessions(local_orchestrator):
     yield
-    # After all tests in this module: sweep any remaining sessions
+    # After all tests in this module: sweep any remaining sessions.
+    # This runs before local_orchestrator teardown (reverse dep order).
+    # Handle connection errors gracefully — the orchestrator may already
+    # be shutting down if a prior fixture failed.
     try:
         sessions = local_orchestrator.list_sessions()
         for s in sessions.get("sessions", []):
@@ -296,6 +340,8 @@ def cleanup_leaked_sessions(local_orchestrator):
                 local_orchestrator.destroy_session(s["session_id"])
             except Exception:
                 pass
+    except (requests.ConnectionError, requests.Timeout):
+        pass  # Orchestrator already gone — nothing to sweep
     except Exception:
         pass
 ```
@@ -594,6 +640,16 @@ MR-CT2: NativeDriver agent writes code -> snapshot
 
 **Note:** Context transfer means filesystem state transfer (via ZFS snapshots), not conversation history transfer. The new agent starts a fresh conversation but inherits the file system state.
 
+### 8.4 Remote ExecutionEnvironment Providers (Optional)
+
+An optional `test_remote_providers.py` module can exercise remote `ExecutionEnvironment` providers (E2B, Daytona, Fly) in nightly runs. These tests verify provider selection, environment factory wiring, and credential routing that are not visible with Native sandbox alone. Requires provider-specific credentials and is nightly-only.
+
+```
+MR-RP1: Create session with E2B provider -> verify agent runs in E2B sandbox
+MR-RP2: Create session with Fly provider -> verify agent runs in Fly machine
+MR-RP3: Verify provider selection based on session config
+```
+
 ---
 
 ## 9. Real LLM Provider API Tests
@@ -769,11 +825,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version: '1.23' }
-      - run: go build -o flexagent ./cmd/flexagent
+      - run: |
+          go build -o flexagent ./cmd/flexagent
+          go build -o stubserver ./cmd/stubserver
       - uses: actions/upload-artifact@v4
         with:
-          name: flexagent-binary
-          path: flexagent
+          name: flexagent-binaries
+          path: |
+            flexagent
+            stubserver
 
   e2e-fast:
     name: "E2E-Fast: Local mode + stubserver"
@@ -784,11 +844,12 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - uses: actions/download-artifact@v4
-        with: { name: flexagent-binary }
-      - run: chmod +x flexagent && pip install -r tests/e2e/requirements.txt
+        with: { name: flexagent-binaries }
+      - run: chmod +x flexagent stubserver && pip install -r tests/e2e/requirements.txt
       - run: pytest tests/e2e/ -m "not provider and not infra" -v --timeout=120
         env:
           FLEXAGENT_BINARY: ./flexagent
+          STUBSERVER_BINARY: ./stubserver
           FLEXAGENT_AUTH_TOKEN: test-token
 
   e2e-provider:
@@ -801,7 +862,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - uses: actions/download-artifact@v4
-        with: { name: flexagent-binary }
+        with: { name: flexagent-binaries }
       - run: chmod +x flexagent && pip install -r tests/e2e/requirements.txt
       - run: pytest tests/e2e/test_provider_api.py -v --timeout=120
         env:
@@ -820,7 +881,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - uses: actions/download-artifact@v4
-        with: { name: flexagent-binary }
+        with: { name: flexagent-binaries }
       - run: chmod +x flexagent && pip install -r tests/e2e/requirements.txt
       - run: pytest tests/e2e/ -m "infra" -v --timeout=600
         env:
@@ -861,46 +922,48 @@ def flexagent_binary():
 
 @pytest.fixture(scope="module")
 def local_orchestrator(flexagent_binary):
-    """Start orchestrator + sandbox-host in local mode for the test module."""
+    """Start orchestrator + sandbox-host in local mode for the test module.
+    Uses E2E-Fast tier ports (18080/18082) to avoid conflicts."""
     pm = ProcessManager(flexagent_binary)
     auth_token = os.environ.get("FLEXAGENT_AUTH_TOKEN", "test-token")
 
-    # Start sandbox-host
-    pm.start_sandbox_host(listen=":8082", FLEXAGENT_AUTH_TOKEN=auth_token)
-    wait_for_health("http://localhost:8082/health")
+    # Start sandbox-host on E2E-Fast port
+    pm.start_sandbox_host(listen=":18082", FLEXAGENT_AUTH_TOKEN=auth_token)
+    wait_for_health("http://localhost:18082/health")
 
-    # Start orchestrator
+    # Start orchestrator on E2E-Fast port
     pm.start_orchestrator(
-        listen=":8080",
-        sandbox_host_addr="localhost:8082",
+        listen=":18080",
+        sandbox_host_addr="localhost:18082",
         auth_token=auth_token,
     )
-    wait_for_health("http://localhost:8080/health")
+    wait_for_health("http://localhost:18080/health")
 
-    client = FlexAgentClient("http://localhost:8080", auth_token=auth_token)
+    client = FlexAgentClient("http://localhost:18080", auth_token=auth_token)
     yield client
 
     pm.stop_all()
 
 @pytest.fixture(scope="module")
 def fleet_orchestrator(flexagent_binary):
-    """Start orchestrator + 2 sandbox-hosts in fleet mode."""
+    """Start orchestrator + 2 sandbox-hosts in fleet mode.
+    Uses E2E-Standard tier ports (28080/28082/28083) to avoid conflicts."""
     pm = ProcessManager(flexagent_binary)
     auth_token = os.environ.get("FLEXAGENT_AUTH_TOKEN", "test-token")
 
-    pm.start_sandbox_host(listen=":8082", FLEXAGENT_AUTH_TOKEN=auth_token)
-    pm.start_sandbox_host(listen=":8083", FLEXAGENT_AUTH_TOKEN=auth_token)
-    wait_for_health("http://localhost:8082/health")
-    wait_for_health("http://localhost:8083/health")
+    pm.start_sandbox_host(listen=":28082", FLEXAGENT_AUTH_TOKEN=auth_token)
+    pm.start_sandbox_host(listen=":28083", FLEXAGENT_AUTH_TOKEN=auth_token)
+    wait_for_health("http://localhost:28082/health")
+    wait_for_health("http://localhost:28083/health")
 
     pm.start_orchestrator(
-        listen=":8080",
-        sandbox_host_addr="localhost:8082,localhost:8083",
+        listen=":28080",
+        sandbox_host_addr="localhost:28082,localhost:28083",
         auth_token=auth_token,
     )
-    wait_for_health("http://localhost:8080/health")
+    wait_for_health("http://localhost:28080/health")
 
-    client = FlexAgentClient("http://localhost:8080", auth_token=auth_token)
+    client = FlexAgentClient("http://localhost:28080", auth_token=auth_token)
     yield client
 
     pm.stop_all()
@@ -925,30 +988,31 @@ For tests that don't need real LLM providers, the test driver starts the stubser
 ```python
 @pytest.fixture(scope="module")
 def stubserver_orchestrator(flexagent_binary):
-    """Orchestrator with stubserver as LLM backend."""
+    """Orchestrator with stubserver as LLM backend.
+    Uses E2E-Fast tier ports to avoid conflicts."""
     pm = ProcessManager(flexagent_binary)
     auth_token = "test-token"
 
-    # Start stubserver
-    pm._start(["cmd/stubserver"], {"STUBSERVER_FIXTURE_DIR": "testdata/fixtures"})
-    wait_for_health("http://localhost:9090/health")
+    # Start stubserver (separate binary, built alongside flexagent)
+    pm.start_stubserver(listen=":19090")
+    wait_for_health("http://localhost:19090/health")
 
     # Start sandbox-host + orchestrator with provider pointed at stubserver
-    pm.start_sandbox_host(listen=":8082", FLEXAGENT_AUTH_TOKEN=auth_token)
-    wait_for_health("http://localhost:8082/health")
+    pm.start_sandbox_host(listen=":18082", FLEXAGENT_AUTH_TOKEN=auth_token)
+    wait_for_health("http://localhost:18082/health")
 
     pm.start_orchestrator(
-        listen=":8080",
-        sandbox_host_addr="localhost:8082",
+        listen=":18080",
+        sandbox_host_addr="localhost:18082",
         auth_token=auth_token,
         env={
-            "ANTHROPIC_BASE_URL": "http://localhost:9090",
+            "ANTHROPIC_BASE_URL": "http://localhost:19090",
             "FLEXAGENT_AUTH_TOKEN": auth_token,
         },
     )
-    wait_for_health("http://localhost:8080/health")
+    wait_for_health("http://localhost:18080/health")
 
-    client = FlexAgentClient("http://localhost:8080", auth_token=auth_token)
+    client = FlexAgentClient("http://localhost:18080", auth_token=auth_token)
     yield client
 
     pm.stop_all()
@@ -1015,14 +1079,30 @@ The two plans are complementary. Plan 17 catches bugs in the agent loop and tool
 
 ---
 
-## 16. Open Questions
+## 16. Decisions
 
-1. **ConnectRPC streaming from Python**: The unary JSON protocol is trivial, but server-streaming RPCs (SendMessage, SubscribeEvents) use ConnectRPC's streaming wire format. Should we use `grpcio` for streaming, implement the ConnectRPC streaming protocol manually (newline-delimited JSON envelopes), or use a ConnectRPC Python library if one becomes available?
+These were originally open questions, now resolved:
 
-2. **Stubserver as LLM backend**: For E2E-Fast tests, should we use the Go stubserver binary from plan 17, or implement a minimal Python-based fixture server? The Go binary is already built but adds a dependency on building two binaries.
+1. **ConnectRPC streaming from Python**: **Decision: manual newline-delimited JSON.** ConnectRPC's server-streaming protocol over HTTP sends newline-delimited JSON objects. The Python client uses `requests` with `stream=True` and `resp.iter_lines()` to parse events incrementally. No `grpcio` dependency needed — the `_stream` helper in `FlexAgentClient` (§2.3) handles this directly. This keeps the test driver lightweight with zero protobuf/gRPC dependencies.
 
-3. **Port allocation**: Tests start multiple processes on fixed ports (8080, 8082, 8083, 9090). Should we use dynamic port allocation to avoid conflicts when tests run in parallel? This adds complexity to the process manager.
+2. **Stubserver as LLM backend**: **Decision: use the Go stubserver binary from Plan 17.** The CI workflow builds both `flexagent` and `stubserver` binaries in the `build-binary` job. The `ProcessManager.start_stubserver()` method handles locating and starting it. This avoids reimplementing fixture serving in Python and keeps the stubserver implementation authoritative in one place.
 
-4. **EC2 direct mode without real EC2**: For CI, we simulate EC2 direct mode by pointing `--direct-host-addr` at a local `flexagent serve agent` process. Is this sufficient, or should we invest in localstack/mock EC2 for more realistic testing?
+3. **Port allocation**: **Decision: tier-specific fixed ports from §3.5.** Each test tier uses a unique port range (E2E-Fast: 18xxx, E2E-Standard: 28xxx, E2E-Provider: 38xxx, E2E-Infra: 48xxx). All fixtures use these ports instead of default ports. This allows parallel tier execution without conflicts while keeping port assignment deterministic and debuggable. Dynamic port allocation was rejected as it adds complexity to the process manager and makes debugging harder.
 
-5. **Multi-runtime binary availability**: Claude Code and Codex binaries may not be available in CI. Should multi-runtime tests be nightly-only, or should we provide lightweight mock drivers that simulate their behavior?
+4. **EC2 direct mode without real EC2**: **Recommended default: local simulation is sufficient for CI.** The local `flexagent serve agent` process exercises the same direct-host code path. Real EC2 testing is reserved for nightly E2E-Infra runs. Localstack/mock EC2 is not worth the investment since the direct mode code path is small (just SSH/network setup vs. agent interaction).
+
+5. **Multi-runtime binary availability**: **Recommended default: nightly-only.** Multi-runtime tests require Claude Code and Codex binaries which are not available in standard CI runners. These tests run only in E2E-Infra nightly runs on self-hosted runners that have the required binaries installed.
+
+---
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | reviewer-sea | P1 | FlexAgentClient missing Continue, ListSessions, ResumeSession, CreateSnapshot methods | Incorporated | §2.3 rewritten: added `_stream` helper, `continue_`, `list_sessions`, `resume_session`, `create_snapshot`; `send_message` and `follow_up` moved to streaming |
+| 2 | reviewer-sea | P1 | SendMessage uses unary pattern but is server-streaming | Incorporated | §2.3: `send_message`, `continue_`, `follow_up` now use `_stream` returning iterators; `_call` reserved for unary RPCs |
+| 3 | reviewer-sea | P2 | Port conflicts between module-scoped fixtures | Incorporated | §12.1/12.2: all fixtures updated to use tier-specific ports from §3.5 (18xxx for Fast, 28xxx for Standard) |
+| 4 | reviewer-sea | P2 | Open questions 1-3 blocking implementation | Incorporated | §16 renamed "Decisions" with resolved answers; Q1: manual NDJSON, Q2: Go stubserver, Q3: tier-specific fixed ports; Q4-5: recommended defaults |
+| 5 | reviewer-sea | P2 | Stubserver fixture uses private `_start` with incorrect args | Incorporated | §2.4: added `start_stubserver()` to ProcessManager; §12.2: fixture uses `start_stubserver()`; CI builds both binaries |
+| 6 | reviewer-sea | P3 | No remote ExecutionEnvironment provider coverage | Incorporated | §8.4 added: optional `test_remote_providers.py` for nightly E2B/Fly testing |
+| 7 | reviewer-sea | P3 | cleanup_leaked_sessions calls undefined list_sessions and fixture ordering | Incorporated | §3.3 Layer 3: added fixture ordering note, connection error handling for orchestrator-already-gone case |
