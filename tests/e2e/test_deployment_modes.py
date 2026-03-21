@@ -30,9 +30,13 @@ class TestToolsSandboxSessionLifecycle:
             events = list(local_orchestrator.send_message(session_id, "Say hello"))
             assert len(events) > 0
 
-            # Verify we got at least one event with expected structure
+            # Verify we got meaningful event types (not just errors/garbage)
             event_types = {e.get("type") for e in events}
-            assert len(event_types) > 0
+            # Should have at least a text or content event from the LLM response
+            content_types = {"text", "text_delta", "content_block_delta", "message_start"}
+            assert event_types & content_types, (
+                f"Expected at least one content event type, got: {event_types}"
+            )
 
             # Get session state
             session = local_orchestrator.get_session(session_id)
@@ -98,7 +102,7 @@ class TestHealthCheck:
     def test_orchestrator_health_endpoint(self, local_orchestrator: FlexAgentClient):
         """Health endpoint returns 200 with proper response."""
         import requests
-        resp = requests.get("http://localhost:18080/health", timeout=5)
+        resp = requests.get(f"{local_orchestrator.base_url}/health", timeout=5)
         assert resp.status_code == 200
 
 
