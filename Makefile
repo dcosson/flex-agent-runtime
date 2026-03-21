@@ -4,7 +4,7 @@ GO_TEST_RACE := $(if $(filter 0 false no,$(RACE)),,-race)
 EXTERNAL_COMPOSE_FILE ?= tests/external/docker/docker-compose.e2e.yaml
 PKGS := $(shell $(GO) list ./...)
 
-.PHONY: help build build-llm-demo build-embedding-demo build-stubserver build-sandbox-host build-flexagent fmt fmt-check vet deps deps-staticcheck check test test-race test-integration \
+.PHONY: help build build-llm-demo build-embedding-demo build-stubserver build-sandbox-host build-flexagent fmt fmt-check vet deps deps-staticcheck check test test-race test-integration test-liveapi \
 	test-harness test-harness-t2 \
 	test-anthropic-harness-fast test-anthropic-harness-race \
 	test-harness-openai test-harness-google \
@@ -39,6 +39,7 @@ help:
 	@echo "  test                             Unit + small integration (all packages)"
 	@echo "  test-race                        Full test suite with race detector"
 	@echo "  test-integration                 Integration agent + tools scenarios"
+	@echo "  test-liveapi                     Live API tests (real providers, requires API keys)"
 	@echo ""
 	@echo "=== Harness Tests ==="
 	@echo "  note                             Set RACE=0 to disable race detector on harness/external/integration targets"
@@ -146,6 +147,9 @@ test-race:
 
 test-integration:
 	$(GO) test $(GO_TEST_RACE) ./tests/integration/... -count=1 -timeout 120s
+
+test-liveapi:
+	$(GO) test -tags=liveapi -v -count=1 -timeout 300s ./tests/liveapi/...
 
 # ---------------------------------------------------------------------------
 # Harness Tests
