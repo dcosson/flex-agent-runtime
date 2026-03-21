@@ -11,6 +11,7 @@ import os
 import pytest
 
 from .client import FlexAgentClient
+from .helpers import collect_events, events_contain_text, has_content_event
 
 
 pytestmark = [pytest.mark.real, pytest.mark.multi_runtime, pytest.mark.timeout(300)]
@@ -20,24 +21,6 @@ def _skip_without_binary(env_var: str, name: str):
     """Skip if agent binary is not available."""
     if not os.environ.get(env_var):
         pytest.skip(f"{name} binary not configured ({env_var} not set)")
-
-
-def _collect_events(client: FlexAgentClient, session_id: str, message: str) -> list[dict]:
-    return list(client.send_message(session_id, message))
-
-
-def _has_content_event(events: list[dict]) -> bool:
-    content_types = {"text", "text_delta", "content_block_delta", "message_start"}
-    return bool({e.get("type") for e in events} & content_types)
-
-
-def _events_contain_text(events: list[dict], substring: str) -> bool:
-    for e in events:
-        for field in ("text", "content", "data", "output"):
-            val = e.get(field, "")
-            if isinstance(val, str) and substring in val:
-                return True
-    return False
 
 
 class TestClaudeCodeSandbox:
@@ -54,12 +37,12 @@ class TestClaudeCodeSandbox:
         )
         session_id = resp["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session_id,
                 "Write 'hello from claude code' to /workspace/cc-test.txt"
             )
             assert len(events) > 0, "Expected events from Claude Code"
-            assert _has_content_event(events), "Expected content events"
+            assert has_content_event(events), "Expected content events"
         finally:
             client.destroy_session(session_id)
 
@@ -75,7 +58,7 @@ class TestClaudeCodeSandbox:
         )
         session_id = resp["session_id"]
         try:
-            _collect_events(
+            collect_events(
                 client, session_id,
                 "Create a file /workspace/cc-snapshot-test.txt with content 'cc-data'"
             )
@@ -92,11 +75,11 @@ class TestClaudeCodeSandbox:
         )
         session2 = resp2["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session2,
                 "Read /workspace/cc-snapshot-test.txt and tell me its contents"
             )
-            assert _events_contain_text(events, "cc-data"), (
+            assert events_contain_text(events, "cc-data"), (
                 "Expected snapshot to contain Claude Code's file"
             )
         finally:
@@ -117,12 +100,12 @@ class TestCodexSandbox:
         )
         session_id = resp["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session_id,
                 "Write 'hello from codex' to /workspace/codex-test.txt"
             )
             assert len(events) > 0, "Expected events from Codex"
-            assert _has_content_event(events), "Expected content events"
+            assert has_content_event(events), "Expected content events"
         finally:
             client.destroy_session(session_id)
 
@@ -137,11 +120,11 @@ class TestCodexSandbox:
         )
         session_id = resp["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session_id,
                 "Run the command 'echo codex-tool-test' and tell me the output"
             )
-            assert _has_content_event(events), "Expected content events from tool execution"
+            assert has_content_event(events), "Expected content events from tool execution"
         finally:
             client.destroy_session(session_id)
 
@@ -162,7 +145,7 @@ class TestCrossRuntimeTransfer:
         )
         session1 = resp1["session_id"]
         try:
-            _collect_events(
+            collect_events(
                 client, session1,
                 "Write 'cross-runtime-transfer-data' to /workspace/transfer.txt"
             )
@@ -177,11 +160,11 @@ class TestCrossRuntimeTransfer:
         )
         session2 = resp2["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session2,
                 "Read /workspace/transfer.txt and tell me its exact contents"
             )
-            assert _events_contain_text(events, "cross-runtime-transfer-data"), (
+            assert events_contain_text(events, "cross-runtime-transfer-data"), (
                 "Expected native agent to read Claude Code's file from snapshot"
             )
         finally:
@@ -197,7 +180,7 @@ class TestCrossRuntimeTransfer:
         resp1 = client.create_session(placement="tools-sandbox")
         session1 = resp1["session_id"]
         try:
-            _collect_events(
+            collect_events(
                 client, session1,
                 "Write 'native-to-cc-data' to /workspace/native-transfer.txt"
             )
@@ -213,11 +196,11 @@ class TestCrossRuntimeTransfer:
         )
         session2 = resp2["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session2,
                 "Read /workspace/native-transfer.txt and tell me its contents"
             )
-            assert _events_contain_text(events, "native-to-cc-data"), (
+            assert events_contain_text(events, "native-to-cc-data"), (
                 "Expected Claude Code to read native agent's file from snapshot"
             )
         finally:

@@ -18,39 +18,10 @@ which is deferred to real tier testing with real LLM.
 import pytest
 
 from .client import FlexAgentClient
+from .helpers import collect_events, events_contain_text, has_content_event
 
 
 pytestmark = pytest.mark.timeout(120)
-
-
-def _collect_events(client: FlexAgentClient, session_id: str, message: str) -> list[dict]:
-    """Send a message and collect all events."""
-    return list(client.send_message(session_id, message))
-
-
-def _find_event(events: list[dict], event_type: str) -> dict | None:
-    """Find first event of given type."""
-    for e in events:
-        if e.get("type") == event_type:
-            return e
-    return None
-
-
-def _events_contain_text(events: list[dict], substring: str) -> bool:
-    """Check if any event contains the given substring in text-like fields."""
-    for e in events:
-        for field in ("text", "content", "data", "output"):
-            val = e.get(field, "")
-            if isinstance(val, str) and substring in val:
-                return True
-    return False
-
-
-def _has_content_event(events: list[dict]) -> bool:
-    """Check that events include at least one content/text event."""
-    content_types = {"text", "text_delta", "content_block_delta", "message_start"}
-    event_types = {e.get("type") for e in events}
-    return bool(event_types & content_types)
 
 
 class TestFileOperations:
@@ -61,20 +32,20 @@ class TestFileOperations:
         session_id = resp["session_id"]
         try:
             # Ask agent to write a file
-            events = _collect_events(
+            events = collect_events(
                 local_orchestrator, session_id,
                 "Write the text 'hello e2e' to a file called /workspace/test.txt"
             )
             assert len(events) > 0
-            assert _has_content_event(events), "Expected content events from write"
+            assert has_content_event(events), "Expected content events from write"
 
             # Ask agent to read it back — response should mention the content
-            events = _collect_events(
+            events = collect_events(
                 local_orchestrator, session_id,
                 "Read the file /workspace/test.txt and tell me its exact contents"
             )
             assert len(events) > 0
-            assert _events_contain_text(events, "hello e2e"), (
+            assert events_contain_text(events, "hello e2e"), (
                 "Expected read-back to contain 'hello e2e'"
             )
         finally:
@@ -88,12 +59,12 @@ class TestBashCommands:
         resp = local_orchestrator.create_session(placement="tools-sandbox")
         session_id = resp["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 local_orchestrator, session_id,
                 "Run the bash command: echo 'sandbox-test-marker'"
             )
             assert len(events) > 0
-            assert _has_content_event(events), "Expected content events from bash"
+            assert has_content_event(events), "Expected content events from bash"
         finally:
             local_orchestrator.destroy_session(session_id)
 
@@ -101,12 +72,12 @@ class TestBashCommands:
         resp = local_orchestrator.create_session(placement="tools-sandbox")
         session_id = resp["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 local_orchestrator, session_id,
                 "Run pwd and tell me the current directory"
             )
             assert len(events) > 0
-            assert _has_content_event(events), "Expected content events from pwd"
+            assert has_content_event(events), "Expected content events from pwd"
         finally:
             local_orchestrator.destroy_session(session_id)
 
@@ -119,17 +90,17 @@ class TestGrepGlob:
         session_id = resp["session_id"]
         try:
             # Write a file with searchable content
-            _collect_events(
+            collect_events(
                 local_orchestrator, session_id,
                 "Write 'unique-grep-marker-xyz' to /workspace/searchable.txt"
             )
             # Search for it
-            events = _collect_events(
+            events = collect_events(
                 local_orchestrator, session_id,
                 "Search for the text 'unique-grep-marker' in /workspace/"
             )
             assert len(events) > 0
-            assert _has_content_event(events), "Expected content events from grep"
+            assert has_content_event(events), "Expected content events from grep"
         finally:
             local_orchestrator.destroy_session(session_id)
 
@@ -138,17 +109,17 @@ class TestGrepGlob:
         session_id = resp["session_id"]
         try:
             # Write files
-            _collect_events(
+            collect_events(
                 local_orchestrator, session_id,
                 "Create files /workspace/a.py and /workspace/b.py with any content"
             )
             # Glob for them
-            events = _collect_events(
+            events = collect_events(
                 local_orchestrator, session_id,
                 "List all .py files in /workspace/"
             )
             assert len(events) > 0
-            assert _has_content_event(events), "Expected content events from glob"
+            assert has_content_event(events), "Expected content events from glob"
         finally:
             local_orchestrator.destroy_session(session_id)
 
@@ -161,19 +132,19 @@ class TestMultiTurnPersistence:
         session_id = resp["session_id"]
         try:
             # Turn 1: write a file
-            events1 = _collect_events(
+            events1 = collect_events(
                 local_orchestrator, session_id,
                 "Write 'turn1-data' to /workspace/persist-test.txt"
             )
             assert len(events1) > 0
 
             # Turn 2: read it back — should contain the written content
-            events2 = _collect_events(
+            events2 = collect_events(
                 local_orchestrator, session_id,
                 "Read /workspace/persist-test.txt and tell me its exact contents"
             )
             assert len(events2) > 0
-            assert _events_contain_text(events2, "turn1-data"), (
+            assert events_contain_text(events2, "turn1-data"), (
                 "Expected persist-test.txt to contain 'turn1-data' across turns"
             )
         finally:
@@ -194,11 +165,11 @@ class TestAgentInSandbox:
         resp = fleet_orchestrator.create_session(placement="agent-sandbox")
         session_id = resp["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 fleet_orchestrator, session_id, "Say hello"
             )
             assert len(events) > 0
-            assert _has_content_event(events), "Expected content from agent-sandbox"
+            assert has_content_event(events), "Expected content from agent-sandbox"
         finally:
             fleet_orchestrator.destroy_session(session_id)
 
@@ -207,15 +178,15 @@ class TestAgentInSandbox:
         resp = fleet_orchestrator.create_session(placement="agent-sandbox")
         session_id = resp["session_id"]
         try:
-            _collect_events(
+            collect_events(
                 fleet_orchestrator, session_id,
                 "Write 'agent-sandbox-data' to /workspace/agent-file.txt"
             )
-            events = _collect_events(
+            events = collect_events(
                 fleet_orchestrator, session_id,
                 "Read /workspace/agent-file.txt and tell me its contents"
             )
-            assert _events_contain_text(events, "agent-sandbox-data"), (
+            assert events_contain_text(events, "agent-sandbox-data"), (
                 "Expected agent to read file in its sandbox"
             )
         finally:
@@ -226,11 +197,11 @@ class TestAgentInSandbox:
         resp = fleet_orchestrator.create_session(placement="agent-sandbox")
         session_id = resp["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 fleet_orchestrator, session_id,
                 "Run 'cat /proc/1/cmdline' and tell me what process is PID 1"
             )
-            assert _has_content_event(events), "Expected PID namespace info"
+            assert has_content_event(events), "Expected PID namespace info"
         finally:
             fleet_orchestrator.destroy_session(session_id)
 
@@ -240,10 +211,10 @@ class TestAgentInSandbox:
         session_id = resp["session_id"]
 
         # Write something to verify the session is active
-        events = _collect_events(
+        events = collect_events(
             fleet_orchestrator, session_id, "Say hello"
         )
-        assert _has_content_event(events)
+        assert has_content_event(events)
 
         # Destroy the session
         fleet_orchestrator.destroy_session(session_id)
@@ -261,29 +232,29 @@ class TestAgentInSandbox:
                 sessions.append(resp["session_id"])
 
             # Write different data in each session
-            _collect_events(
+            collect_events(
                 fleet_orchestrator, sessions[0],
                 "Write 'session-0-data' to /workspace/isolation-test.txt"
             )
-            _collect_events(
+            collect_events(
                 fleet_orchestrator, sessions[1],
                 "Write 'session-1-data' to /workspace/isolation-test.txt"
             )
 
             # Each session should see its own data
-            events0 = _collect_events(
+            events0 = collect_events(
                 fleet_orchestrator, sessions[0],
                 "Read /workspace/isolation-test.txt and tell me its exact contents"
             )
-            events1 = _collect_events(
+            events1 = collect_events(
                 fleet_orchestrator, sessions[1],
                 "Read /workspace/isolation-test.txt and tell me its exact contents"
             )
 
-            assert _events_contain_text(events0, "session-0-data"), (
+            assert events_contain_text(events0, "session-0-data"), (
                 "Session 0 should see its own data"
             )
-            assert _events_contain_text(events1, "session-1-data"), (
+            assert events_contain_text(events1, "session-1-data"), (
                 "Session 1 should see its own data"
             )
         finally:
@@ -312,15 +283,15 @@ class TestMixedMode:
 
         try:
             # Both sessions should work independently
-            events_tools = _collect_events(
+            events_tools = collect_events(
                 fleet_orchestrator, tools_sid, "Say hello"
             )
-            events_agent = _collect_events(
+            events_agent = collect_events(
                 fleet_orchestrator, agent_sid, "Say hello"
             )
 
-            assert _has_content_event(events_tools), "tools-sandbox should respond"
-            assert _has_content_event(events_agent), "agent-sandbox should respond"
+            assert has_content_event(events_tools), "tools-sandbox should respond"
+            assert has_content_event(events_agent), "agent-sandbox should respond"
         finally:
             try:
                 fleet_orchestrator.destroy_session(tools_sid)
@@ -340,27 +311,27 @@ class TestMixedMode:
 
         try:
             # Write distinct data in each
-            _collect_events(
+            collect_events(
                 fleet_orchestrator, tools_sid,
                 "Write 'tools-mode-data' to /workspace/mode-test.txt"
             )
-            _collect_events(
+            collect_events(
                 fleet_orchestrator, agent_sid,
                 "Write 'agent-mode-data' to /workspace/mode-test.txt"
             )
 
             # Each should see its own data (isolated filesystems)
-            events_tools = _collect_events(
+            events_tools = collect_events(
                 fleet_orchestrator, tools_sid,
                 "Read /workspace/mode-test.txt and tell me its contents"
             )
-            events_agent = _collect_events(
+            events_agent = collect_events(
                 fleet_orchestrator, agent_sid,
                 "Read /workspace/mode-test.txt and tell me its contents"
             )
 
-            assert _events_contain_text(events_tools, "tools-mode-data")
-            assert _events_contain_text(events_agent, "agent-mode-data")
+            assert events_contain_text(events_tools, "tools-mode-data")
+            assert events_contain_text(events_agent, "agent-mode-data")
         finally:
             try:
                 fleet_orchestrator.destroy_session(tools_sid)

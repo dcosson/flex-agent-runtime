@@ -9,38 +9,10 @@ Tier: Real only — requires gVisor container runtime.
 import pytest
 
 from .client import FlexAgentClient
+from .helpers import collect_events, extract_text, has_content_event
 
 
 pytestmark = [pytest.mark.real, pytest.mark.timeout(120)]
-
-
-def _collect_events(client: FlexAgentClient, session_id: str, message: str) -> list[dict]:
-    return list(client.send_message(session_id, message))
-
-
-def _events_contain_text(events: list[dict], substring: str) -> bool:
-    for e in events:
-        for field in ("text", "content", "data", "output"):
-            val = e.get(field, "")
-            if isinstance(val, str) and substring in val:
-                return True
-    return False
-
-
-def _extract_text(events: list[dict]) -> str:
-    """Extract all text content from events."""
-    parts = []
-    for e in events:
-        for field in ("text", "content", "data", "output"):
-            val = e.get(field, "")
-            if isinstance(val, str) and val:
-                parts.append(val)
-    return "\n".join(parts)
-
-
-def _has_content_event(events: list[dict]) -> bool:
-    content_types = {"text", "text_delta", "content_block_delta", "message_start"}
-    return bool({e.get("type") for e in events} & content_types)
 
 
 class TestSandboxHostname:
@@ -51,14 +23,14 @@ class TestSandboxHostname:
         resp = client.create_session(placement="tools-sandbox")
         session_id = resp["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session_id,
                 "Run the command 'hostname' and tell me the exact output"
             )
-            assert _has_content_event(events), "Expected hostname output"
+            assert has_content_event(events), "Expected hostname output"
             # The hostname should be non-empty; we can't assert the exact value
             # but verify we got a response
-            text = _extract_text(events)
+            text = extract_text(events)
             assert len(text.strip()) > 0, "Expected non-empty hostname"
         finally:
             client.destroy_session(session_id)
@@ -72,11 +44,11 @@ class TestCgroupIsolation:
         resp = client.create_session(placement="tools-sandbox")
         session_id = resp["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session_id,
                 "Run 'cat /proc/self/cgroup' and show me the output"
             )
-            assert _has_content_event(events), "Expected cgroup output"
+            assert has_content_event(events), "Expected cgroup output"
         finally:
             client.destroy_session(session_id)
 
@@ -90,11 +62,11 @@ class TestAgentInSandboxHostname:
         resp = client.create_session(placement="agent-sandbox")
         session_id = resp["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session_id,
                 "Run 'hostname' and tell me the exact output"
             )
-            assert _has_content_event(events), "Expected hostname from agent-sandbox"
+            assert has_content_event(events), "Expected hostname from agent-sandbox"
         finally:
             client.destroy_session(session_id)
 
@@ -107,11 +79,11 @@ class TestToolsSandboxHostname:
         resp = client.create_session(placement="tools-sandbox")
         session_id = resp["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session_id,
                 "Run the bash command 'hostname' and tell me what it returns"
             )
-            assert _has_content_event(events), "Expected hostname from tools-sandbox bash"
+            assert has_content_event(events), "Expected hostname from tools-sandbox bash"
         finally:
             client.destroy_session(session_id)
 
@@ -128,20 +100,20 @@ class TestSessionIsolation:
         session2 = resp2["session_id"]
 
         try:
-            events1 = _collect_events(
+            events1 = collect_events(
                 client, session1,
                 "Run 'hostname' and tell me only the hostname, nothing else"
             )
-            events2 = _collect_events(
+            events2 = collect_events(
                 client, session2,
                 "Run 'hostname' and tell me only the hostname, nothing else"
             )
 
-            assert _has_content_event(events1), "Expected hostname from session 1"
-            assert _has_content_event(events2), "Expected hostname from session 2"
+            assert has_content_event(events1), "Expected hostname from session 1"
+            assert has_content_event(events2), "Expected hostname from session 2"
 
-            hostname1 = _extract_text(events1).strip()
-            hostname2 = _extract_text(events2).strip()
+            hostname1 = extract_text(events1).strip()
+            hostname2 = extract_text(events2).strip()
 
             # Two sessions should have different hostnames (isolated sandboxes)
             assert hostname1 != hostname2, (

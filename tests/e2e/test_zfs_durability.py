@@ -11,6 +11,7 @@ import os
 import pytest
 
 from .client import FlexAgentClient
+from .helpers import collect_events, events_contain_text, extract_text, has_content_event
 
 
 pytestmark = [pytest.mark.real, pytest.mark.zfs, pytest.mark.timeout(300)]
@@ -20,24 +21,6 @@ def _skip_without_zfs():
     """Skip if ZFS backend is not configured."""
     if os.environ.get("SANDBOX_STORAGE_BACKEND", "").lower() != "zfs":
         pytest.skip("ZFS storage backend not configured")
-
-
-def _collect_events(client: FlexAgentClient, session_id: str, message: str) -> list[dict]:
-    return list(client.send_message(session_id, message))
-
-
-def _events_contain_text(events: list[dict], substring: str) -> bool:
-    for e in events:
-        for field in ("text", "content", "data", "output"):
-            val = e.get(field, "")
-            if isinstance(val, str) and substring in val:
-                return True
-    return False
-
-
-def _has_content_event(events: list[dict]) -> bool:
-    content_types = {"text", "text_delta", "content_block_delta", "message_start"}
-    return bool({e.get("type") for e in events} & content_types)
 
 
 class TestZFSWriteSnapshotClone:
@@ -51,11 +34,11 @@ class TestZFSWriteSnapshotClone:
         resp_a = client.create_session(placement="tools-sandbox")
         session_a = resp_a["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session_a,
                 "Write the text 'zfs-durability-test-data' to /workspace/persist.txt"
             )
-            assert _has_content_event(events), "Expected content events from write"
+            assert has_content_event(events), "Expected content events from write"
 
             # Snapshot session A
             snap = client.create_snapshot(session_a, "checkpoint-1")
@@ -70,12 +53,12 @@ class TestZFSWriteSnapshotClone:
         )
         session_b = resp_b["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session_b,
                 "Read /workspace/persist.txt and tell me its exact contents"
             )
-            assert _has_content_event(events), "Expected content events from read"
-            assert _events_contain_text(events, "zfs-durability-test-data"), (
+            assert has_content_event(events), "Expected content events from read"
+            assert events_contain_text(events, "zfs-durability-test-data"), (
                 "Expected cloned session to contain data from snapshot"
             )
         finally:
@@ -93,7 +76,7 @@ class TestZFSSnapshotRollback:
         session_id = resp["session_id"]
         try:
             # Write initial file
-            _collect_events(
+            collect_events(
                 client, session_id,
                 "Write 'before-snapshot' to /workspace/rollback-test.txt"
             )
@@ -102,17 +85,17 @@ class TestZFSSnapshotRollback:
             client.create_snapshot(session_id, "rollback-point")
 
             # Write more (overwrite)
-            _collect_events(
+            collect_events(
                 client, session_id,
                 "Write 'after-snapshot' to /workspace/rollback-test.txt"
             )
 
             # Verify overwrite took effect
-            events = _collect_events(
+            events = collect_events(
                 client, session_id,
                 "Read /workspace/rollback-test.txt and tell me its exact contents"
             )
-            assert _events_contain_text(events, "after-snapshot"), (
+            assert events_contain_text(events, "after-snapshot"), (
                 "Expected overwritten content before rollback"
             )
         finally:
@@ -125,11 +108,11 @@ class TestZFSSnapshotRollback:
         )
         session2 = resp2["session_id"]
         try:
-            events = _collect_events(
+            events = collect_events(
                 client, session2,
                 "Read /workspace/rollback-test.txt and tell me its exact contents"
             )
-            assert _events_contain_text(events, "before-snapshot"), (
+            assert events_contain_text(events, "before-snapshot"), (
                 "Expected snapshot state after rollback"
             )
         finally:
@@ -148,7 +131,7 @@ class TestZFSMultiTurnSnapshots:
         snapshots = []
         try:
             for i in range(3):
-                _collect_events(
+                collect_events(
                     client, session_id,
                     f"Write 'turn-{i}-data' to /workspace/turn-{i}.txt"
                 )
@@ -170,19 +153,19 @@ class TestZFSMultiTurnSnapshots:
         session2 = resp2["session_id"]
         try:
             # turn-0.txt and turn-1.txt should exist
-            events = _collect_events(
+            events = collect_events(
                 client, session2,
                 "Read /workspace/turn-1.txt and tell me its contents"
             )
-            assert _events_contain_text(events, "turn-1-data")
+            assert events_contain_text(events, "turn-1-data")
 
             # turn-2.txt should NOT exist (created after turn-1 snapshot)
-            events = _collect_events(
+            events = collect_events(
                 client, session2,
                 "Check if /workspace/turn-2.txt exists and tell me yes or no"
             )
             # The agent should report the file doesn't exist
-            assert _has_content_event(events)
+            assert has_content_event(events)
         finally:
             client.destroy_session(session2)
 
@@ -198,7 +181,7 @@ class TestZFSSessionPauseResume:
         session_id = resp["session_id"]
         try:
             # Write a file
-            _collect_events(
+            collect_events(
                 client, session_id,
                 "Write 'pause-resume-test' to /workspace/pause-test.txt"
             )
@@ -207,11 +190,11 @@ class TestZFSSessionPauseResume:
             client.resume_session(session_id)
 
             # Verify file still present
-            events = _collect_events(
+            events = collect_events(
                 client, session_id,
                 "Read /workspace/pause-test.txt and tell me its exact contents"
             )
-            assert _events_contain_text(events, "pause-resume-test"), (
+            assert events_contain_text(events, "pause-resume-test"), (
                 "Expected file to persist across pause/resume"
             )
         finally:
@@ -230,7 +213,7 @@ class TestZFSLargeFile:
         session_id = resp["session_id"]
         try:
             # Write a large file via bash (100MB of deterministic data)
-            _collect_events(
+            collect_events(
                 client, session_id,
                 "Run this bash command: dd if=/dev/urandom bs=1M count=100 | "
                 "base64 > /workspace/large-file.txt && "
@@ -238,11 +221,12 @@ class TestZFSLargeFile:
             )
 
             # Read the checksum
-            events_md5 = _collect_events(
+            events_md5 = collect_events(
                 client, session_id,
-                "Read /workspace/large-file.md5 and tell me the md5 hash"
+                "Run: cat /workspace/large-file.md5"
             )
-            assert _has_content_event(events_md5)
+            assert has_content_event(events_md5)
+            original_md5 = extract_text(events_md5)
 
             # Snapshot
             client.create_snapshot(session_id, "large-file-snap")
@@ -256,12 +240,23 @@ class TestZFSLargeFile:
         )
         session2 = resp2["session_id"]
         try:
-            events = _collect_events(
+            clone_events = collect_events(
                 client, session2,
-                "Run: md5sum /workspace/large-file.txt && cat /workspace/large-file.md5"
+                "Run: md5sum /workspace/large-file.txt"
             )
-            assert _has_content_event(events), (
+            assert has_content_event(clone_events), (
                 "Expected checksum output from cloned session"
+            )
+            clone_md5 = extract_text(clone_events)
+
+            # Compare the md5 hashes (first field of md5sum output)
+            original_hash = original_md5.split()[0] if original_md5.strip() else ""
+            clone_hash = clone_md5.split()[0] if clone_md5.strip() else ""
+            assert original_hash and clone_hash, (
+                f"Failed to extract md5 hashes: original='{original_md5}', clone='{clone_md5}'"
+            )
+            assert original_hash == clone_hash, (
+                f"Checksum mismatch after clone: original={original_hash}, clone={clone_hash}"
             )
         finally:
             client.destroy_session(session2)

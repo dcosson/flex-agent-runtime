@@ -14,6 +14,7 @@ import time
 import pytest
 
 from .client import FlexAgentClient
+from .helpers import has_content_event
 
 
 pytestmark = pytest.mark.timeout(120)
@@ -135,11 +136,6 @@ class TestSteer:
 # Real Tier Tests — require real LLM providers and infrastructure
 # ---------------------------------------------------------------------------
 
-def _has_content_event(events: list[dict]) -> bool:
-    content_types = {"text", "text_delta", "content_block_delta", "message_start"}
-    return bool({e.get("type") for e in events} & content_types)
-
-
 def _skip_without_key(env_var: str):
     if not os.environ.get(env_var):
         pytest.skip(f"{env_var} not set")
@@ -168,7 +164,7 @@ class TestRealC2ToolsSandbox:
             events = list(client.send_message(
                 session_id, "Write 'test' to /workspace/dm-test.txt"
             ))
-            assert _has_content_event(events), (
+            assert has_content_event(events), (
                 f"Expected content events from {provider}"
             )
         finally:
@@ -188,7 +184,7 @@ class TestRealC5AgentSandbox:
         try:
             events = list(client.send_message(session_id, "Say hello"))
             assert len(events) > 0
-            assert _has_content_event(events)
+            assert has_content_event(events)
         finally:
             client.destroy_session(session_id)
 
@@ -249,7 +245,7 @@ class TestRealC6Fleet:
                 events = list(client.send_message(
                     session_id, f"Echo 'sticky-test-{i}'"
                 ))
-                assert _has_content_event(events), f"Turn {i} should get content"
+                assert has_content_event(events), f"Turn {i} should get content"
         finally:
             client.destroy_session(session_id)
 

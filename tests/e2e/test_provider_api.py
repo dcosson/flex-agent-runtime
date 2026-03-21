@@ -11,6 +11,7 @@ import os
 import pytest
 
 from .client import ConnectStreamError, FlexAgentClient
+from .helpers import has_content_event
 
 
 pytestmark = [pytest.mark.real, pytest.mark.provider, pytest.mark.timeout(120)]
@@ -22,11 +23,6 @@ PROVIDERS = [
     ("google", "gemini-2.0-flash", "GOOGLE_API_KEY"),
     ("openrouter", "openrouter/auto", "OPENROUTER_API_KEY"),
 ]
-
-
-def _has_content_event(events: list[dict]) -> bool:
-    content_types = {"text", "text_delta", "content_block_delta", "message_start"}
-    return bool({e.get("type") for e in events} & content_types)
 
 
 def _skip_without_key(env_var: str):
@@ -132,7 +128,7 @@ class TestProviderToolUse:
                 "Create a file called /workspace/tool-test.txt containing 'tool-use-verified'"
             ))
             assert len(events) > 0
-            assert _has_content_event(events), (
+            assert has_content_event(events), (
                 f"Expected content events from {provider} tool use"
             )
         finally:
@@ -143,15 +139,41 @@ class TestProviderAuthFailure:
     """PA-5: Auth failure — invalid API key produces clean error."""
 
     def test_invalid_api_key(self, local_orchestrator: FlexAgentClient):
-        # This test verifies the system handles auth failures gracefully.
-        # The exact behavior depends on provider configuration — it should
-        # produce an error event, not crash.
-        resp = local_orchestrator.create_session(placement="tools-sandbox")
-        session_id = resp["session_id"]
+        """Verify that an invalid provider produces a clean error, not a crash."""
+        # Use a bogus provider name to trigger an error at session creation
+        # or message send time. The system should return an error, not crash.
         try:
-            # The session was created with valid config; auth failure would
-            # occur at the provider level. This is a placeholder for when
-            # per-session credential override is supported.
-            pass
-        finally:
-            local_orchestrator.destroy_session(session_id)
+            resp = local_orchestrator.create_session(
+                placement="tools-sandbox",
+                provider="nonexistent-provider",
+                model="fake-model",
+            )
+            session_id = resp.get("session_id")
+            if session_id:
+                # Session was created; try sending a message — should get
+                # an error event or ConnectStreamError, not a crash
+                try:
+                    events = list(local_orchestrator.send_message(
+                        session_id, "Say hello"
+                    ))
+                    # If we get events, check they include an error indicator
+                    event_types = {e.get("type") for e in events}
+                    has_error = any(
+                        "error" in str(e).lower() for e in events
+                    ) or "error" in event_types
+                    assert has_error or has_content_event(events), (
+                        "Expected either error or content events from invalid provider"
+                    )
+                except ConnectStreamError:
+                    pass  # Clean error — this is the expected path
+                finally:
+                    try:
+                        local_orchestrator.destroy_session(session_id)
+                    except Exception:
+                        pass
+        except Exception as e:
+            # Session creation itself failed — that's also acceptable
+            # as long as it's a clean HTTP error, not a crash
+            assert "500" not in str(e) or "Internal Server Error" not in str(e), (
+                f"Expected clean error for invalid provider, got server crash: {e}"
+            )
