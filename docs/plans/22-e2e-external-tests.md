@@ -394,100 +394,145 @@ Port allocation uses a deterministic scheme per test tier to avoid conflicts:
 
 | Tier | Orchestrator Port | Sandbox-Host Ports | Stubserver Port |
 |------|-------------------|--------------------|-----------------|
-| E2E-Fast | 18080 | 18082 | 19090 |
-| E2E-Standard | 28080 | 28082, 28083 | 29090 |
-| E2E-Provider | 38080 | 38082 | N/A (real providers) |
-| E2E-Infra | 48080 | 48082, 48083 | 49090 |
+| Mock | 18080 | 18082, 18083 | 19090 |
+| Real | 28080 | 28082, 28083 | N/A (real providers) |
 
-This allows parallel tier execution without port conflicts.
+This allows the two tiers to run without port conflicts if needed.
 
 ---
 
-## 4. Deployment Mode Tests
+## 4. Deployment Dimension Test Matrix
 
-These tests verify that each orchestrator deployment configuration works end-to-end.
+Tests are organized around the four deployment dimensions from the README. Each test exercises a specific combination of these dimensions.
 
-### 4.1 Local Mode (sandbox-host on localhost)
+### 4.1 The Four Dimensions
 
-The simplest deployment: orchestrator + sandbox-host on the same machine. Both `tools-sandbox` and `agent-sandbox` placement modes are available.
+| # | Dimension | Values | What It Determines |
+|---|-----------|--------|--------------------|
+| 1 | **Agent Loop Placement** | Orchestrator, Remote | Where the agent loop process runs |
+| 2 | **Tools Placement** | Co-located, Sandbox | Where tool execution happens |
+| 3 | **Agent Type** | Native, Terminal (Claude Code, Codex) | What drives the agent loop |
+| 4 | **Execution Environment** | Bare instance, gVisor (+ZFS), E2B, Daytona, Fly | Isolation level for the host |
+
+### 4.2 Test Configuration Matrix
+
+Each row is a tested combination. The **Tier** column indicates which test tier covers it.
+
+| Config ID | Agent Loop | Tools | Agent Type | Exec Env | Tier | Infra Setup |
+|-----------|-----------|-------|------------|----------|------|-------------|
+| **C1** | Orchestrator | Co-located | Native | Bare | Mock | `serve orchestrator` only (dev/local mode) |
+| **C2** | Orchestrator | Sandbox | Native | gVisor | Mock + Real | `serve orchestrator` + `serve sandbox-host` (tools-sandbox) |
+| **C3** | Remote | Co-located | Terminal (Claude Code) | Bare | Real | `serve orchestrator --direct-host-addr` + EC2/local agent |
+| **C4** | Remote | Co-located | Terminal (Codex) | Bare | Real | Same as C3, different agent binary |
+| **C5** | Remote | Co-located | Terminal | gVisor | Real | `serve orchestrator` + `serve sandbox-host` (agent-sandbox) |
+| **C6** | Orchestrator | Sandbox | Native | gVisor (fleet) | Real | `serve orchestrator --sandbox-host-addr h1,h2` + 2× sandbox-host |
+
+### 4.3 Mock Tier Tests (CI — stubserver LLM)
+
+These tests use the stubserver as the LLM backend. They verify orchestrator wiring, RPC transport, session lifecycle, and tool dispatch — but **not** real LLM behavior, real EC2 provisioning, real ZFS durability, or real agent binaries.
+
+**What the mock tier covers:**
+- ConnectRPC transport: request/response serialization, streaming, auth headers
+- Session lifecycle: create, send message, get events, destroy
+- Health monitoring and error reporting
+- Tools-sandbox dispatch: file ops, bash, grep/glob via sandbox-host RPC
+- Multi-session concurrency on a single orchestrator
+- Orchestrator restart resilience (sandbox-host stays up)
+
+**What the mock tier does NOT cover (real tier only):**
+- Real LLM provider API calls (Anthropic, OpenAI, Google, OpenRouter)
+- Real EC2 instance provisioning and SSH connectivity
+- ZFS snapshot/clone/rollback durability
+- Terminal agent binaries (Claude Code, Codex)
+- Fleet routing across multiple physical hosts
+- Cross-runtime context transfer via ZFS snapshots
+- gVisor container isolation verification
+- Remote agent process lifecycle
 
 ```
-Setup:
-  1. Start sandbox-host on :8082
-  2. Start orchestrator with --sandbox-host-addr localhost:8082
+Configs tested: C1, C2
+
+Setup (C1 — dev/local):
+  1. Start orchestrator in dev mode (no sandbox-host)
+  2. Wait for /health
+
+Setup (C2 — tools-sandbox):
+  1. Start sandbox-host
+  2. Start orchestrator with --sandbox-host-addr localhost:<port>
   3. Wait for /health on both
 
 Tests:
-  DM-L1: Create session (tools-sandbox) -> send message -> get events -> destroy
-  DM-L2: Create session (agent-sandbox) -> send message -> get events -> destroy
-  DM-L3: Multiple concurrent sessions on same orchestrator
-  DM-L4: Session survives orchestrator restart (if sandbox-host stays up)
-  DM-L5: Health check returns healthy when sandbox-host is up
-  DM-L6: Health check reflects unhealthy when sandbox-host is down
+  DM-M1: Create session (C1, dev/local) -> send message -> get events -> destroy
+  DM-M2: Create session (C2, tools-sandbox) -> send message -> get events -> destroy
+  DM-M3: File write via tools-sandbox -> read back -> verify contents
+  DM-M4: Bash command via tools-sandbox -> verify output
+  DM-M5: Multiple concurrent sessions on same orchestrator
+  DM-M6: Session survives orchestrator restart (if sandbox-host stays up)
+  DM-M7: Health check returns healthy when sandbox-host is up
+  DM-M8: Health check reflects unhealthy when sandbox-host is down
 ```
 
-### 4.2 EC2 Direct Mode
+### 4.4 Real Tier Tests (Local machine — real providers, real infra)
 
-The orchestrator connects to a pre-existing host running `flexagent serve agent`. Uses `--direct-host-addr`.
+These tests use real LLM providers, real infrastructure, and real agent binaries. They run on a developer's local machine (or dedicated test host), not in CI.
 
 ```
-Prerequisites:
-  - EC2 instance running flexagent serve agent (or mock equivalent)
-  - Instance reachable from test machine
+Configs tested: C2 (real LLM), C3, C4, C5, C6
 
+--- C2 with real LLM providers ---
 Setup:
-  1. Start orchestrator with --direct-host-addr <host>:<port>
-  2. Wait for /health
+  1. Start sandbox-host with gVisor + ZFS
+  2. Start orchestrator with real provider credentials
 
 Tests:
-  DM-D1: Create session (agent-direct) -> send message -> get events -> destroy
-  DM-D2: Verify agent runs on remote host (hostname check)
-  DM-D3: Multiple sessions on same direct host
-  DM-D4: Session cleanup on destroy (verify no leaked processes)
-```
+  DM-R1: Create session (tools-sandbox) -> send real coding task -> verify tool use
+  DM-R2: Same with each provider (Anthropic, OpenAI, Google, OpenRouter)
+  DM-R3: Verify usage/cost tracking in session metadata
 
-For CI without real EC2 instances, we can use a local `flexagent serve agent` process as the "direct host" by pointing `--direct-host-addr` at it.
-
-### 4.3 EC2 Fleet Mode
-
-The orchestrator manages multiple sandbox-hosts and routes sessions across them.
-
-```
-Prerequisites:
-  - Multiple sandbox-host instances (or local processes on different ports)
-
+--- C3/C4: Remote terminal agents (agent-direct) ---
 Setup:
-  1. Start sandbox-host on :8082 and :8083
-  2. Start orchestrator with --sandbox-host-addr localhost:8082,localhost:8083
-  3. Wait for /health on all
+  1. Start remote host running `flexagent serve agent` (EC2 or local)
+  2. Start orchestrator with --direct-host-addr <host>:<port>
 
 Tests:
-  DM-F1: Create sessions distributed across fleet members
-  DM-F2: Verify routing -- sessions stick to their assigned host
-  DM-F3: Fleet health reflects individual host status
-  DM-F4: Session creation fails gracefully when all hosts are full
-  DM-F5: Fleet handles host going down (health monitoring)
+  DM-R4: Create session (agent-direct, Claude Code) -> send message -> get events
+  DM-R5: Create session (agent-direct, Codex) -> send message -> get events
+  DM-R6: Verify agent runs on remote host (hostname check)
+  DM-R7: Multiple sessions on same direct host
+  DM-R8: Session cleanup on destroy (no leaked processes)
+
+--- C5: Agent-in-sandbox (gVisor) ---
+Setup:
+  1. Start sandbox-host with gVisor + ZFS
+  2. Start orchestrator with sandbox-host-addr
+
+Tests:
+  DM-R9: Create session (agent-sandbox) -> send message -> get events
+  DM-R10: Verify agent process runs inside gVisor container (PID namespace)
+  DM-R11: Multiple agent-sandbox sessions are isolated from each other
+
+--- C6: Fleet mode ---
+Setup:
+  1. Start 2 sandbox-hosts on different ports
+  2. Start orchestrator with --sandbox-host-addr h1,h2
+
+Tests:
+  DM-R12: Sessions distributed across fleet members
+  DM-R13: Sessions stick to assigned host
+  DM-R14: Fleet health reflects individual host status
+  DM-R15: Session creation fails gracefully when all hosts full
+  DM-R16: Fleet handles host going down
 ```
-
-### 4.4 Deployment Mode Test Matrix
-
-| Test | Local | EC2 Direct | EC2 Fleet | CI Feasible |
-|------|:---:|:---:|:---:|:---:|
-| Session lifecycle (create/message/destroy) | Yes | Yes | Yes | All |
-| Health monitoring | Yes | Yes | Yes | All |
-| Multi-session | Yes | Yes | Yes | All |
-| Host failure handling | N/A | N/A | Yes | Yes (kill process) |
-| Real EC2 provisioning | No | Yes | No | Nightly only |
 
 ---
 
 ## 5. Sandbox Configuration Tests
 
-These tests verify that both sandbox placement modes work correctly.
+These tests verify tool dispatch behavior across the **Tools Placement** dimension (co-located vs sandbox).
 
-### 5.1 Tools-in-Sandbox
+### 5.1 Tools-in-Sandbox (Dimension 2: Sandbox)
 
-Agent loop runs in orchestrator process; tool calls dispatch to sandbox-host via RPC.
+Agent loop runs in orchestrator process; tool calls dispatch to sandbox-host via RPC. Corresponds to configs C2/C6 from §4.2.
 
 ```
 SC-T1: File operations (read, write, edit) execute on sandbox-host filesystem
@@ -498,9 +543,11 @@ SC-T5: Agent can create and read files across multiple turns
 SC-T6: File edits persist within the session
 ```
 
-### 5.2 Agent-in-Sandbox
+**Tier:** Mock (SC-T1 through SC-T6 use stubserver) + Real (with real LLM for DM-R1/R2)
 
-Agent process runs inside a sandbox on the sandbox-host. All tools run locally inside the sandbox.
+### 5.2 Agent-in-Sandbox (Dimension 1: Remote + Dimension 4: gVisor)
+
+Agent process runs inside a gVisor sandbox on the sandbox-host. All tools run locally inside the sandbox. Corresponds to config C5 from §4.2.
 
 ```
 SC-A1: Agent session creates and runs inside sandbox
@@ -510,6 +557,8 @@ SC-A4: Agent session cleanup destroys sandbox on destroy
 SC-A5: Multiple agent-in-sandbox sessions are isolated from each other
 ```
 
+**Tier:** Real only (requires gVisor + real agent binary)
+
 ### 5.3 Mixed Mode
 
 ```
@@ -517,12 +566,15 @@ SC-M1: Same orchestrator serves both tools-sandbox and agent-sandbox sessions co
 SC-M2: Sessions in different modes don't interfere with each other
 ```
 
+**Tier:** Real only (agent-sandbox requires real agent binary)
+
 ---
 
 ## 6. ZFS Durability Tests
 
-These tests verify data persistence across agent lifecycles using ZFS.
+These tests verify data persistence across agent lifecycles using ZFS. Exercises Dimension 4 (Execution Environment: gVisor+ZFS).
 
+**Tier:** Real only
 **Prerequisite:** Sandbox-host configured with ZFS storage backend (`SANDBOX_STORAGE_BACKEND=zfs`).
 
 ```
@@ -580,7 +632,9 @@ sequenceDiagram
 
 ## 7. Sandbox Identity Verification
 
-These tests verify agents are running in the correct sandbox environment.
+These tests verify agents are running in the correct sandbox environment. Exercises Dimension 4 (gVisor isolation).
+
+**Tier:** Real only
 
 ```
 SI-1: Agent reads hostname -> verify it matches sandbox ID or container hostname
@@ -602,7 +656,9 @@ SI-5: Two concurrent sessions report different hostnames
 
 ## 8. Multi-Runtime Tests
 
-These tests verify interop between different agent driver types.
+These tests verify interop between different agent driver types. Exercises Dimension 3 (Agent Type: Terminal agents).
+
+**Tier:** Real only
 
 ### 8.1 Claude Code Sandbox
 
@@ -655,6 +711,8 @@ MR-RP3: Verify provider selection based on session config
 ## 9. Real LLM Provider API Tests
 
 A focused test suite that exercises real provider API endpoints. These are **not** full agent tests -- they test provider connectivity, auth, and basic streaming at the API level.
+
+**Tier:** Real only
 
 ### 9.1 Provider Test Matrix
 
@@ -800,14 +858,12 @@ def require_credential(key: str):
 
 ### 11.1 Test Tiers
 
-| Tier | What | Prerequisites | Duration | When |
-|------|------|---------------|----------|------|
-| **E2E-Fast** | Local mode only, stubserver LLM | `flexagent` binary | <2min | Every PR |
-| **E2E-Standard** | Local + fleet modes, stubserver LLM | `flexagent` binary, multiple ports | <5min | Every PR |
-| **E2E-Provider** | Real LLM provider API tests | API keys | <5min | Nightly |
-| **E2E-Infra** | EC2 direct/fleet, ZFS durability, multi-runtime | AWS credentials, ZFS, EC2 instances | <20min | Nightly |
+| Tier | What | Prerequisites | Duration | Where |
+|------|------|---------------|----------|-------|
+| **Mock** | Configs C1+C2 with stubserver LLM. Verifies orchestrator wiring, RPC transport, session lifecycle, tool dispatch. | `flexagent` + `stubserver` binaries | <5min | CI (every PR) |
+| **Real** | All configs (C1-C6) with real LLM providers, real EC2/gVisor/ZFS, real agent binaries. Verifies full end-to-end behavior. | Real infrastructure, API keys, agent binaries, ZFS | <30min | Local machine only (no CI setup) |
 
-### 11.2 CI Workflow
+### 11.2 CI Workflow (Mock tier only)
 
 ```yaml
 # .github/workflows/e2e-external.yml
@@ -815,11 +871,9 @@ name: E2E External Tests
 
 on:
   pull_request:
-  schedule:
-    - cron: '0 4 * * *'  # Nightly at 4 AM UTC
 
 jobs:
-  build-binary:
+  build-binaries:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -835,10 +889,10 @@ jobs:
             flexagent
             stubserver
 
-  e2e-fast:
-    name: "E2E-Fast: Local mode + stubserver"
+  e2e-mock:
+    name: "E2E Mock: stubserver + local orchestrator"
     runs-on: ubuntu-latest
-    needs: build-binary
+    needs: build-binaries
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -846,50 +900,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: flexagent-binaries }
       - run: chmod +x flexagent stubserver && pip install -r tests/e2e/requirements.txt
-      - run: pytest tests/e2e/ -m "not provider and not infra" -v --timeout=120
+      - run: pytest tests/e2e/ -m "not real" -v --timeout=120
         env:
           FLEXAGENT_BINARY: ./flexagent
           STUBSERVER_BINARY: ./stubserver
           FLEXAGENT_AUTH_TOKEN: test-token
+```
 
-  e2e-provider:
-    name: "E2E-Provider: Real LLM APIs"
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
-    needs: build-binary
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.12' }
-      - uses: actions/download-artifact@v4
-        with: { name: flexagent-binaries }
-      - run: chmod +x flexagent && pip install -r tests/e2e/requirements.txt
-      - run: pytest tests/e2e/test_provider_api.py -v --timeout=120
-        env:
-          FLEXAGENT_BINARY: ./flexagent
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+The **Real** tier has no CI workflow. It is run manually on a local machine or dedicated test host that has the required infrastructure (ZFS, gVisor, agent binaries, provider API keys, EC2 access):
 
-  e2e-infra:
-    name: "E2E-Infra: EC2 + ZFS + multi-runtime"
-    runs-on: [self-hosted, linux, zfs]
-    if: github.event_name == 'schedule'
-    needs: build-binary
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.12' }
-      - uses: actions/download-artifact@v4
-        with: { name: flexagent-binaries }
-      - run: chmod +x flexagent && pip install -r tests/e2e/requirements.txt
-      - run: pytest tests/e2e/ -m "infra" -v --timeout=600
-        env:
-          FLEXAGENT_BINARY: ./flexagent
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+```bash
+# Run all real tier tests locally
+pytest tests/e2e/ -m "real" -v --timeout=600
 ```
 
 ### 11.3 Pytest Markers
@@ -899,11 +921,11 @@ jobs:
 import pytest
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "provider: requires real LLM provider API key")
-    config.addinivalue_line("markers", "infra: requires EC2/ZFS infrastructure")
+    config.addinivalue_line("markers", "real: requires real infrastructure (not run in CI)")
     config.addinivalue_line("markers", "zfs: requires ZFS storage backend")
     config.addinivalue_line("markers", "fleet: requires multiple sandbox-hosts")
     config.addinivalue_line("markers", "multi_runtime: requires Claude Code or Codex binary")
+    config.addinivalue_line("markers", "provider: requires real LLM provider API key")
 ```
 
 ---
@@ -923,15 +945,15 @@ def flexagent_binary():
 @pytest.fixture(scope="module")
 def local_orchestrator(flexagent_binary):
     """Start orchestrator + sandbox-host in local mode for the test module.
-    Uses E2E-Fast tier ports (18080/18082) to avoid conflicts."""
+    Uses Mock tier ports (18080/18082)."""
     pm = ProcessManager(flexagent_binary)
     auth_token = os.environ.get("FLEXAGENT_AUTH_TOKEN", "test-token")
 
-    # Start sandbox-host on E2E-Fast port
+    # Start sandbox-host on Mock tier port
     pm.start_sandbox_host(listen=":18082", FLEXAGENT_AUTH_TOKEN=auth_token)
     wait_for_health("http://localhost:18082/health")
 
-    # Start orchestrator on E2E-Fast port
+    # Start orchestrator on Mock tier port
     pm.start_orchestrator(
         listen=":18080",
         sandbox_host_addr="localhost:18082",
@@ -947,7 +969,7 @@ def local_orchestrator(flexagent_binary):
 @pytest.fixture(scope="module")
 def fleet_orchestrator(flexagent_binary):
     """Start orchestrator + 2 sandbox-hosts in fleet mode.
-    Uses E2E-Standard tier ports (28080/28082/28083) to avoid conflicts."""
+    Uses Real tier ports (28080/28082/28083). Real tier only."""
     pm = ProcessManager(flexagent_binary)
     auth_token = os.environ.get("FLEXAGENT_AUTH_TOKEN", "test-token")
 
@@ -989,7 +1011,7 @@ For tests that don't need real LLM providers, the test driver starts the stubser
 @pytest.fixture(scope="module")
 def stubserver_orchestrator(flexagent_binary):
     """Orchestrator with stubserver as LLM backend.
-    Uses E2E-Fast tier ports to avoid conflicts."""
+    Uses Mock tier ports."""
     pm = ProcessManager(flexagent_binary)
     auth_token = "test-token"
 
@@ -1024,16 +1046,16 @@ def stubserver_orchestrator(flexagent_binary):
 
 | Criterion | Target | How Measured |
 |-----------|--------|-------------|
-| E2E-Fast pass rate | 100% on every PR | CI status check |
-| E2E-Fast runtime | <2 minutes | CI job duration |
-| E2E-Standard pass rate | 100% on every PR | CI status check |
-| Deployment mode coverage | All 3 modes tested | Test count per mode |
-| Sandbox config coverage | tools-sandbox + agent-sandbox | Test count per config |
-| Provider API coverage | All 4 providers pass basic tests | Provider test results |
-| ZFS durability | Write/snapshot/clone/read verified | ZFS test assertions |
-| Multi-runtime | At least 2 driver types tested | Multi-runtime test count |
+| Mock tier pass rate | 100% on every PR | CI status check |
+| Mock tier runtime | <5 minutes | CI job duration |
+| Mock tier configs covered | C1 + C2 from §4.2 | Test count per config |
+| Real tier configs covered | C1-C6 from §4.2 | Test count per config (local run) |
+| Deployment dimension coverage | All 4 dimensions exercised | Dimension × value coverage matrix |
+| Provider API coverage | All 4 providers pass basic tests | Provider test results (real tier) |
+| ZFS durability | Write/snapshot/clone/read verified | ZFS test assertions (real tier) |
+| Multi-runtime | At least 2 driver types tested | Multi-runtime test count (real tier) |
 | Credential management | No hardcoded secrets in code | Grep for API keys in committed files |
-| CI integration | All tiers defined and runnable | Workflow file exists and parses |
+| CI integration | Mock tier workflow defined and passing | Workflow file exists and parses |
 
 ---
 
@@ -1041,25 +1063,19 @@ def stubserver_orchestrator(flexagent_binary):
 
 ```mermaid
 graph LR
-    A[Phase 1<br/>Python client +<br/>process manager +<br/>credential manager] --> B[Phase 2<br/>Local mode tests +<br/>sandbox config tests]
-    B --> C[Phase 3<br/>Fleet mode tests +<br/>ZFS durability]
-    C --> D[Phase 4<br/>Provider API tests +<br/>multi-runtime tests]
-    D --> E[Phase 5<br/>CI workflow +<br/>EC2 infra tests]
+    A[Phase 1<br/>Python client +<br/>process manager +<br/>credential manager] --> B[Phase 2<br/>Mock tier tests<br/>CI workflow]
+    B --> C[Phase 3<br/>Real tier tests<br/>all configs]
 
     style A fill:#e8f5e9
     style B fill:#e8f5e9
     style C fill:#fff3e0
-    style D fill:#fff3e0
-    style E fill:#fce4ec
 ```
 
 | Phase | Work | Depends On |
 |-------|------|------------|
-| **Phase 1** | `client.py`, `process.py`, `credentials.py`, `conftest.py`, `requirements.txt` | `flexagent` binary builds |
-| **Phase 2** | `test_deployment_modes.py` (local), `test_sandbox_config.py` | Phase 1, stubserver binary |
-| **Phase 3** | `test_deployment_modes.py` (fleet), `test_zfs_durability.py` | Phase 2, ZFS-enabled sandbox-host |
-| **Phase 4** | `test_provider_api.py`, `test_multi_runtime.py`, `test_sandbox_identity.py` | Phase 2, API keys, Claude Code/Codex binaries |
-| **Phase 5** | `.github/workflows/e2e-external.yml`, EC2 direct mode tests | Phase 3-4, AWS infrastructure |
+| **Phase 1** | `client.py`, `process.py`, `credentials.py`, `conftest.py`, `requirements.txt` | `flexagent` + `stubserver` binaries build |
+| **Phase 2** | Mock tier: `test_deployment_modes.py` (C1+C2), `test_sandbox_config.py` (tools-sandbox), `.github/workflows/e2e-external.yml` | Phase 1 |
+| **Phase 3** | Real tier: fleet mode (C6), ZFS durability, agent-direct (C3/C4), agent-sandbox (C5), provider API tests, multi-runtime, sandbox identity | Phase 2, real infrastructure |
 
 ---
 
@@ -1072,8 +1088,8 @@ graph LR
 | **LLM backend** | ScriptedProvider / stubserver | Stubserver / real providers |
 | **Deployment** | In-process or Docker | Real processes (`flexagent serve`) |
 | **Focus** | Agent loop correctness, cross-mode parity | Deployment correctness, infra integration |
-| **Speed** | <30s (Tier 1) | <2min (E2E-Fast) |
-| **CI** | Every PR (all tiers) | Every PR (fast), nightly (full) |
+| **Speed** | <30s (Tier 1) | <5min (Mock tier) |
+| **CI** | Every PR (all tiers) | Every PR (Mock tier only); Real tier local-only |
 
 The two plans are complementary. Plan 17 catches bugs in the agent loop and tool execution logic with fast, deterministic tests. Plan 22 catches deployment, wiring, credential, and infrastructure integration bugs that only surface when running real processes over the network.
 
