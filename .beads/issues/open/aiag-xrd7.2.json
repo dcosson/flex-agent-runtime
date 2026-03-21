@@ -1,0 +1,33 @@
+{
+  "id": "aiag-xrd7.2",
+  "title": "Phase 2: Mock tier tests + CI workflow",
+  "description": "Implement mock tier tests using stubserver LLM backend (Plan 22 §4.3, §5.1, §11):\n\n- tests/e2e/test_deployment_modes.py — Mock tier tests DM-M1 through DM-M8 for configs C1 and C2\n- tests/e2e/test_sandbox_config.py — Tools-in-sandbox tests (§5.1)\n- .github/workflows/e2e-external.yml — CI workflow running mock tier on every PR\n- Stubserver fixture integration (§12.2)\n\nTests use stubserver as LLM backend. Verify orchestrator wiring, RPC transport, session lifecycle, tool dispatch, health monitoring. Port scheme: orchestrator 18080, sandbox-host 18082/18083, stubserver 19090.\n\nReferences: docs/plans/22-e2e-external-tests.md §4.3, §5.1, §11, §12.2",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "aiag-xrd7",
+  "dependencies": [
+    {
+      "id": "aiag-xrd7",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-xrd7.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "aiag-xrd7.3",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=22-e2e-external-tests"
+  ],
+  "created_at": "2026-03-20T20:46:49.225358-07:00",
+  "updated_at": "2026-03-20T20:46:49.225358-07:00"
+}

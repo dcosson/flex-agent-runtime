@@ -1,0 +1,30 @@
+{
+  "id": "aiag-xrd7",
+  "title": "E2E External Tests Implementation",
+  "description": "Implement Plan 22: automated end-to-end external testing. Python driver script exercising the system via RPC API across all deployment modes. 3 phases: foundation, mock tier (CI), real tier (local).",
+  "status": "open",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "aiag-xrd7.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-xrd7.2",
+      "type": "parent-child"
+    },
+    {
+      "id": "aiag-xrd7.3",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=22-e2e-external-tests"
+  ],
+  "created_at": "2026-03-20T20:46:30.818602-07:00",
+  "updated_at": "2026-03-20T20:46:30.818602-07:00"
+}
