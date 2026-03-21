@@ -1,0 +1,22 @@
+{
+  "id": "aiag-4av5",
+  "title": "Phase 3: Real tier tests — providers, ZFS, multi-runtime",
+  "description": "Real tier tests with real LLM providers and infrastructure (Plan 22 §4.4, §5.2-5.3, §6-9). Configs C1-C6, ZFS durability, multi-runtime, provider API tests. Local machine only.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "dependencies": [
+    {
+      "id": "aiag-x1nn",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=flex-agent-runtime",
+    "plan-doc=22-e2e-external-tests"
+  ],
+  "created_at": "2026-03-20T20:53:25.151321-07:00",
+  "updated_at": "2026-03-20T20:53:25.151321-07:00"
+}
