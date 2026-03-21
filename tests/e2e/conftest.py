@@ -11,6 +11,7 @@ Provides:
 
 import os
 import shutil
+import tempfile
 
 import pytest
 import requests
@@ -48,16 +49,35 @@ def credential_manager():
 
 # --- Module-scoped orchestrator fixtures ---
 
+def _sandbox_host_kwargs() -> dict:
+    """Return kwargs for sandbox-host in local-disk/no-container mode (CI-safe)."""
+    sessions_dir = os.environ.get(
+        "E2E_SESSIONS_ROOT_DIR",
+        os.path.join(tempfile.gettempdir(), "flexagent-e2e-sessions"),
+    )
+    os.makedirs(sessions_dir, exist_ok=True)
+    return {
+        "storage_backend": "local-disk",
+        "container_runtime": "none",
+        "sessions_root_dir": sessions_dir,
+    }
+
+
 @pytest.fixture(scope="module")
 def local_orchestrator(flexagent_binary):
     """Start orchestrator + sandbox-host in local mode.
 
-    Uses Mock tier ports (18080/18082).
+    Uses Mock tier ports (18080/18082). Sandbox-host runs in local-disk
+    mode with no container runtime (CI-safe, no ZFS/gVisor required).
     """
     pm = ProcessManager(flexagent_binary)
     auth_token = os.environ.get("FLEXAGENT_AUTH_TOKEN", "test-token")
 
-    pm.start_sandbox_host(listen=":18082", FLEXAGENT_AUTH_TOKEN=auth_token)
+    pm.start_sandbox_host(
+        listen=":18082",
+        env={"SANDBOX_AUTH_TOKEN": auth_token},
+        **_sandbox_host_kwargs(),
+    )
     wait_for_health("http://localhost:18082/health")
 
     pm.start_orchestrator(
@@ -82,8 +102,16 @@ def fleet_orchestrator(flexagent_binary):
     pm = ProcessManager(flexagent_binary)
     auth_token = os.environ.get("FLEXAGENT_AUTH_TOKEN", "test-token")
 
-    pm.start_sandbox_host(listen=":28082", FLEXAGENT_AUTH_TOKEN=auth_token)
-    pm.start_sandbox_host(listen=":28083", FLEXAGENT_AUTH_TOKEN=auth_token)
+    pm.start_sandbox_host(
+        listen=":28082",
+        env={"SANDBOX_AUTH_TOKEN": auth_token},
+        **_sandbox_host_kwargs(),
+    )
+    pm.start_sandbox_host(
+        listen=":28083",
+        env={"SANDBOX_AUTH_TOKEN": auth_token},
+        **_sandbox_host_kwargs(),
+    )
     wait_for_health("http://localhost:28082/health")
     wait_for_health("http://localhost:28083/health")
 
@@ -104,7 +132,8 @@ def fleet_orchestrator(flexagent_binary):
 def stubserver_orchestrator(flexagent_binary):
     """Orchestrator with stubserver as LLM backend.
 
-    Uses Mock tier ports (18080/18082/19090).
+    Uses Mock tier ports (18080/18082/19090). Sandbox-host runs in local-disk
+    mode with no container runtime (CI-safe).
     """
     pm = ProcessManager(flexagent_binary)
     auth_token = "test-token"
@@ -112,7 +141,11 @@ def stubserver_orchestrator(flexagent_binary):
     pm.start_stubserver(listen=":19090")
     wait_for_health("http://localhost:19090/health")
 
-    pm.start_sandbox_host(listen=":18082", FLEXAGENT_AUTH_TOKEN=auth_token)
+    pm.start_sandbox_host(
+        listen=":18082",
+        env={"SANDBOX_AUTH_TOKEN": auth_token},
+        **_sandbox_host_kwargs(),
+    )
     wait_for_health("http://localhost:18082/health")
 
     pm.start_orchestrator(
@@ -138,13 +171,10 @@ def stubserver_orchestrator(flexagent_binary):
 def cleanup_leaked_sessions(request):
     """Sweep and destroy any leaked sessions after all tests in a module.
 
-    This fixture depends on whichever orchestrator fixture is active for the
-    module. It runs before orchestrator teardown (reverse dependency order).
-    Handles connection errors gracefully — the orchestrator may already be
-    shutting down if a prior fixture failed.
+    Runs before orchestrator teardown (reverse dependency order).
+    Handles connection errors gracefully.
     """
     yield
-    # Try to find the active orchestrator client from the module's fixtures
     for fixture_name in ("local_orchestrator", "fleet_orchestrator", "stubserver_orchestrator"):
         client = request.getfixturevalue(fixture_name) if fixture_name in request.fixturenames else None
         if client is not None:
@@ -156,7 +186,7 @@ def cleanup_leaked_sessions(request):
                     except Exception:
                         pass
             except (requests.ConnectionError, requests.Timeout):
-                pass  # orchestrator already gone
+                pass
             except Exception:
                 pass
             break

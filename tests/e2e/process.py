@@ -30,8 +30,13 @@ class ProcessManager:
         self.stop_all()
         sys.exit(128 + signum)
 
-    def start_sandbox_host(self, listen: str = ":8082", **env) -> subprocess.Popen:
-        return self._start(["serve", "sandbox-host", "--listen", listen], env)
+    def start_sandbox_host(
+        self, listen: str = ":8082", env: dict | None = None, **kwargs
+    ) -> subprocess.Popen:
+        args = ["serve", "sandbox-host", "--listen", listen]
+        for k, v in kwargs.items():
+            args.extend([f"--{k.replace('_', '-')}", str(v)])
+        return self._start(args, env or {})
 
     def start_orchestrator(
         self, listen: str = ":8080", env: dict | None = None, **kwargs
