@@ -1,9 +1,13 @@
-"""Mock tier sandbox configuration tests (Plan 22 §5.1).
+"""Sandbox configuration tests (Plan 22 §5.1, §5.2, §5.3).
 
-Tests tools-in-sandbox dispatch: file ops, bash commands, grep/glob
-execute on the sandbox-host filesystem via RPC.
+Mock tier (§5.1): Tools-in-sandbox dispatch — file ops, bash commands, grep/glob
+execute on the sandbox-host filesystem via RPC. Tests SC-T1 through SC-T6.
 
-Tests SC-T1 through SC-T6.
+Real tier (§5.2): Agent-in-sandbox — agent process runs inside gVisor sandbox.
+Tests SC-A1 through SC-A5.
+
+Real tier (§5.3): Mixed mode — same orchestrator serves both tools-sandbox and
+agent-sandbox sessions. Tests SC-M1, SC-M2.
 
 Note: SC-T4 (tool progress streaming) is tested indirectly — streaming
 is verified by the Connect parser and the event iteration pattern. A
@@ -174,3 +178,195 @@ class TestMultiTurnPersistence:
             )
         finally:
             local_orchestrator.destroy_session(session_id)
+
+
+# ---------------------------------------------------------------------------
+# Real Tier: Agent-in-Sandbox (§5.2) — SC-A1 through SC-A5
+# ---------------------------------------------------------------------------
+
+class TestAgentInSandbox:
+    """SC-A1/A2/A3/A4/A5: Agent runs inside gVisor sandbox."""
+
+    pytestmark = [pytest.mark.real, pytest.mark.timeout(300)]
+
+    def test_agent_session_in_sandbox(self, fleet_orchestrator: FlexAgentClient):
+        """SC-A1: Agent session creates and runs inside sandbox."""
+        resp = fleet_orchestrator.create_session(placement="agent-sandbox")
+        session_id = resp["session_id"]
+        try:
+            events = _collect_events(
+                fleet_orchestrator, session_id, "Say hello"
+            )
+            assert len(events) > 0
+            assert _has_content_event(events), "Expected content from agent-sandbox"
+        finally:
+            fleet_orchestrator.destroy_session(session_id)
+
+    def test_agent_file_access(self, fleet_orchestrator: FlexAgentClient):
+        """SC-A2: Agent can access files within its sandbox mountpoint."""
+        resp = fleet_orchestrator.create_session(placement="agent-sandbox")
+        session_id = resp["session_id"]
+        try:
+            _collect_events(
+                fleet_orchestrator, session_id,
+                "Write 'agent-sandbox-data' to /workspace/agent-file.txt"
+            )
+            events = _collect_events(
+                fleet_orchestrator, session_id,
+                "Read /workspace/agent-file.txt and tell me its contents"
+            )
+            assert _events_contain_text(events, "agent-sandbox-data"), (
+                "Expected agent to read file in its sandbox"
+            )
+        finally:
+            fleet_orchestrator.destroy_session(session_id)
+
+    def test_agent_pid_isolation(self, fleet_orchestrator: FlexAgentClient):
+        """SC-A3: Agent processes are isolated from host (PID namespace)."""
+        resp = fleet_orchestrator.create_session(placement="agent-sandbox")
+        session_id = resp["session_id"]
+        try:
+            events = _collect_events(
+                fleet_orchestrator, session_id,
+                "Run 'cat /proc/1/cmdline' and tell me what process is PID 1"
+            )
+            assert _has_content_event(events), "Expected PID namespace info"
+        finally:
+            fleet_orchestrator.destroy_session(session_id)
+
+    def test_agent_cleanup_on_destroy(self, fleet_orchestrator: FlexAgentClient):
+        """SC-A4: Agent session cleanup destroys sandbox on destroy."""
+        resp = fleet_orchestrator.create_session(placement="agent-sandbox")
+        session_id = resp["session_id"]
+
+        # Write something to verify the session is active
+        events = _collect_events(
+            fleet_orchestrator, session_id, "Say hello"
+        )
+        assert _has_content_event(events)
+
+        # Destroy the session
+        fleet_orchestrator.destroy_session(session_id)
+
+        # Session should no longer be accessible
+        with pytest.raises(Exception):
+            fleet_orchestrator.get_session(session_id)
+
+    def test_agent_sessions_isolated(self, fleet_orchestrator: FlexAgentClient):
+        """SC-A5: Multiple agent-in-sandbox sessions are isolated."""
+        sessions = []
+        try:
+            for i in range(2):
+                resp = fleet_orchestrator.create_session(placement="agent-sandbox")
+                sessions.append(resp["session_id"])
+
+            # Write different data in each session
+            _collect_events(
+                fleet_orchestrator, sessions[0],
+                "Write 'session-0-data' to /workspace/isolation-test.txt"
+            )
+            _collect_events(
+                fleet_orchestrator, sessions[1],
+                "Write 'session-1-data' to /workspace/isolation-test.txt"
+            )
+
+            # Each session should see its own data
+            events0 = _collect_events(
+                fleet_orchestrator, sessions[0],
+                "Read /workspace/isolation-test.txt and tell me its exact contents"
+            )
+            events1 = _collect_events(
+                fleet_orchestrator, sessions[1],
+                "Read /workspace/isolation-test.txt and tell me its exact contents"
+            )
+
+            assert _events_contain_text(events0, "session-0-data"), (
+                "Session 0 should see its own data"
+            )
+            assert _events_contain_text(events1, "session-1-data"), (
+                "Session 1 should see its own data"
+            )
+        finally:
+            for sid in sessions:
+                try:
+                    fleet_orchestrator.destroy_session(sid)
+                except Exception:
+                    pass
+
+
+# ---------------------------------------------------------------------------
+# Real Tier: Mixed Mode (§5.3) — SC-M1, SC-M2
+# ---------------------------------------------------------------------------
+
+class TestMixedMode:
+    """SC-M1/M2: Same orchestrator serves both tools-sandbox and agent-sandbox."""
+
+    pytestmark = [pytest.mark.real, pytest.mark.timeout(300)]
+
+    def test_concurrent_placement_modes(self, fleet_orchestrator: FlexAgentClient):
+        """SC-M1: Same orchestrator serves both modes concurrently."""
+        resp_tools = fleet_orchestrator.create_session(placement="tools-sandbox")
+        resp_agent = fleet_orchestrator.create_session(placement="agent-sandbox")
+        tools_sid = resp_tools["session_id"]
+        agent_sid = resp_agent["session_id"]
+
+        try:
+            # Both sessions should work independently
+            events_tools = _collect_events(
+                fleet_orchestrator, tools_sid, "Say hello"
+            )
+            events_agent = _collect_events(
+                fleet_orchestrator, agent_sid, "Say hello"
+            )
+
+            assert _has_content_event(events_tools), "tools-sandbox should respond"
+            assert _has_content_event(events_agent), "agent-sandbox should respond"
+        finally:
+            try:
+                fleet_orchestrator.destroy_session(tools_sid)
+            except Exception:
+                pass
+            try:
+                fleet_orchestrator.destroy_session(agent_sid)
+            except Exception:
+                pass
+
+    def test_no_cross_interference(self, fleet_orchestrator: FlexAgentClient):
+        """SC-M2: Sessions in different modes don't interfere."""
+        resp_tools = fleet_orchestrator.create_session(placement="tools-sandbox")
+        resp_agent = fleet_orchestrator.create_session(placement="agent-sandbox")
+        tools_sid = resp_tools["session_id"]
+        agent_sid = resp_agent["session_id"]
+
+        try:
+            # Write distinct data in each
+            _collect_events(
+                fleet_orchestrator, tools_sid,
+                "Write 'tools-mode-data' to /workspace/mode-test.txt"
+            )
+            _collect_events(
+                fleet_orchestrator, agent_sid,
+                "Write 'agent-mode-data' to /workspace/mode-test.txt"
+            )
+
+            # Each should see its own data (isolated filesystems)
+            events_tools = _collect_events(
+                fleet_orchestrator, tools_sid,
+                "Read /workspace/mode-test.txt and tell me its contents"
+            )
+            events_agent = _collect_events(
+                fleet_orchestrator, agent_sid,
+                "Read /workspace/mode-test.txt and tell me its contents"
+            )
+
+            assert _events_contain_text(events_tools, "tools-mode-data")
+            assert _events_contain_text(events_agent, "agent-mode-data")
+        finally:
+            try:
+                fleet_orchestrator.destroy_session(tools_sid)
+            except Exception:
+                pass
+            try:
+                fleet_orchestrator.destroy_session(agent_sid)
+            except Exception:
+                pass

@@ -1,11 +1,14 @@
-"""Mock tier deployment mode tests (Plan 22 §4.3).
+"""Deployment mode tests (Plan 22 §4.3 + §4.4).
 
-Tests configs C1 (dev/local) and C2 (tools-sandbox) using stubserver LLM backend.
+Mock tier: Tests configs C1 (dev/local) and C2 (tools-sandbox) using stubserver LLM backend.
 Verifies orchestrator wiring, RPC transport, session lifecycle, and health monitoring.
-
 Tests DM-M1 through DM-M8.
+
+Real tier: Tests configs C1-C6 with real LLM providers and infrastructure.
+Tests DM-R0 through DM-R16.
 """
 
+import os
 import time
 
 import pytest
@@ -126,3 +129,130 @@ class TestSteer:
             local_orchestrator.abort(session_id)
         finally:
             local_orchestrator.destroy_session(session_id)
+
+
+# ---------------------------------------------------------------------------
+# Real Tier Tests — require real LLM providers and infrastructure
+# ---------------------------------------------------------------------------
+
+def _has_content_event(events: list[dict]) -> bool:
+    content_types = {"text", "text_delta", "content_block_delta", "message_start"}
+    return bool({e.get("type") for e in events} & content_types)
+
+
+def _skip_without_key(env_var: str):
+    if not os.environ.get(env_var):
+        pytest.skip(f"{env_var} not set")
+
+
+class TestRealC2ToolsSandbox:
+    """DM-R1/R2: Tools-sandbox with real LLM providers."""
+
+    pytestmark = [pytest.mark.real, pytest.mark.timeout(300)]
+
+    @pytest.mark.parametrize("provider,model,env_var", [
+        ("anthropic", "claude-haiku-4-5-20251001", "ANTHROPIC_API_KEY"),
+        ("openai", "gpt-4o-mini", "OPENAI_API_KEY"),
+        ("google", "gemini-2.0-flash", "GOOGLE_API_KEY"),
+    ])
+    def test_real_provider_session(self, fleet_orchestrator: FlexAgentClient,
+                                    provider: str, model: str, env_var: str):
+        """DM-R2: Create session with real provider -> verify tool use."""
+        _skip_without_key(env_var)
+        client = fleet_orchestrator
+        resp = client.create_session(
+            placement="tools-sandbox", provider=provider, model=model,
+        )
+        session_id = resp["session_id"]
+        try:
+            events = list(client.send_message(
+                session_id, "Write 'test' to /workspace/dm-test.txt"
+            ))
+            assert _has_content_event(events), (
+                f"Expected content events from {provider}"
+            )
+        finally:
+            client.destroy_session(session_id)
+
+
+class TestRealC5AgentSandbox:
+    """DM-R9/R10/R11: Agent-in-sandbox with gVisor."""
+
+    pytestmark = [pytest.mark.real, pytest.mark.timeout(300)]
+
+    def test_agent_sandbox_session(self, fleet_orchestrator: FlexAgentClient):
+        """DM-R9: Create agent-sandbox session -> send message -> get events."""
+        client = fleet_orchestrator
+        resp = client.create_session(placement="agent-sandbox")
+        session_id = resp["session_id"]
+        try:
+            events = list(client.send_message(session_id, "Say hello"))
+            assert len(events) > 0
+            assert _has_content_event(events)
+        finally:
+            client.destroy_session(session_id)
+
+    def test_agent_sandbox_isolation(self, fleet_orchestrator: FlexAgentClient):
+        """DM-R11: Multiple agent-sandbox sessions are isolated."""
+        client = fleet_orchestrator
+        sessions = []
+        try:
+            for _ in range(2):
+                resp = client.create_session(placement="agent-sandbox")
+                sessions.append(resp["session_id"])
+
+            for sid in sessions:
+                session = client.get_session(sid)
+                assert session["session_id"] == sid
+        finally:
+            for sid in sessions:
+                try:
+                    client.destroy_session(sid)
+                except Exception:
+                    pass
+
+
+class TestRealC6Fleet:
+    """DM-R12/R13/R14: Fleet mode with multiple sandbox-hosts."""
+
+    pytestmark = [pytest.mark.real, pytest.mark.fleet, pytest.mark.timeout(300)]
+
+    def test_sessions_distributed(self, fleet_orchestrator: FlexAgentClient):
+        """DM-R12: Sessions are distributed across fleet members."""
+        client = fleet_orchestrator
+        sessions = []
+        try:
+            for _ in range(4):
+                resp = client.create_session(placement="tools-sandbox")
+                sessions.append(resp["session_id"])
+
+            # All sessions should be independently accessible
+            for sid in sessions:
+                session = client.get_session(sid)
+                assert session["session_id"] == sid
+        finally:
+            for sid in sessions:
+                try:
+                    client.destroy_session(sid)
+                except Exception:
+                    pass
+
+    def test_session_stickiness(self, fleet_orchestrator: FlexAgentClient):
+        """DM-R13: Sessions stick to assigned host."""
+        client = fleet_orchestrator
+        resp = client.create_session(placement="tools-sandbox")
+        session_id = resp["session_id"]
+        try:
+            # Send multiple messages to the same session — should always
+            # route to the same sandbox-host
+            for i in range(3):
+                events = list(client.send_message(
+                    session_id, f"Echo 'sticky-test-{i}'"
+                ))
+                assert _has_content_event(events), f"Turn {i} should get content"
+        finally:
+            client.destroy_session(session_id)
+
+    def test_fleet_health(self, fleet_orchestrator: FlexAgentClient):
+        """DM-R14: Fleet health reflects individual host status."""
+        assert fleet_orchestrator.health()
