@@ -48,7 +48,7 @@ type chatProvider struct {
 var chatProviders = []chatProvider{
 	{"anthropic", "claude-haiku-4-5-20251001", "ANTHROPIC_API_KEY"},
 	{"openai", "gpt-4o-mini", "OPENAI_API_KEY"},
-	{"google", "gemini-2.0-flash", "GOOGLE_API_KEY"},
+	{"google", "gemini-2.0-flash-001", "GOOGLE_API_KEY"},
 }
 
 func skipWithoutKey(t *testing.T, envVar string) {
@@ -271,7 +271,7 @@ func TestOpenRouterRouting(t *testing.T) {
 		t.Fatalf("OpenRouter model not in catalog: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	llmCtx := ai.Context{
