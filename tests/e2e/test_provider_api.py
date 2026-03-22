@@ -20,7 +20,7 @@ pytestmark = [pytest.mark.real, pytest.mark.provider, pytest.mark.timeout(120)]
 PROVIDERS = [
     ("anthropic", "claude-haiku-4-5-20251001", "ANTHROPIC_API_KEY"),
     ("openai", "gpt-4o-mini", "OPENAI_API_KEY"),
-    ("google", "gemini-2.0-flash-001", "GOOGLE_API_KEY"),
+    ("google", "gemini-2.5-flash", "GOOGLE_API_KEY"),
     ("openrouter", "openrouter/auto", "OPENROUTER_API_KEY"),
 ]
 

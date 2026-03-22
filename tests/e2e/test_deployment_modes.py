@@ -149,7 +149,7 @@ class TestRealC2ToolsSandbox:
     @pytest.mark.parametrize("provider,model,env_var", [
         ("anthropic", "claude-haiku-4-5-20251001", "ANTHROPIC_API_KEY"),
         ("openai", "gpt-4o-mini", "OPENAI_API_KEY"),
-        ("google", "gemini-2.0-flash-001", "GOOGLE_API_KEY"),
+        ("google", "gemini-2.5-flash", "GOOGLE_API_KEY"),
     ])
     def test_real_provider_session(self, fleet_orchestrator: FlexAgentClient,
                                     provider: str, model: str, env_var: str):
