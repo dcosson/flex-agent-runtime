@@ -32,10 +32,20 @@ func (c *Client) StreamSimple(ctx context.Context, endpoint ai.ProviderEndpoint,
 			*base.MaxTokens, model.MaxTokens, opts.Reasoning, opts.ThinkingBudgets)
 		base.MaxTokens = &maxTokens
 		params.thinkingBudget = &thinkBudget
-		params.thinkingLevel = mapThinkingLevel(opts.Reasoning)
+		// thinkingLevel is only supported by Gemini 3+ models.
+		// Gemini 2.5 models only accept thinkingBudget.
+		if supportsThinkingLevel(model.ID) {
+			params.thinkingLevel = mapThinkingLevel(opts.Reasoning)
+		}
 	}
 
 	return c.streamInternal(ctx, endpoint, model, llmCtx, base, params)
+}
+
+// supportsThinkingLevel returns true for Gemini 3+ models which accept the
+// thinkingLevel parameter. Gemini 2.5 models only support thinkingBudget.
+func supportsThinkingLevel(modelID string) bool {
+	return strings.HasPrefix(modelID, "gemini-3")
 }
 
 // mapThinkingLevel converts an ai.ThinkingLevel to a Gemini thinkingLevel string.

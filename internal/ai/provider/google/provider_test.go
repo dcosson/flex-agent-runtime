@@ -563,13 +563,23 @@ func TestStreamSimpleThinkingBudget(t *testing.T) {
 	if *payload.GenerationConfig.ThinkingConfig.ThinkingBudget != high {
 		t.Fatalf("thinking budget mismatch: %d", *payload.GenerationConfig.ThinkingConfig.ThinkingBudget)
 	}
-	if payload.GenerationConfig.ThinkingConfig.ThinkingLevel != "THINKING_LEVEL_HIGH" {
-		t.Fatalf("thinking level mismatch: %q", payload.GenerationConfig.ThinkingConfig.ThinkingLevel)
+	// Gemini 2.5 models should NOT have thinkingLevel set (only thinkingBudget).
+	if payload.GenerationConfig.ThinkingConfig.ThinkingLevel != "" {
+		t.Fatalf("gemini-2.5 should not send thinkingLevel, got %q", payload.GenerationConfig.ThinkingConfig.ThinkingLevel)
 	}
 }
 
 func TestStreamSimpleThinkingLevelMapping(t *testing.T) {
-	fixture := `data: {"candidates":[{"content":{"parts":[{"text":"ok"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2},"modelVersion":"gemini-2.5-flash"}` + "\n\n"
+	// thinkingLevel is only sent for Gemini 3+ models, so use a gemini-3 model ID.
+	fixture := `data: {"candidates":[{"content":{"parts":[{"text":"ok"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2},"modelVersion":"gemini-3-flash"}` + "\n\n"
+
+	gemini3Model := ai.Model{
+		ID:        "gemini-3-flash",
+		API:       "google-genai",
+		Provider:  "google",
+		Reasoning: true,
+		MaxTokens: 65536,
+	}
 
 	cases := []struct {
 		level    ai.ThinkingLevel
@@ -588,7 +598,7 @@ func TestStreamSimpleThinkingLevelMapping(t *testing.T) {
 			defer srv.Close()
 
 			p, ep := testClientAndEndpoint(srv.URL, "k")
-			es := p.StreamSimple(context.Background(), ep, testModel(), ai.Context{
+			es := p.StreamSimple(context.Background(), ep, gemini3Model, ai.Context{
 				Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
 			}, ai.SimpleStreamOptions{Reasoning: tc.level})
 			_, _ = es.Drain()
@@ -608,6 +618,38 @@ func TestStreamSimpleThinkingLevelMapping(t *testing.T) {
 				t.Fatalf("expected %q, got %q", tc.expected, payload.GenerationConfig.ThinkingConfig.ThinkingLevel)
 			}
 		})
+	}
+}
+
+func TestStreamSimpleGemini25NoThinkingLevel(t *testing.T) {
+	// Gemini 2.5 models should only send thinkingBudget, not thinkingLevel.
+	fixture := `data: {"candidates":[{"content":{"parts":[{"text":"ok"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2},"modelVersion":"gemini-2.5-flash"}` + "\n\n"
+
+	srv := stubserver.New(stubserver.WithFixture(fixture))
+	defer srv.Close()
+
+	p, ep := testClientAndEndpoint(srv.URL, "k")
+	es := p.StreamSimple(context.Background(), ep, testModel(), ai.Context{
+		Messages: []ai.Message{&ai.UserMessage{Content: []ai.ContentBlock{&ai.TextContent{Text: "hi"}}}},
+	}, ai.SimpleStreamOptions{Reasoning: ai.ThinkingHigh})
+	_, _ = es.Drain()
+
+	reqs := srv.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(reqs))
+	}
+	var payload generateContentRequest
+	if err := json.Unmarshal(reqs[0].Body, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.GenerationConfig == nil || payload.GenerationConfig.ThinkingConfig == nil {
+		t.Fatal("thinking config not set")
+	}
+	if payload.GenerationConfig.ThinkingConfig.ThinkingBudget == nil {
+		t.Fatal("gemini-2.5 should have thinkingBudget set")
+	}
+	if payload.GenerationConfig.ThinkingConfig.ThinkingLevel != "" {
+		t.Fatalf("gemini-2.5 should not send thinkingLevel, got %q", payload.GenerationConfig.ThinkingConfig.ThinkingLevel)
 	}
 }
 
