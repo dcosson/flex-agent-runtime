@@ -328,7 +328,7 @@ def _model_id_matches_filter(model_id):
         suffix = model_id.split("/", 1)[1]
         # Gemini 2.x stable models
         if suffix in ("gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
-                       "gemini-2.0-flash", "gemini-2.0-flash-001"):
+                       "gemini-2.0-flash"):
             return True
         # Gemini 3.x preview (latest generation, skip specialized variants)
         if suffix.startswith("gemini-3"):
@@ -380,7 +380,17 @@ def _should_skip(model_id):
     # Skip old Anthropic models (pre-Claude 3.5)
     if model_id == "anthropic/claude-3-haiku":
         return True
+    # Blocklist: deprecated models that should be excluded from the catalog.
+    if model_id in _BLOCKLIST:
+        return True
     return False
+
+
+# Models explicitly excluded from the catalog (deprecated, broken, etc.).
+# Add entries as "provider/model-id" (the OpenRouter format).
+_BLOCKLIST = {
+    "google/gemini-2.0-flash-001",  # Deprecated by Google in favor of gemini-2.0-flash / 2.5-flash
+}
 
 
 # ---------------------------------------------------------------------------
