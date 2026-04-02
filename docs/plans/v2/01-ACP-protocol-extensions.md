@@ -408,9 +408,11 @@ sessionMetadata:
 
   # --- Identity & Instructions ---
   systemPrompt        (string)          Agent's primary system prompt
-  appendInstructions  (string)          Additional instructions appended to
-                                        system prompt (e.g., AGENTS.md content)
-  globalInstructions  (InstructionFile[]) Instruction files to inject:
+  appendInstructions  (string)          Additional text appended to the system
+                                        prompt (maps to --append-system-prompt
+                                        CLI flag where supported)
+  globalInstructions  (InstructionFile[]) Instruction files to inject
+                                        (e.g., CLAUDE.md, AGENTS.md):
     - name            (string)            e.g., "CLAUDE.md", "AGENTS.md"
       content         (string)            file content
 
