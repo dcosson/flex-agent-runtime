@@ -536,25 +536,47 @@ Key insight: **agents don't spawn sub-agents directly — they request them
 from the driver.** This gives the driver full visibility, policy enforcement,
 cost tracking, and lifecycle management over all sub-agents.
 
+#### How Agents Initiate Sub-Agent Requests
+
+The mechanism differs by agent type:
+
+**NativeDriver:** Sub-agent request is a built-in tool in the tool registry.
+When the LLM calls it, the NativeDriver makes the ACP reverse call to the
+driver directly. Straightforward — we control the loop.
+
+**PTY-wrapped agents (Claude Code, Codex, etc.):** The agent binary doesn't
+speak ACP, so the wrapper exposes sub-agent capabilities via an **MCP
+server**. The wrapper injects this MCP server into the agent's config
+(via `sessionMetadata.mcpServers` → settings.json). The MCP server exposes
+tools: `request_sub_agent`, `sub_agent_status`, `sub_agent_result`,
+`cancel_sub_agent`. When the agent calls one of these MCP tools, the wrapper
+intercepts it and translates to the ACP reverse call upstream to the driver.
+
 ```
-Agent needs to delegate work
-    │
-    │  ACP reverse call: requestSubAgent(prompt, config)
-    │
-    ▼
-Driver receives request
-    │
-    ├── Applies policies (allowed? what permissions? what model?)
-    ├── Launches sub-agent (full protocol stack)
-    ├── Monitors sub-agent via ACP events
-    ├── Returns handle to parent agent
-    │
-    ▼
-Parent agent can:
-    ├── Poll sub-agent status
-    ├── Read sub-agent result when complete
-    └── Cancel sub-agent
+PTY-wrapped agent flow:
+
+  Agent calls MCP tool "request_sub_agent"
+    → Wrapper's MCP server receives the tool call
+      → Wrapper sends ACP reverse call (requestSubAgent) to driver
+        → Driver launches sub-agent, returns handle
+          → Wrapper returns sub-agent ID via MCP tool result
+            → Agent polls via "sub_agent_status" / reads via "sub_agent_result"
 ```
+
+```
+NativeDriver flow:
+
+  LLM calls built-in "request_sub_agent" tool
+    → NativeDriver sends ACP reverse call (requestSubAgent) to driver
+      → Driver launches sub-agent, returns handle
+        → NativeDriver returns result to LLM as tool output
+```
+
+#### Protocol Methods
+
+The ACP reverse calls below are the wire protocol between wrapper and
+driver. For PTY-wrapped agents, the wrapper translates between MCP tool
+calls and these reverse calls transparently.
 
 #### `requestSubAgent` — Agent Requests a Sub-Agent
 
