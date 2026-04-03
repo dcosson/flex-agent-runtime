@@ -53,7 +53,7 @@ func main() {
 			switch {
 			case strings.Contains(r.URL.Path, "batchEmbedContents"):
 				name = "google-embedding"
-			case strings.Contains(r.URL.Path, "/embed"):
+			case r.URL.Path == "/v2/embed" || strings.HasSuffix(r.URL.Path, "/embed"):
 				name = "cohere-embedding"
 			default:
 				name = "openai-embedding"
