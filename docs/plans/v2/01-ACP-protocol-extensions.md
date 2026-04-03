@@ -646,11 +646,59 @@ sub-agents internally. Both paths coexist:
 
 - **Driver-managed** (`requestSubAgent`): Full visibility, session state
   capture, lifecycle hooks, cost tracking. Preferred for substantial work.
-- **Agent-internal** (built-in Agent tool): Opaque to the driver — visible
-  only as long-running tool calls. Fine for lightweight delegation.
+- **Agent-internal** (built-in Agent tool): The driver can't control these,
+  but can **observe** them via log synthesis (see below).
 
 Both paths are valid. The driver should not assume it controls all sub-agent
 spawning.
+
+#### Observing Agent-Internal Sub-Agents
+
+The wrapper already synthesizes ACP events from agent logs for the main
+session. It can do the same for internal sub-agents. Claude Code writes
+separate JSONL logs per sub-agent; Codex emits `CollabAgent*` events. The
+wrapper parses these and emits dedicated `session/update` types.
+
+**New update types for internal sub-agent observability:**
+
+```
+internal_sub_agent_started:
+  toolUseId             (string)  — the parent Agent tool call
+  internalSubAgentId    (string)  — opaque ID from the agent's logs
+  model                 (string, optional)
+  prompt                (string, optional) — truncated/summarized
+
+internal_sub_agent_update:
+  toolUseId             (string)
+  internalSubAgentId    (string)
+  update                (SessionNotification)  — reuses the same update types
+                                                 as top-level (message chunks,
+                                                 tool calls, usage, etc.)
+
+internal_sub_agent_completed:
+  toolUseId             (string)
+  internalSubAgentId    (string)
+  stopReason            (StopReason)
+  usage:
+    inputTokens         (number)
+    outputTokens        (number)
+```
+
+Properties:
+
+- **Best-effort, not guaranteed.** Depends on what the agent exposes in
+  logs. Claude Code's JSONL gives full sub-agent events. Codex's collab
+  events give less. Generic agents give nothing. Fidelity is declared in
+  the agent-type manifest's `eventSources` section.
+- **Scoped under `toolUseId`.** The driver knows which parent tool call
+  spawned this sub-agent. It's observability into an existing tool call,
+  not a new session.
+- **Same update vocabulary.** `internal_sub_agent_update` reuses the same
+  `SessionNotification` types (message chunks, tool calls, usage) so the
+  driver doesn't need separate rendering logic.
+- **Read-only.** The driver can observe but can't control these — no
+  cancel, no policy injection. For controllable sub-agents, use the
+  driver-managed `requestSubAgent` path instead.
 
 ### Extension 3: Agent-Type Manifest
 
