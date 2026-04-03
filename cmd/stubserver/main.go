@@ -30,7 +30,15 @@ func main() {
 	sseHandler := stubserver.NewHandler(stubserver.WithFixtureFunc(func(r *http.Request) string {
 		name := strings.TrimSpace(r.Header.Get("X-Fixture"))
 		if name == "" {
-			name = "default"
+			// Select fixture by request path (provider-specific SSE format).
+			switch {
+			case strings.Contains(r.URL.Path, "chat/completions"):
+				name = "openai-chat"
+			case strings.Contains(r.URL.Path, "streamGenerateContent"), strings.Contains(r.URL.Path, "generateContent"):
+				name = "google-chat"
+			default:
+				name = "anthropic-simple-response"
+			}
 		}
 		if fixture, ok := fixtures[name]; ok {
 			return fixture

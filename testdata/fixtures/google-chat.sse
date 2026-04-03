@@ -1,0 +1,1 @@
+data: {"candidates":[{"content":{"parts":[{"text":"Hello from fixture."}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":7,"totalTokenCount":19},"modelVersion":"gemini-2.5-flash"}
