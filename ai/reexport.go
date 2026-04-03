@@ -122,6 +122,7 @@ var (
 	UnregisterProviderConfig     = internal.UnregisterProviderConfig
 	ClearProviderConfigs         = internal.ClearProviderConfigs
 	ResolveEndpoint              = internal.ResolveEndpoint
+	ResolveEmbeddingEndpoint     = internal.ResolveEmbeddingEndpoint
 	RegisterCustomProvider       = internal.RegisterCustomProvider
 	RegisterCustomModel          = internal.RegisterCustomModel
 )

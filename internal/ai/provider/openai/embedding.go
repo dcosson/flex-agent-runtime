@@ -44,7 +44,9 @@ func RegisterEmbeddingClient(cfg ClientConfig) *EmbeddingClient {
 }
 
 // Embed dispatches embedding requests with shared batch-splitting behavior.
+// If endpoint.APIKey is empty, resolves from provider config env vars.
 func (c *EmbeddingClient) Embed(ctx context.Context, endpoint ai.ProviderEndpoint, model ai.EmbeddingModel, req ai.EmbeddingRequest) (*ai.EmbeddingResponse, error) {
+	endpoint = ai.ResolveEmbeddingEndpoint(endpoint)
 	return ai.BatchEmbed(ctx, c.embedSingle, endpoint, model, req)
 }
 

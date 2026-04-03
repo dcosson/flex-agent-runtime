@@ -5,6 +5,40 @@ import (
 	"strings"
 )
 
+// ResolveEmbeddingEndpoint enriches an existing ProviderEndpoint with
+// API key resolution when the endpoint's APIKey is empty. Uses the same
+// resolution order as ResolveEndpoint: directAPIKeys → env vars.
+// This allows embedding clients to receive a pre-built endpoint from
+// callers (e.g., with credentials from an external secret store) while
+// still falling back to env vars when no explicit key is provided.
+func ResolveEmbeddingEndpoint(endpoint ProviderEndpoint) ProviderEndpoint {
+	if endpoint.APIKey != "" {
+		return endpoint
+	}
+	cfg, err := GetProviderConfig(endpoint.ProviderName)
+	if err != nil {
+		return endpoint
+	}
+	directAPIKeysMu.RLock()
+	apiKey := directAPIKeys[cfg.Name]
+	directAPIKeysMu.RUnlock()
+	if apiKey == "" {
+		for _, envVar := range cfg.KeyEnvVars {
+			if v := os.Getenv(envVar); v != "" {
+				apiKey = v
+				break
+			}
+		}
+	}
+	if apiKey != "" {
+		endpoint.APIKey = apiKey
+	}
+	if endpoint.BaseURL == "" && cfg.BaseURL != "" {
+		endpoint.BaseURL = cfg.BaseURL
+	}
+	return endpoint
+}
+
 // ResolveEndpoint creates a ProviderEndpoint from a ProviderConfig and
 // call-level options. API key resolution order:
 //  1. opts.APIKey (explicit per-call override)
